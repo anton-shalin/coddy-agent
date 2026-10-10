@@ -487,6 +487,33 @@ func (s *turnEndState) turnEndsWithRestOfSentence() error {
 	return nil
 }
 
+// turnHandsOverTheWholeSentence: the last assistant message of the transcript is
+// the second half of the sentence, and the answer the turn hands over - what a
+// subagent's report, a non-streaming reply and a Stop hook read - is the whole
+// sentence, the first half stored as it streamed joined in front of it.
+func (s *turnEndState) turnHandsOverTheWholeSentence() error {
+	if s.runErr != nil {
+		return fmt.Errorf("the turn failed: %v", s.runErr)
+	}
+	msgs := s.state.GetMessages()
+	last := -1
+	for i := len(msgs) - 1; i >= 0 && last < 0; i-- {
+		if msgs[i].Role == llm.RoleAssistant {
+			last = i
+		}
+	}
+	if last < 0 {
+		return fmt.Errorf("the transcript holds no assistant message")
+	}
+	if msgs[last].Content == turnEndAnswer {
+		return fmt.Errorf("the sentence is one message %q; nothing was continued", msgs[last].Content)
+	}
+	if got := session.ContinuedAnswer(msgs, last); got != turnEndAnswer {
+		return fmt.Errorf("the answer handed over is %q, want the whole sentence %q", got, turnEndAnswer)
+	}
+	return nil
+}
+
 // secondRequestContinuedTheText: the partial text is replayed as an assistant
 // message and the corrective message after it asks the model to go on exactly
 // where it stopped.
@@ -632,6 +659,7 @@ func initializeTurnEndScenario(sc *godog.ScenarioContext) {
 	sc.Step(`^a model whose first reply is cut off at the output limit after "([^"]+)"$`, s.modelCutOffAfter)
 	sc.Step(`^a model whose first step is a write call cut off at the output limit$`, s.modelWriteCutOff)
 	sc.Step(`^the turn ends with the rest of the sentence$`, s.turnEndsWithRestOfSentence)
+	sc.Step(`^the answer the turn hands over is the whole sentence$`, s.turnHandsOverTheWholeSentence)
 	sc.Step(`^the second request carried that part and asked the model to continue exactly where it stopped$`, s.secondRequestContinuedTheText)
 	sc.Step(`^the user sends another prompt$`, s.userSendsAnotherPrompt)
 	sc.Step(`^the request of the second turn carries the sentence as one assistant message$`, s.nextTurnCarriesTheSentenceAsOneMessage)

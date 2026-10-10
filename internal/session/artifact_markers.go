@@ -55,6 +55,28 @@ func FollowsTruncated(msgs []llm.Message) bool {
 	return false
 }
 
+// ContinuedAnswer returns the text of msgs[i], an assistant message, with the
+// truncated messages it goes on from in front of it: the whole answer the
+// reader watched stream in when the output limit cut it off and the model went
+// on, where the transcript holds it as several messages. The parts are joined
+// as stored, with nothing between, and an empty step between two of them is
+// passed over as FollowsTruncated passes it. A message that goes on from
+// nothing is returned as it is.
+func ContinuedAnswer(msgs []llm.Message, i int) string {
+	text := msgs[i].Content
+	for j := i - 1; j >= 0; j-- {
+		m := msgs[j]
+		if m.Role == llm.RoleAssistant && strings.TrimSpace(m.Content) == "" && len(m.ToolCalls) == 0 {
+			continue
+		}
+		if m.Role != llm.RoleAssistant || !m.Truncated || len(m.ToolCalls) > 0 {
+			break
+		}
+		text = m.Content + text
+	}
+	return text
+}
+
 // ArtifactMarkers renders placement markers for already-verified artifact
 // associations. Callers must never pass client or model-supplied ids here.
 func ArtifactMarkers(artifacts []llm.Artifact) string {

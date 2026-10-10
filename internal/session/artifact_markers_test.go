@@ -129,6 +129,53 @@ func TestFollowsTruncated(t *testing.T) {
 	}
 }
 
+// TestContinuedAnswer: the answer a turn hands over - to a parent as a report, to
+// a non-streaming client as the reply, to a Stop hook - is the whole of what an
+// answer the output limit cut off said, not the part after the last cut. The
+// parts are joined as stored, with nothing between; only truncated messages are
+// parts of it.
+func TestContinuedAnswer(t *testing.T) {
+	user := llm.Message{Role: llm.RoleUser, Content: "go"}
+	cut := func(s string) llm.Message { return llm.Message{Role: llm.RoleAssistant, Content: s, Truncated: true} }
+	text := func(s string) llm.Message { return llm.Message{Role: llm.RoleAssistant, Content: s} }
+	empty := llm.Message{Role: llm.RoleAssistant, Reasoning: "Hmm."}
+	call := llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "c1", Name: "read"}}}
+	cutWithCall := llm.Message{Role: llm.RoleAssistant, Content: "reading ", Truncated: true, ToolCalls: []llm.ToolCall{{ID: "c1", Name: "read"}}}
+	tool := llm.Message{Role: llm.RoleTool, ToolCallID: "c1", Content: "ok"}
+	for _, tc := range []struct {
+		name string
+		msgs []llm.Message
+		at   int
+		want string
+	}{
+		{"a message that goes on from nothing", []llm.Message{user, text("Done.")}, 1, "Done."},
+		{"the first message", []llm.Message{text("Done.")}, 0, "Done."},
+		{"a cut text is only itself when nothing goes on from it", []llm.Message{user, cut("and then ")}, 1, "and then "},
+		{"a text and its continuation", []llm.Message{user, cut("Press the butt"), text("on labelled Save.")}, 2, "Press the button labelled Save."},
+		{"whitespace at the join is kept as stored", []llm.Message{user, cut("one "), text(" two")}, 2, "one  two"},
+		{"a chain of three", []llm.Message{user, cut("a "), cut("b "), text("c")}, 3, "a b c"},
+		{"an empty step between two parts is passed over", []llm.Message{user, cut("a "), empty, text("b")}, 3, "a b"},
+		{"several empty steps between", []llm.Message{user, cut("a "), empty, empty, cut("b "), empty, text("c")}, 6, "a b c"},
+		{"the placement markers stay as stored", []llm.Message{user, cut("<coddy_file id=\"x\"/>\n\nPress the butt"), text("on labelled Save.")}, 2, "<coddy_file id=\"x\"/>\n\nPress the button labelled Save."},
+		{"a message that was not cut off ends the chain", []llm.Message{user, text("first"), text("second")}, 2, "second"},
+		{"the chain stops at a message that was not cut off", []llm.Message{user, cut("a "), text("b"), text("c")}, 3, "c"},
+		// An answer a provider failure cut off is not marked truncated: the step
+		// run again starts the answer over as often as it goes on from it.
+		{"an answer a provider failure cut off is not a part", []llm.Message{user, text("The module starts with"), text("The module starts with an import block.")}, 2, "The module starts with an import block."},
+		{"a kept answer between ends the chain", []llm.Message{user, cut("a "), text("kept"), text("rest")}, 3, "rest"},
+		{"a user message ends the chain", []llm.Message{cut("a "), user, text("b")}, 2, "b"},
+		{"a tool result ends the chain", []llm.Message{cut("a "), tool, text("b")}, 2, "b"},
+		{"a step with a call ends the chain", []llm.Message{cut("a "), call, text("b")}, 2, "b"},
+		{"a truncated message that issued a call ends the chain", []llm.Message{cutWithCall, text("b")}, 1, "b"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ContinuedAnswer(tc.msgs, tc.at); got != tc.want {
+				t.Fatalf("ContinuedAnswer(msgs, %d) = %q, want %q", tc.at, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestStripAssistantContent pins what is kept at the join of a truncated message
 // and the one that goes on from it, and what is not.
 func TestStripAssistantContent(t *testing.T) {

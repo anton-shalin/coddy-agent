@@ -27,6 +27,9 @@ Feature: A turn ends for a reason the user can see, and a sick provider does not
   assistant messages of the transcript, stored as they streamed; the history of
   a later turn sends them as the one text they are, because chat templates that
   insist on alternation refuse two assistant messages in a row, every turn after.
+  The answer a turn hands over - the report of a subagent, the reply of a
+  non-streaming request, what a Stop hook is told - is the whole sentence, not
+  the part after the cut.
 
   Scenario: Without a step limit a long task runs to its answer
     Given a model that reads a file 35 times before it answers
@@ -76,6 +79,13 @@ Feature: A turn ends for a reason the user can see, and a sick provider does not
     When the user sends a prompt
     And the user sends another prompt
     Then the request of the second turn carries the sentence as one assistant message
+
+  Scenario: A continued answer is handed over whole
+    Given a model whose first reply is cut off at the output limit after "The notes hold"
+    And an agent with no step limit configured
+    When the user sends a prompt
+    Then the turn ends with the rest of the sentence
+    And the answer the turn hands over is the whole sentence
 
   Scenario: A tool call cut off at the output limit is not run and is asked again in smaller pieces
     Given a model whose first step is a write call cut off at the output limit

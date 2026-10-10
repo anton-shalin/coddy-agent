@@ -1646,8 +1646,14 @@ func (a *Agent) runReActLoop(
 			}
 			// A Stop hook may send the agent back to work with a follow-up that
 			// is submitted as the next user message (persisted, so the transcript
-			// explains the continuation), bounded by hooks.stop_loop_limit.
-			if followUp, again := a.runStopHooks(ctx, mode, response.Content, stopHookActive); again {
+			// explains the continuation), bounded by hooks.stop_loop_limit. It is
+			// handed the whole answer: the step that ends the turn may go on from
+			// text the output limit cut off (session.ContinuedAnswer).
+			lastAnswer := response.Content
+			if stored := a.state.GetMessages(); len(stored) > 0 && stored[len(stored)-1].Role == llm.RoleAssistant {
+				lastAnswer = session.StripArtifactMarkers(session.ContinuedAnswer(stored, len(stored)-1))
+			}
+			if followUp, again := a.runStopHooks(ctx, mode, lastAnswer, stopHookActive); again {
 				limit := a.cfg.Hooks.EffectiveStopLoopLimit()
 				if stopBlocks >= limit {
 					a.log.Warn("stop hook loop limit reached; ending the turn", "limit", limit)

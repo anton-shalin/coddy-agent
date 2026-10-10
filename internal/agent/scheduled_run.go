@@ -270,14 +270,17 @@ func registryToolNamesForMode(cfg *config.Config, mode string) []string {
 }
 
 // lastAssistantPlainText returns the last assistant message with text, or ""
-// when the transcript holds none: the report of a child run.
+// when the transcript holds none: the report of a child run. An answer the
+// output limit cut off and the model continued is several messages of the
+// transcript, and the report is all of it (session.ContinuedAnswer), not the
+// part after the last cut.
 func lastAssistantPlainText(msgs []llm.Message) string {
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if msgs[i].Role != llm.RoleAssistant {
 			continue
 		}
 		if s := strings.TrimSpace(msgs[i].Content); s != "" {
-			return msgs[i].Content
+			return session.ContinuedAnswer(msgs, i)
 		}
 	}
 	return ""
