@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -149,9 +150,105 @@ func TestProviderRecoveryKeepsTheContinuationBeforeTheKeptAnswer(t *testing.T) {
 	}
 	hist := requestHistory(p.seen[2])
 	n := len(hist)
+	// The kept answer goes on from the text, so it is stored as it streamed, with
+	// the space it starts with.
 	if n < 4 || hist[n-4] != "assistant: "+partialText || hist[n-3] != "user: "+outputLimitContinueNudge ||
-		hist[n-2] != "assistant: the second half starts with" || hist[n-1] != "user: "+providerRecoveryNudge {
+		hist[n-2] != "assistant:  the second half starts with" || hist[n-1] != "user: "+providerRecoveryNudge {
 		t.Fatalf("want the text, the continuation message, the kept answer and the provider's message in that order at the end, got %q", hist[max(n-5, 0):])
+	}
+}
+
+// TestProviderRecoveryDuringAContinuationKeepsTheMessagesInOrder: a text the
+// output limit cut off is answered with the message that asks for the rest, and
+// the call that was to write the rest fails after streaming the start of it. The
+// request run again carries the cut text, that message, the kept start of the rest
+// and the provider's own message, in that order and as four messages: the kept
+// answer is not folded into the text it goes on from (it is not truncated, the
+// step run again may start it over), and the message that asked for it does not
+// move in front of the text. The next turn's history holds one assistant message:
+// the cut text and the kept start joined with nothing between, as they streamed,
+// then a blank line and what the step run again wrote.
+func TestProviderRecoveryDuringAContinuationKeepsTheMessagesInOrder(t *testing.T) {
+	const (
+		cutText = "Here is the first half of the module and then " // the whitespace at the end is part of the text
+		kept    = " abc"                                           // and so is the whitespace the continuation starts with
+	)
+	p := &outputLimitProvider{steps: []outputLimitStep{
+		{text: cutText, stop: "max_tokens"},
+		{text: kept, err: errConnectionReset},
+		answered,
+		{text: "ok", stop: "end_turn"},
+	}}
+	ag, st := recoveringAgent(t, p)
+	stop, err := runOutputLimitTurn(ag)
+	if err != nil || stop != string(acp.StopReasonEndTurn) || p.calls != 3 {
+		t.Fatalf("stop = %q, err = %v after %d calls; want end_turn after 3", stop, err, p.calls)
+	}
+
+	rerun := p.seen[2]
+	tail := []string{"assistant: " + cutText, "user: " + outputLimitContinueNudge, "assistant: " + kept, "user: " + providerRecoveryNudge}
+	hist := requestHistory(rerun)
+	if n := len(tail); len(hist) < n || strings.Join(hist[len(hist)-n:], "\n") != strings.Join(tail, "\n") {
+		t.Fatalf("the request run again does not end with the cut text, the message that asked for the rest, the kept start of it and the provider's message:\n%s", tailLines(strings.Join(hist, "\n"), len(tail)+2))
+	}
+	if got := countNudges(rerun, outputLimitContinueNudge); got != 1 {
+		t.Fatalf("the request run again carries the message that asks for the rest %d times, want 1", got)
+	}
+
+	stored := assistantMessages(st.GetMessages())
+	if len(stored) != 3 || !stored[0].Truncated || stored[0].Content != cutText ||
+		stored[1].Truncated || stored[1].Content != kept || stored[2].Truncated || stored[2].Content != "Done." {
+		t.Fatalf("the transcript stores %+v, want the cut text (truncated), the kept start as it streamed and the answer", stored)
+	}
+
+	if _, err := ag.Run(context.Background(), []acp.ContentBlock{{Type: "text", Text: "next"}}); err != nil {
+		t.Fatal(err)
+	}
+	next := p.seen[len(p.seen)-1]
+	requireNoAssistantInARow(t, next)
+	if got, want := assistantMessages(next), cutText+kept+"\n\nDone."; len(got) != 1 || got[0].Content != want {
+		t.Fatalf("the next turn replays %+v, want one message holding %q", got, want)
+	}
+}
+
+// TestSplitKeptAnswer: the answer a provider failure kept is taken off the end
+// of the transcript to go after the messages that stood at the end of the
+// request that failed. It comes back as a request carries an assistant message:
+// the markers of shared files taken out, the whitespace it starts with kept only
+// where it goes on from a text the output limit cut off.
+func TestSplitKeptAnswer(t *testing.T) {
+	user := llm.Message{Role: llm.RoleUser, Content: "go"}
+	cut := llm.Message{Role: llm.RoleAssistant, Content: "Press the butt", Truncated: true}
+	empty := llm.Message{Role: llm.RoleAssistant}
+	reply := func(s string) llm.Message { return llm.Message{Role: llm.RoleAssistant, Content: s} }
+	for _, tc := range []struct {
+		name       string
+		stored     []llm.Message
+		wantOK     bool
+		wantPrior  int // messages left in front of the answer
+		wantAnswer string
+	}{
+		{"markers are taken out", []llm.Message{user, reply("Here it is.\n\n<coddy_file id=\"a\"/>")}, true, 1, "Here it is."},
+		{"whitespace at the start goes after a message that was not cut off", []llm.Message{user, reply("  Here it is. ")}, true, 1, "Here it is."},
+		{"whitespace at the start stays after a text the output limit cut off", []llm.Message{user, cut, reply(" on labelled Save. ")}, true, 2, " on labelled Save."},
+		{"an empty step between does not make it a new answer", []llm.Message{user, cut, empty, reply(" on")}, true, 3, " on"},
+		{"a user message between ends the join", []llm.Message{cut, user, reply(" on")}, true, 2, "on"},
+		{"nothing stored", nil, false, 0, ""},
+		{"the transcript ends on a user message", []llm.Message{user}, false, 1, ""},
+		{"the transcript ends on a tool result", []llm.Message{user, {Role: llm.RoleTool, ToolCallID: "c1", Content: "ok"}}, false, 2, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			prior, answer, ok := splitKeptAnswer(tc.stored)
+			if ok != tc.wantOK || len(prior) != tc.wantPrior {
+				t.Fatalf("splitKeptAnswer = %d messages in front, ok = %v; want %d and %v", len(prior), ok, tc.wantPrior, tc.wantOK)
+			}
+			if tc.wantOK && (answer.Role != llm.RoleAssistant || answer.Content != tc.wantAnswer) {
+				t.Fatalf("answer = %+v, want an assistant message holding %q", answer, tc.wantAnswer)
+			}
+			if !tc.wantOK && answer.Content != "" {
+				t.Fatalf("answer = %+v, want none when ok is false", answer)
+			}
+		})
 	}
 }
 
@@ -228,7 +325,9 @@ func TestProviderRecoveryRestoresOnlyTheNudgesThatStillStandAtTheEnd(t *testing.
 		// absent is a message that request must not carry at all.
 		absent string
 	}{
-		{"a text cut off twice", []outputLimitStep{partialStep, partialStep, failing, answered}, []string{text, text, goOn}, ""},
+		// Two texts the output limit cut off are one text in a history rebuilt from
+		// the transcript, joined with nothing between (foldSplitAnswers).
+		{"a text cut off twice", []outputLimitStep{partialStep, partialStep, failing, answered}, []string{text + partialText, goOn}, ""},
 		{"thinking, then a text", []outputLimitStep{cutOff, partialStep, failing, answered}, []string{text, goOn}, thinking},
 		{"a text, then thinking", []outputLimitStep{partialStep, cutOff, failing, answered}, []string{text, goOn, thinking}, ""},
 		// An empty answer is replayed, then nudged in words; a text cut off after

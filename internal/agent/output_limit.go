@@ -118,3 +118,62 @@ func (a *Agent) dropCutOffToolCall(tc llm.ToolCall) {
 	}
 	a.finishToolCall(sessionDir, a.state.GetID(), tc, cutOffToolCallResult, nil, "failed")
 }
+
+// stopsPartway says whether a step's text stops partway because the output limit
+// cut it off: the step stopped at max_tokens with text and no tool call, cut or
+// whole, to go with it. The step is then stored as Truncated, and what goes on
+// from it joins it with nothing between.
+func stopsPartway(response *llm.Response, cutCall *llm.ToolCall) bool {
+	return response.StopReason == "max_tokens" && cutCall == nil && len(response.ToolCalls) == 0 &&
+		strings.TrimSpace(response.Content) != ""
+}
+
+// foldSplitAnswers joins the assistant messages of a history that follow each
+// other. Three come out of the loop's recoveries: a text the output limit cut
+// off and the step that went on from it, the text before a tool call the output
+// limit cut off with the step that answered the message about it, and an answer
+// a provider failure cut off with the step run again after it. The requests of
+// the turn have a local message between them; a history built from the
+// transcript for a later turn has none, and chat templates that insist on
+// alternation refuse two assistant messages in a row for the rest of the
+// session. A message goes on from a truncated one with nothing between,
+// whitespace at the join as it streamed; otherwise the two texts are separated
+// by a blank line, which also keeps an answer a provider failure cut off apart
+// from the step that started it over. The result carries the later message's
+// calls and reasoning. A step with signed reasoning keeps its message, since a
+// provider that signs replays it as it is, and so does a step with a tool call
+// before what follows it.
+func foldSplitAnswers(msgs []llm.Message) []llm.Message {
+	out := make([]llm.Message, 0, len(msgs))
+	for _, m := range msgs {
+		if n := len(out); n > 0 && foldsInto(out[n-1], m) {
+			out[n-1] = joinAnswers(out[n-1], m)
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+func foldsInto(prev, next llm.Message) bool {
+	return prev.Role == llm.RoleAssistant && next.Role == llm.RoleAssistant &&
+		len(prev.ToolCalls) == 0 &&
+		prev.ReasoningSignature == "" && next.ReasoningSignature == "" &&
+		prev.PlanDocument == nil && next.PlanDocument == nil &&
+		len(prev.ImageParts) == 0 && len(next.ImageParts) == 0
+}
+
+func joinAnswers(prev, next llm.Message) llm.Message {
+	joined := next
+	switch {
+	case prev.Truncated:
+		joined.Content = prev.Content + next.Content
+	case strings.TrimSpace(next.Content) == "":
+		joined.Content = prev.Content
+	case strings.TrimSpace(prev.Content) == "":
+		joined.Content = next.Content
+	default:
+		joined.Content = prev.Content + "\n\n" + next.Content
+	}
+	return joined
+}

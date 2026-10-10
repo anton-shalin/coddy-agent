@@ -120,9 +120,9 @@ func TestPromptCacheOutputLimitContinuationIsLocalAndAppendOnly(t *testing.T) {
 			t.Fatal("the continuation message was written to the transcript")
 		}
 	}
-	// The transcript stores an answer without the whitespace around it, so the
-	// continuation's leading space is not kept.
-	if got := assistantTexts(stored); len(got) != 2 || got[0] != partialText || got[1] != strings.TrimSpace(restOfText.text) {
+	// The text and its continuation are stored as they streamed at the join: the
+	// continuation keeps the space it starts with.
+	if got := assistantTexts(stored); len(got) != 2 || got[0] != partialText || got[1] != restOfText.text {
 		t.Fatalf("assistant messages of the transcript = %q, want the text and its continuation", got)
 	}
 	if notice := st.TakeTurnStopNotice(); notice != "" {

@@ -23,7 +23,10 @@ Feature: A turn ends for a reason the user can see, and a sick provider does not
   it stopped. A tool call whose arguments were cut off is never run - half a
   file written is worse than none, and the call could not be replayed to the
   provider anyway: the call is dropped, and the model is asked to make it again
-  as several smaller calls.
+  as several smaller calls. A text and the step that went on from it are two
+  assistant messages of the transcript, stored as they streamed; the history of
+  a later turn sends them as the one text they are, because chat templates that
+  insist on alternation refuse two assistant messages in a row, every turn after.
 
   Scenario: Without a step limit a long task runs to its answer
     Given a model that reads a file 35 times before it answers
@@ -66,6 +69,13 @@ Feature: A turn ends for a reason the user can see, and a sick provider does not
     And the transcript keeps "The notes hold" that the user already saw
     And the second request carried that part and asked the model to continue exactly where it stopped
     And the session's log carries no notice about the output limit
+
+  Scenario: The next turn sends a continued answer as the one text it is
+    Given a model whose first reply is cut off at the output limit after "The notes hold"
+    And an agent with no step limit configured
+    When the user sends a prompt
+    And the user sends another prompt
+    Then the request of the second turn carries the sentence as one assistant message
 
   Scenario: A tool call cut off at the output limit is not run and is asked again in smaller pieces
     Given a model whose first step is a write call cut off at the output limit

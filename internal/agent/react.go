@@ -639,8 +639,13 @@ func (a *Agent) keepInterruptedAnswer(model, text, reasoning string, clockStart,
 		Content:             text,
 		Reasoning:           reasonTrim,
 		ReasoningDurationMs: reasoningMs,
-		Model:               model,
-		CreatedAt:           time.Now().UTC().Format(time.RFC3339),
+		// Not Truncated: the provider ended the stream wherever the failure hit
+		// it, and the step run again starts its answer over as often as it goes
+		// on from the last character, so the two are not one text. The history
+		// joins them with a blank line (joinAnswers) and the surfaces keep them
+		// apart, the notice of the failure between them.
+		Model:     model,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	})
 	a.refreshConversationContextUsage(true)
 	return strings.TrimSpace(text) != ""
@@ -649,17 +654,18 @@ func (a *Agent) keepInterruptedAnswer(model, text, reasoning string, clockStart,
 // splitKeptAnswer takes the answer keepInterruptedAnswer added off the end of
 // stored, for a history rebuilt before the step runs again: the answer goes after
 // the messages that stood at the end of the request that failed, not before them.
-// It comes back as a request carries it, without the placement markers of shared
-// files, which are for the web UI only. ok is false when stored does not end on
-// an assistant message.
+// It comes back as buildMessages would carry it: without the placement markers of
+// shared files, which are for the web UI only, and with the whitespace it starts
+// with when it goes on from a truncated text. ok is false when stored does not
+// end on an assistant message.
 func splitKeptAnswer(stored []llm.Message) (prior []llm.Message, answer llm.Message, ok bool) {
 	n := len(stored)
 	if n == 0 || stored[n-1].Role != llm.RoleAssistant {
 		return stored, llm.Message{}, false
 	}
-	answer = stored[n-1]
-	answer.Content = session.StripArtifactMarkers(answer.Content)
-	return stored[:n-1], answer, true
+	prior, answer = stored[:n-1], stored[n-1]
+	answer.Content = session.StripAssistantContent(answer.Content, session.FollowsTruncated(prior), answer.Truncated)
+	return prior, answer, true
 }
 
 // maxEmptyAssistantReissues bounds how many times an empty turn is answered by
@@ -1535,12 +1541,18 @@ func (a *Agent) runReActLoop(
 			ReasoningSignature:  reasonSig,
 			ToolCalls:           response.ToolCalls,
 			ReasoningDurationMs: reasoningMs,
+			Truncated:           stopsPartway(response, cutCall),
 			Model:               transport.model,
 			CreatedAt:           time.Now().UTC().Format(time.RFC3339),
 		}
 		messages = append(messages, assistantMsg)
 		a.state.AddMessage(assistantMsg)
-		if stored := a.state.GetMessages(); len(stored) > 0 {
+		// The markers placed on the message close the answer on a live surface
+		// as they close it in the transcript. A truncated message carries them in
+		// front of its text (placePendingArtifacts) and its answer goes on, so
+		// nothing is streamed for it: a chunk here would land in the middle of the
+		// text; the stored message shows them once the surface reads it back.
+		if stored := a.state.GetMessages(); len(stored) > 0 && !stored[len(stored)-1].Truncated {
 			if markers := session.ArtifactMarkers(stored[len(stored)-1].Artifacts); markers != "" {
 				_ = a.server.SendSessionUpdate(sessionID, acp.MessageChunkUpdate{
 					SessionUpdate: acp.UpdateTypeAgentMessageChunk,
@@ -2523,10 +2535,13 @@ func (a *Agent) buildMessagesFrom(systemPrompt string, stored []llm.Message) []l
 	// out of the analysis: they would cut a batch's contiguous result chain and
 	// make a healthy pair look misplaced.
 	filtered := make([]llm.Message, 0, len(history))
+	// afterTruncated: the last assistant message kept so far stops partway, so
+	// the one that follows goes on from it and keeps the whitespace it starts with.
+	afterTruncated := false
 	for _, m := range history {
 		if isLLMHistoryMessage(m) {
 			if m.Role == llm.RoleAssistant {
-				m.Content = session.StripArtifactMarkers(m.Content)
+				m.Content = session.StripAssistantContent(m.Content, afterTruncated, m.Truncated)
 				// A step that came back empty stays in the transcript, where the
 				// user watched it think, but says nothing the model could read
 				// back; replayed, it makes two assistant turns in a row, which chat
@@ -2536,10 +2551,16 @@ func (a *Agent) buildMessagesFrom(systemPrompt string, stored []llm.Message) []l
 				if repliesNothing(m) {
 					continue
 				}
+				afterTruncated = m.Truncated
+			} else {
+				afterTruncated = false
 			}
 			filtered = append(filtered, m)
 		}
 	}
+	// What the recoveries left as two assistant messages in a row goes out as one,
+	// the same way each time (foldSplitAnswers).
+	filtered = foldSplitAnswers(filtered)
 	repaired, _ := session.RepairMissingToolResults(filtered)
 	if a.log != nil {
 		if issues := session.ValidateToolPairing(repaired); len(issues) > 0 {

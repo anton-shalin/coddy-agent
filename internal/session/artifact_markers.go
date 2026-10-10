@@ -3,6 +3,7 @@ package session
 import (
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/EvilFreelancer/coddy-agent/internal/llm"
 )
@@ -15,6 +16,43 @@ var safeArtifactMarkerID = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 // the same assistant message; markers are never model instructions.
 func StripArtifactMarkers(content string) string {
 	return strings.TrimSpace(coddyFileMarker.ReplaceAllString(content, ""))
+}
+
+// StripAssistantContent is StripArtifactMarkers for the text of an assistant
+// message that may stand at the join of a truncated message and its
+// continuation: whitespace at the start of the text is kept when keepStart is
+// set (the message goes on from a truncated one) and at the end when keepEnd is
+// set (the message is itself truncated), since that whitespace is part of one
+// text that is joined with nothing between. A text of nothing but whitespace
+// is nothing.
+func StripAssistantContent(content string, keepStart, keepEnd bool) string {
+	s := coddyFileMarker.ReplaceAllString(content, "")
+	core := strings.TrimSpace(s)
+	if core == "" {
+		return ""
+	}
+	if keepStart {
+		core = s[:len(s)-len(strings.TrimLeftFunc(s, unicode.IsSpace))] + core
+	}
+	if keepEnd {
+		core += s[len(strings.TrimRightFunc(s, unicode.IsSpace)):]
+	}
+	return core
+}
+
+// FollowsTruncated says whether an assistant message appended after msgs goes
+// on from a truncated one: the last message that says anything is an assistant
+// message marked Truncated. An assistant message with no text and no tool call
+// is not in the way, a step that came back empty having nothing to join.
+func FollowsTruncated(msgs []llm.Message) bool {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		if m.Role == llm.RoleAssistant && strings.TrimSpace(m.Content) == "" && len(m.ToolCalls) == 0 {
+			continue
+		}
+		return m.Role == llm.RoleAssistant && m.Truncated
+	}
+	return false
 }
 
 // ArtifactMarkers renders placement markers for already-verified artifact
@@ -33,7 +71,8 @@ func placePendingArtifacts(msgs []llm.Message, assistant *llm.Message) {
 	if assistant.Role != llm.RoleAssistant {
 		return
 	}
-	assistant.Content = StripArtifactMarkers(assistant.Content)
+	keepStart := FollowsTruncated(msgs)
+	assistant.Content = StripAssistantContent(assistant.Content, keepStart, assistant.Truncated)
 	if assistant.Content == "" {
 		return
 	}
@@ -72,6 +111,27 @@ func placePendingArtifacts(msgs []llm.Message, assistant *llm.Message) {
 	if len(pending) == 0 {
 		return
 	}
+	if assistant.Truncated {
+		// A truncated text and the message that goes on from it are one text,
+		// joined with nothing between, so markers after it would stand inside
+		// that text, in the middle of a word as often as not. They go in front
+		// of it instead: tools run only before the first part of such an
+		// answer, so that part is the one that meets them. A part that goes on
+		// from another has no front of its own and leaves them to the message
+		// after it.
+		if keepStart {
+			return
+		}
+		assistant.Artifacts = append(assistant.Artifacts, pending...)
+		assistant.Content = ArtifactMarkers(pending) + "\n\n" + assistant.Content
+		return
+	}
 	assistant.Artifacts = append(assistant.Artifacts, pending...)
-	assistant.Content = strings.TrimSpace(assistant.Content) + "\n\n" + ArtifactMarkers(pending)
+	// The markers close the text, so the whitespace it ended with goes; the
+	// whitespace it began with, when it goes on from a truncated message, stays.
+	start := ""
+	if keepStart {
+		start = assistant.Content[:len(assistant.Content)-len(strings.TrimLeftFunc(assistant.Content, unicode.IsSpace))]
+	}
+	assistant.Content = start + strings.TrimSpace(assistant.Content) + "\n\n" + ArtifactMarkers(pending)
 }

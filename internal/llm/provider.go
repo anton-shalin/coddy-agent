@@ -56,9 +56,18 @@ type Message struct {
 	ReasoningSignature string `json:"reasoning_signature,omitempty"`
 	// ReasoningDurationMs wall clock between first streamed reasoning delta and UI-equivalent finish
 	// (first non-whitespace text delta or first tool-call chunk); omitted when unset or zero.
-	ReasoningDurationMs int64      `json:"reasoning_duration_ms,omitempty"`
-	ToolCalls           []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID          string     `json:"tool_call_id,omitempty"` // for RoleTool messages
+	ReasoningDurationMs int64 `json:"reasoning_duration_ms,omitempty"`
+	// Truncated marks an assistant message that stops partway through its text:
+	// the model's output limit cut it off, and the assistant message after it,
+	// when there is one, goes on from its last character, the model having been
+	// asked to. The two are stored exactly as they were streamed at the join,
+	// with the whitespace there left alone, and a history built from them, like
+	// a reloaded transcript, joins them with nothing between. An answer a
+	// provider failure cut off is not marked: the step run again may start it
+	// over.
+	Truncated  bool       `json:"truncated,omitempty"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"` // for RoleTool messages
 	// Rules, on a RoleTool message, are the project rules the call brought
 	// into play for the first time, rendered as the model reads them after
 	// Content. They are kept apart from the output, which every surface shows

@@ -101,6 +101,9 @@ type turnEndState struct {
 	state  *session.State
 	stop   acp.StopReason
 	runErr error
+	// mgr and sessionID are the session the scenario's prompts go to.
+	mgr       *session.Manager
+	sessionID string
 	// partial is the text the scripted model streamed before breaking off.
 	partial string
 }
@@ -204,7 +207,11 @@ func (s *turnEndState) modelCutOffAfter(partial string) error {
 			_, _ = io.WriteString(w, "data: [DONE]\n\n")
 			return
 		}
-		sseAnswer(w, strings.TrimPrefix(turnEndAnswer, partial))
+		if n == 2 {
+			sseAnswer(w, strings.TrimPrefix(turnEndAnswer, partial))
+			return
+		}
+		sseAnswer(w, "Noted.")
 	})
 	return nil
 }
@@ -262,15 +269,29 @@ func (s *turnEndState) userSendsPrompt() error {
 	if err != nil {
 		return fmt.Errorf("session/new: %w", err)
 	}
-	res, err := mgr.HandleSessionPrompt(ctx, acp.SessionPromptParams{
-		SessionID: newRes.SessionID,
-		Prompt:    []acp.ContentBlock{{Type: "text", Text: "read the notes and sum them up"}},
+	s.mgr, s.sessionID = mgr, newRes.SessionID
+	return s.prompt(ctx, "read the notes and sum them up")
+}
+
+// prompt sends one prompt to the session the scenario opened and keeps how the
+// turn ended.
+func (s *turnEndState) prompt(ctx context.Context, text string) error {
+	res, err := s.mgr.HandleSessionPrompt(ctx, acp.SessionPromptParams{
+		SessionID: s.sessionID,
+		Prompt:    []acp.ContentBlock{{Type: "text", Text: text}},
 	})
 	s.runErr = err
 	if res != nil {
 		s.stop = res.StopReason
 	}
 	return nil
+}
+
+// userSendsAnotherPrompt is the next turn of the same session.
+func (s *turnEndState) userSendsAnotherPrompt() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	return s.prompt(ctx, "now run the tests")
 }
 
 func (s *turnEndState) lastAssistantText() string {
@@ -444,8 +465,8 @@ func (s *turnEndState) secondRequest() ([]requestMessage, []byte, error) {
 
 // turnEndsWithRestOfSentence: the turn ended normally, and the assistant
 // messages of the transcript are the two halves of the sentence the model was
-// cut off in. The transcript stores an answer without the whitespace around it,
-// so the halves are compared as the words they hold.
+// cut off in, stored as they streamed - the first marked as cut off, the second
+// with the space it starts with - so that joined they are the sentence.
 func (s *turnEndState) turnEndsWithRestOfSentence() error {
 	if s.runErr != nil {
 		return fmt.Errorf("the turn failed: %v", s.runErr)
@@ -453,15 +474,15 @@ func (s *turnEndState) turnEndsWithRestOfSentence() error {
 	if s.stop != acp.StopReasonEndTurn {
 		return fmt.Errorf("stop reason = %q, want end_turn", s.stop)
 	}
-	var said []string
+	var said []llm.Message
 	for _, m := range s.state.GetMessages() {
 		if m.Role == llm.RoleAssistant {
-			said = append(said, m.Content)
+			said = append(said, m)
 		}
 	}
-	rest := strings.TrimSpace(strings.TrimPrefix(turnEndAnswer, s.partial))
-	if len(said) != 2 || said[0] != s.partial || said[1] != rest {
-		return fmt.Errorf("the assistant said %q, want %q and then %q", said, s.partial, rest)
+	rest := strings.TrimPrefix(turnEndAnswer, s.partial)
+	if len(said) != 2 || said[0].Content != s.partial || !said[0].Truncated || said[1].Content != rest || said[0].Content+said[1].Content != turnEndAnswer {
+		return fmt.Errorf("the assistant said %+v, want %q (cut off) and then %q", said, s.partial, rest)
 	}
 	return nil
 }
@@ -488,6 +509,37 @@ func (s *turnEndState) secondRequestContinuedTheText() error {
 		return fmt.Errorf("the second request does not replay the partial text: %s", body)
 	}
 	return fmt.Errorf("the second request does not ask the model to go on exactly where it stopped after the partial text: %s", body)
+}
+
+// nextTurnCarriesTheSentenceAsOneMessage: the request of the turn that came
+// after the continued answer holds that answer as one assistant message, the
+// sentence whole, and never two assistant messages in a row, which chat templates
+// that insist on alternation refuse every turn after.
+func (s *turnEndState) nextTurnCarriesTheSentenceAsOneMessage() error {
+	calls := s.stub.calls()
+	if len(calls) < 3 {
+		return fmt.Errorf("the model was called %d time(s), want a request for the second turn", len(calls))
+	}
+	var req struct {
+		Messages []requestMessage `json:"messages"`
+	}
+	if err := json.Unmarshal(calls[2], &req); err != nil {
+		return err
+	}
+	var said []string
+	for i, m := range req.Messages {
+		if m.Role != "assistant" {
+			continue
+		}
+		if i > 0 && req.Messages[i-1].Role == "assistant" {
+			return fmt.Errorf("two assistant messages in a row at %d: %s", i, calls[2])
+		}
+		said = append(said, fmt.Sprint(m.Content))
+	}
+	if len(said) != 1 || said[0] != turnEndAnswer {
+		return fmt.Errorf("the second turn carries the assistant messages %q, want the one sentence %q", said, turnEndAnswer)
+	}
+	return nil
 }
 
 func (s *turnEndState) cutOffFileDoesNotExist() error {
@@ -581,6 +633,8 @@ func initializeTurnEndScenario(sc *godog.ScenarioContext) {
 	sc.Step(`^a model whose first step is a write call cut off at the output limit$`, s.modelWriteCutOff)
 	sc.Step(`^the turn ends with the rest of the sentence$`, s.turnEndsWithRestOfSentence)
 	sc.Step(`^the second request carried that part and asked the model to continue exactly where it stopped$`, s.secondRequestContinuedTheText)
+	sc.Step(`^the user sends another prompt$`, s.userSendsAnotherPrompt)
+	sc.Step(`^the request of the second turn carries the sentence as one assistant message$`, s.nextTurnCarriesTheSentenceAsOneMessage)
 	sc.Step(`^the file the cut-off call was writing does not exist$`, s.cutOffFileDoesNotExist)
 	sc.Step(`^the second request asked the model to make the call again in smaller pieces$`, s.secondRequestAskedForSmallerPieces)
 	sc.Step(`^the second request carries no half-written call$`, s.secondRequestHoldsNoCall)
@@ -772,5 +826,63 @@ func TestProviderRecoveryPauseCutByADeadline(t *testing.T) {
 	stop, err := agent.NewAgent(s.cfg, st, noopSender{}, slog.Default()).Run(ctx, []acp.ContentBlock{{Type: "text", Text: "go"}})
 	if stop == string(acp.StopReasonCancelled) || err == nil || !strings.Contains(err.Error(), "server error 500") {
 		t.Fatalf("Run = %q, %v; want the provider's failure", stop, err)
+	}
+}
+
+// TestProviderRecoveryKeptAnswerIsNotTruncatedAndJoinsTheNextTurnWithABlankLine:
+// the answer a provider failure cut off is stored as any other assistant message
+// - trimmed, not marked truncated, since the step run again may start it over
+// instead of going on from its last character - and the history of the next turn
+// sends it and that step as one assistant message with a blank line between,
+// where the text the output limit cut off is joined with nothing between.
+func TestProviderRecoveryKeptAnswerIsNotTruncatedAndJoinsTheNextTurnWithABlankLine(t *testing.T) {
+	s := runTurnEnd(t, func(n int, w io.Writer) {
+		switch n {
+		case 1:
+			sseFailMidAnswer(w, "The project holds ", 502)
+		case 2:
+			sseAnswer(w, " "+turnEndAnswer)
+		default:
+			sseAnswer(w, "Noted.")
+		}
+	}, nil)
+	if err := s.turnEndsWithAnswer(); err != nil {
+		t.Fatal(err)
+	}
+	var said []llm.Message
+	for _, m := range s.state.GetMessages() {
+		if m.Role == llm.RoleAssistant && strings.TrimSpace(m.Content) != "" {
+			said = append(said, m)
+		}
+	}
+	if len(said) != 2 || said[0].Truncated || said[0].Content != "The project holds" || said[1].Truncated || said[1].Content != turnEndAnswer {
+		t.Fatalf("the transcript holds %+v, want the kept answer and the step run again, neither truncated, both trimmed", said)
+	}
+
+	if err := s.userSendsAnotherPrompt(); err != nil {
+		t.Fatal(err)
+	}
+	calls := s.stub.calls()
+	if len(calls) < 3 {
+		t.Fatalf("the model was called %d time(s), want a request for the second turn", len(calls))
+	}
+	var req struct {
+		Messages []requestMessage `json:"messages"`
+	}
+	if err := json.Unmarshal(calls[2], &req); err != nil {
+		t.Fatal(err)
+	}
+	var sent []string
+	for i, m := range req.Messages {
+		if m.Role != "assistant" {
+			continue
+		}
+		if i > 0 && req.Messages[i-1].Role == "assistant" {
+			t.Fatalf("two assistant messages in a row at %d: %s", i, calls[2])
+		}
+		sent = append(sent, fmt.Sprint(m.Content))
+	}
+	if want := "The project holds\n\n" + turnEndAnswer; len(sent) != 1 || sent[0] != want {
+		t.Fatalf("the second turn carries the assistant messages %q, want one holding %q", sent, want)
 	}
 }
