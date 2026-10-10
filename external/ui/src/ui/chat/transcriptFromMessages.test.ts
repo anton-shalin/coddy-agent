@@ -684,6 +684,8 @@ describe("an answer cut off and continued", () => {
   });
 
   test("a continuation on a page of its own has no text to join and is its own row", () => {
+    // The server never starts a page there (session.PageMessages keeps a
+    // continued answer on one page); the mapping still copes with one that does.
     const msgs: RawSessionMessage[] = [
       prompt,
       cut("and then "),

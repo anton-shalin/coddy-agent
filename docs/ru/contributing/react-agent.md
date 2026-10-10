@@ -311,9 +311,10 @@ messages: [
        (`transcriptFromMessages.ts`), a replay to a client
        (`replayedAssistantText`) and the history of the next turn
        (`foldSplitAnswers` in `buildMessages`) join the two with nothing
-       between. The web UI keeps them apart only when the continuation began
-       with thinking, which the stream draws as a row of its own, or a notice
-       stands between them. Assistant messages that follow each other without
+       between; a paged read of the history never starts or ends a page
+       between them (`session.PageMessages`). The web UI keeps them apart only
+       when the continuation began with thinking, which the stream draws as a
+       row of its own, or a notice stands between them. Assistant messages that follow each other without
        that mark (the text before a cut-off tool call and the step after it,
        an answer a provider failure cut off and the step run again after it)
        are joined in the history with a blank line, so a later turn never
@@ -543,4 +544,4 @@ messages: [
 - Слишком длинный контекст - старые сообщения сжимаются в сводку, работа продолжается со сводкой;
 - Отмена - все операции прерываются, возвращается причина остановки `cancelled`.
 
-<!-- docsgen:source sha256=0efcfa6355e2a022 -->
+<!-- docsgen:source sha256=c383941f81b73461 -->
