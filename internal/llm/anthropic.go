@@ -123,6 +123,10 @@ func (p *anthropicProvider) Stream(ctx context.Context, messages []Message, tool
 		id    string
 		name  string
 		input string
+		// closed is set by the block's content_block_stop. Anthropic sends one
+		// for every block, the one the output limit cut included, so a block
+		// without it is one the stream ended inside.
+		closed bool
 	}
 	toolUseMap := make(map[int64]*toolUseAccum)
 
@@ -137,7 +141,7 @@ func (p *anthropicProvider) Stream(ctx context.Context, messages []Message, tool
 		var out []ToolCall
 		for _, i := range indexes {
 			acc := toolUseMap[i]
-			out = append(out, ToolCall{ID: acc.id, Name: acc.name, InputJSON: acc.input})
+			out = append(out, ToolCall{ID: acc.id, Name: acc.name, InputJSON: acc.input, Incomplete: !acc.closed})
 		}
 		return out
 	}
@@ -178,6 +182,11 @@ func (p *anthropicProvider) Stream(ctx context.Context, messages []Message, tool
 					name: cb.Name,
 				}
 				emit(StreamChunk{ToolCallNamed: &ToolCall{ID: cb.ID, Name: cb.Name}})
+			}
+
+		case anthropic.ContentBlockStopEvent:
+			if acc, ok := toolUseMap[e.Index]; ok {
+				acc.closed = true
 			}
 
 		case anthropic.MessageDeltaEvent:

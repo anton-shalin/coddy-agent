@@ -124,6 +124,16 @@ type ToolCall struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	InputJSON string `json:"input"` // raw JSON arguments
+	// Incomplete says the provider reported that the answer ended inside this
+	// call, before the call was closed: an Anthropic tool_use block that got no
+	// content_block_stop, a Codex function_call item whose status is
+	// "incomplete". Only the agent reads it, right after the answer arrives, to
+	// tell a call the output limit cut off; it is never stored or sent. A call
+	// without it may be cut all the same - an Anthropic stream closes every
+	// block, the one the limit cut included - so the agent judges the arguments
+	// too, and a provider that closes no call (the chat completions streams)
+	// never sets it.
+	Incomplete bool `json:"-"`
 }
 
 // ToolDefinition describes a tool available to the LLM.

@@ -340,9 +340,13 @@ messages: [
        again is asked to go on from it, so it stays one text with the rest.
        The requests of the turn itself are not touched: the local message
        stands between the two there.
-     - A last tool call with arguments that are not a whole JSON document
-       (**`cutOffToolCall`**; empty arguments are a call that takes none and
-       runs): **`cutOffToolCallNudge`** names the tool (a
+     - A last tool call the output limit cut off (**`cutOffToolCall`**): the
+       provider said the answer ended inside it (**`llm.ToolCall.Incomplete`**:
+       an Anthropic block without its `content_block_stop`, a Codex item whose
+       status is `incomplete`), or it has arguments that are not a whole JSON
+       document. Both count, since Anthropic closes every block, the cut one
+       included. Without the provider's word, empty arguments are a call that
+       takes none and runs. **`cutOffToolCallNudge`** names the tool (a
        plain identifier only), says the call was cut off and not run, and asks
        for several smaller calls. Only the last call can be cut; an earlier
        call that does not parse is a model error and runs, and fails, as
@@ -562,4 +566,4 @@ messages: [
 - Слишком длинный контекст - старые сообщения сжимаются в сводку, работа продолжается со сводкой;
 - Отмена - все операции прерываются, возвращается причина остановки `cancelled`.
 
-<!-- docsgen:source sha256=5ef450cc19c7d15c -->
+<!-- docsgen:source sha256=e151c1d5f2610d93 -->
