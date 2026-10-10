@@ -300,10 +300,29 @@ messages: [
      - Visible text that stops partway: **`outputLimitContinueNudge`** -
        continue exactly where it stopped without repeating, keep the step
        short. The text stays in the transcript and in the history, because the
-       user read it. The continuation is the next assistant message. No event
-       marks the seam: a live surface appends the chunks to the message it is
-       drawing, and a reloaded transcript shows two assistant messages in a
-       row, as after a provider recovery.
+       user read it. The continuation is the next assistant message, and the
+       cut one is stored marked `truncated` (`llm.Message.Truncated`), both
+       exactly as streamed, the whitespace at the join included
+       (`session.StripAssistantContent`); the placement markers of shared files
+       go in front of a truncated text, never inside the joined one.
+       No event marks the seam: a live surface appends the chunks to the
+       message it is drawing. A reloaded transcript in the web UI
+       (`transcriptFromMessages.ts`), a replay to a client
+       (`replayedAssistantText`) and the history of the next turn
+       (`foldSplitAnswers` in `buildMessages`) join the two with nothing
+       between. The web UI keeps them apart only when the continuation began
+       with thinking, which the stream draws as a row of its own, or a notice
+       stands between them. Assistant messages that follow each other without
+       that mark (the text before a cut-off tool call and the step after it,
+       an answer a provider failure cut off and the step run again after it)
+       are joined in the history with a blank line, so a later turn never
+       sends two assistant messages in a row, which chat templates that insist
+       on alternation refuse; a step with signed reasoning keeps its message.
+       An answer a provider failure cut off is not marked `truncated`: the
+       stream ended wherever the failure hit it, and the step run again starts
+       the answer over as often as it goes on from the last character.
+       The requests of the turn itself are not touched: the local message
+       stands between the two there.
      - A last tool call with arguments that are not a whole JSON document
        (**`cutOffToolCall`**; empty arguments are a call that takes none and
        runs): **`cutOffToolCallNudge`** names the tool (a

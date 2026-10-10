@@ -1431,6 +1431,12 @@ func llmMsgsToCoddyOpenAIForSession(sessionID, assetsDir string, msgs []llm.Mess
 		if m.CompactionSummary {
 			item["compaction_summary"] = true
 		}
+		if m.Role == llm.RoleAssistant && m.Truncated {
+			// The text stops partway and the assistant row after it goes on from
+			// its last character: a client draws the two as one text, as the
+			// live stream did.
+			item["truncated"] = true
+		}
 		if m.Role == llm.RoleUser && m.BackgroundWake != nil {
 			// Nobody typed this message: a woken turn opened with it.
 			item["background_wake"] = m.BackgroundWake

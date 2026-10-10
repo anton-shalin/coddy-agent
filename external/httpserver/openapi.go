@@ -3887,6 +3887,10 @@ func openAPISpec() map[string]interface{} {
 							"type":        "boolean",
 							"description": "Coddy transcript extension: this row is a generated summary of earlier history (context compaction). Rows before the last summary are excluded from LLM prompts but stay in the transcript.",
 						},
+						"truncated": map[string]interface{}{
+							"type":        "boolean",
+							"description": "Coddy transcript extension: this assistant row's text stops partway because the model's output limit cut it off, and the assistant row after it, when there is one, goes on from its last character. Draw the two as one text, joined with nothing between; `content` is stored as streamed, whitespace at the join included.",
+						},
 						"background_wake": map[string]interface{}{
 							"type":                 "object",
 							"readOnly":             true,
