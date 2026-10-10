@@ -846,11 +846,13 @@ func (a *Agent) runReActLoop(
 		standing = nil
 		nextCallReason = reason
 	}
-	// recovering says a recovery of the empty-answer or output-limit kind is in
-	// progress, so that the history a compaction or a provider failure rebuilds
-	// is cut like the working one.
+	// recovering says a recovery is in progress whose work a history rebuilt from
+	// the transcript (a compaction, a provider failure) has to be given back: an
+	// empty-answer or output-limit recovery, or a message that still stands at the
+	// end of the working history, the request to go on from an answer a provider
+	// failure cut off included.
 	recovering := func() bool {
-		return emptyReissues > 0 || emptyContinuations > 0 || outputLimitRecoveries > 0
+		return emptyReissues > 0 || emptyContinuations > 0 || outputLimitRecoveries > 0 || len(standing) > 0
 	}
 	// mayAskAfterOutputLimit says whether a step the output limit cut off, at
 	// iteration turn, may be answered in words rather than end the turn, and
@@ -1272,6 +1274,11 @@ func (a *Agent) runReActLoop(
 			a.log.Warn("loop guard cut a degenerating response",
 				"channel", loopAbortChannelName(loopAbort), "nudge", loopNudges)
 			resetRetries("loop_guard")
+			// The nudge stands at the end of the history like the messages of
+			// the recoveries, so a compaction or a provider failure before the
+			// next step puts it back instead of ending the request on the step
+			// the guard cut.
+			standing = []string{nudge}
 			continue
 		}
 
@@ -1376,8 +1383,14 @@ func (a *Agent) runReActLoop(
 				}
 				messages = restoreRecoveries(a.buildMessagesFrom(sys.Content, stored), standing, recovering())
 				if kept {
-					// LLM-facing only; never persisted to the transcript.
+					// LLM-facing only; never persisted to the transcript. It stands
+					// at the end of the history like the messages of the other
+					// recoveries, so a compaction before the step runs again puts
+					// it back after the kept answer instead of ending the request
+					// on that answer. The kept answer is text, so what stood before
+					// it was answered.
 					messages = append(messages, keptAnswer, llm.Message{Role: llm.RoleUser, Content: providerRecoveryNudge})
+					standing = []string{providerRecoveryNudge}
 				}
 				nextCallReason = "provider_recovery"
 				retryAllowance = nil

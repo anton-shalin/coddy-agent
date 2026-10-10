@@ -366,7 +366,10 @@ messages: [
      (**`providerRecoveryDelay`**: 5x then 20x **`llm_retry_base_ms`**, or a
      longer **`Retry-After`**, capped at 2 minutes) the step runs again on a
      fresh allowance, with an LLM-facing nudge to continue when text was kept.
-     At most **`maxProviderRecoveries`** (2) in a row; a successful call resets
+     The nudge stands at the end of the history like the messages of the other
+     recoveries (and like the loop guard's nudge), so a compaction before the
+     step runs again puts it back after the kept answer instead of ending the
+     request on that answer. At most **`maxProviderRecoveries`** (2) in a row; a successful call resets
      the count. Uses a normal **`max_turns`** iteration.
 
    An explicit **`llm_retry_max: 0`** disables all of the above. The
