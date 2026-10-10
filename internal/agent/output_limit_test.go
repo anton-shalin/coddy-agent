@@ -66,6 +66,13 @@ func (p *outputLimitProvider) Stream(_ context.Context, msgs []llm.Message, _ []
 
 func outputLimitAgent(t *testing.T, p llm.Provider, adjust func(*config.Config)) (*Agent, *session.State) {
 	t.Helper()
+	return outputLimitAgentWith(t, p, adjust, resumePermissionSender{})
+}
+
+// outputLimitAgentWith is outputLimitAgent talking to a client of the test's
+// choosing, for a test that reads what the turn sent it.
+func outputLimitAgentWith(t *testing.T, p llm.Provider, adjust func(*config.Config), sender acp.UpdateSender) (*Agent, *session.State) {
+	t.Helper()
 	st := &session.State{ID: "sess_output_limit", CWD: t.TempDir(), Mode: session.ModeAgent, SessionDir: t.TempDir()}
 	cfg := &config.Config{
 		Providers: []config.ProviderConfig{{Name: "fake", Type: "openai", APIKey: "test"}},
@@ -75,7 +82,7 @@ func outputLimitAgent(t *testing.T, p llm.Provider, adjust func(*config.Config))
 	if adjust != nil {
 		adjust(cfg)
 	}
-	ag := NewAgent(cfg, st, resumePermissionSender{}, nil)
+	ag := NewAgent(cfg, st, sender, nil)
 	ag.providerFactory = func(llm.ProviderInput) (llm.Provider, error) { return p, nil }
 	return ag, st
 }
@@ -232,21 +239,6 @@ func TestOutputLimitRecoveryHonoursLLMRetryMax(t *testing.T) {
 	}
 }
 
-// TestOutputLimitWithVisibleTextEndsTheTurn: a step that stopped at the limit
-// after writing something the user can read is a cut answer, not an empty
-// step; the turn ends on it as before, with the plain notice.
-func TestOutputLimitWithVisibleTextEndsTheTurn(t *testing.T) {
-	p := &outputLimitProvider{steps: []outputLimitStep{{reasoning: "Plan.", text: "Here is the first half of the module and then", stop: "max_tokens"}, answered}}
-	ag, st := outputLimitAgent(t, p, nil)
-	stop, err := runOutputLimitTurn(ag)
-	if err != nil || stop != string(acp.StopReasonMaxTokens) || p.calls != 1 {
-		t.Fatalf("stop = %q, err = %v after %d calls; want max_tokens after 1", stop, err, p.calls)
-	}
-	if notice := st.TakeTurnStopNotice(); notice != plainOutputLimitNotice {
-		t.Fatalf("notice = %q", notice)
-	}
-}
-
 // TestOutputLimitWhitespaceOnlyTextIsNothing: text that trims to empty is no
 // answer, so the step is asked again.
 func TestOutputLimitWhitespaceOnlyTextIsNothing(t *testing.T) {
@@ -267,9 +259,9 @@ func TestOutputLimitRecoveryLeavesAStoppedTurnAlone(t *testing.T) {
 	p := &outputLimitProvider{steps: []outputLimitStep{stopped, answered}}
 	var ag *Agent
 	ag, st = outputLimitAgent(t, p, nil)
-	_, _ = runOutputLimitTurn(ag)
-	if p.calls != 1 {
-		t.Fatalf("provider called %d times after a Stop, want 1", p.calls)
+	stop, _ := runOutputLimitTurn(ag)
+	if p.calls != 1 || stop != string(acp.StopReasonCancelled) {
+		t.Fatalf("stop = %q after %d calls after a Stop, want cancelled after 1", stop, p.calls)
 	}
 }
 

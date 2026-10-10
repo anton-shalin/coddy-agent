@@ -192,6 +192,50 @@ func (s *turnEndState) modelCutOffWhileReasoning() error {
 	return nil
 }
 
+// modelCutOffAfter scripts a first reply that stops at the output limit in the
+// middle of its text: the text streams in, then the server reports
+// finish_reason "length". The next step writes the rest of the sentence.
+func (s *turnEndState) modelCutOffAfter(partial string) error {
+	s.partial = partial
+	s.serve(func(n int, w io.Writer) {
+		if n == 1 {
+			sseChunk(w, map[string]any{"role": "assistant", "content": partial}, nil)
+			sseChunk(w, map[string]any{}, "length")
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+			return
+		}
+		sseAnswer(w, strings.TrimPrefix(turnEndAnswer, partial))
+	})
+	return nil
+}
+
+// cutOffWritePath is the file the scripted write call was aimed at.
+const cutOffWritePath = "module.go"
+
+// modelWriteCutOff scripts a first step that runs out of output budget in the
+// middle of a write call: the arguments stream in and stop inside the content
+// string, then the server reports finish_reason "length". The server hands the
+// call over as it stands, so its arguments are not valid JSON. The next step
+// answers.
+func (s *turnEndState) modelWriteCutOff() error {
+	s.serve(func(n int, w io.Writer) {
+		if n == 1 {
+			sseChunk(w, map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{
+				"index": 0, "id": "call_write", "type": "function",
+				"function": map[string]any{"name": "write", "arguments": `{"path":"` + cutOffWritePath + `","content":"package module`},
+			}}}, nil)
+			sseChunk(w, map[string]any{"tool_calls": []any{map[string]any{
+				"index": 0, "function": map[string]any{"arguments": `\n\nfunc Run() {\n`},
+			}}}, nil)
+			sseChunk(w, map[string]any{}, "length")
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+			return
+		}
+		sseAnswer(w, turnEndAnswer)
+	})
+	return nil
+}
+
 func (s *turnEndState) agentWithMaxTurns(maxTurns int) error {
 	s.cfg = &config.Config{
 		Paths:     config.Paths{Home: s.home, CWD: s.cwd},
@@ -375,6 +419,127 @@ func (s *turnEndState) secondRequestAskedForShortReasoning() error {
 	return nil
 }
 
+// requestMessage is a message of a chat completions request as the stand
+// receives it.
+type requestMessage struct {
+	Role      string          `json:"role"`
+	Content   any             `json:"content"`
+	ToolCalls json.RawMessage `json:"tool_calls"`
+}
+
+// secondRequest decodes the messages of the request that followed the first step.
+func (s *turnEndState) secondRequest() ([]requestMessage, []byte, error) {
+	calls := s.stub.calls()
+	if len(calls) < 2 {
+		return nil, nil, fmt.Errorf("the model was called %d time(s), want a second request", len(calls))
+	}
+	var req struct {
+		Messages []requestMessage `json:"messages"`
+	}
+	if err := json.Unmarshal(calls[1], &req); err != nil {
+		return nil, nil, err
+	}
+	return req.Messages, calls[1], nil
+}
+
+// turnEndsWithRestOfSentence: the turn ended normally, and the assistant
+// messages of the transcript are the two halves of the sentence the model was
+// cut off in. The transcript stores an answer without the whitespace around it,
+// so the halves are compared as the words they hold.
+func (s *turnEndState) turnEndsWithRestOfSentence() error {
+	if s.runErr != nil {
+		return fmt.Errorf("the turn failed: %v", s.runErr)
+	}
+	if s.stop != acp.StopReasonEndTurn {
+		return fmt.Errorf("stop reason = %q, want end_turn", s.stop)
+	}
+	var said []string
+	for _, m := range s.state.GetMessages() {
+		if m.Role == llm.RoleAssistant {
+			said = append(said, m.Content)
+		}
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(turnEndAnswer, s.partial))
+	if len(said) != 2 || said[0] != s.partial || said[1] != rest {
+		return fmt.Errorf("the assistant said %q, want %q and then %q", said, s.partial, rest)
+	}
+	return nil
+}
+
+// secondRequestContinuedTheText: the partial text is replayed as an assistant
+// message and the corrective message after it asks the model to go on exactly
+// where it stopped.
+func (s *turnEndState) secondRequestContinuedTheText() error {
+	msgs, body, err := s.secondRequest()
+	if err != nil {
+		return err
+	}
+	partialAt := -1
+	for i, m := range msgs {
+		text := strings.ToLower(fmt.Sprint(m.Content))
+		switch {
+		case m.Role == "assistant" && strings.Contains(text, strings.ToLower(s.partial)):
+			partialAt = i
+		case partialAt >= 0 && m.Role == "user" && strings.Contains(text, "output limit") && strings.Contains(text, "exactly where it stopped"):
+			return nil
+		}
+	}
+	if partialAt < 0 {
+		return fmt.Errorf("the second request does not replay the partial text: %s", body)
+	}
+	return fmt.Errorf("the second request does not ask the model to go on exactly where it stopped after the partial text: %s", body)
+}
+
+func (s *turnEndState) cutOffFileDoesNotExist() error {
+	if _, err := os.Stat(filepath.Join(s.cwd, cutOffWritePath)); err == nil {
+		return fmt.Errorf("%s was written by a call that was cut off", cutOffWritePath)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+// secondRequestAskedForSmallerPieces: after the prompt, a corrective message
+// names the output limit, says the call was not run and asks for smaller calls.
+func (s *turnEndState) secondRequestAskedForSmallerPieces() error {
+	msgs, body, err := s.secondRequest()
+	if err != nil {
+		return err
+	}
+	promptAt := -1
+	for i, m := range msgs {
+		text := strings.ToLower(fmt.Sprint(m.Content))
+		switch {
+		case m.Role == "user" && strings.Contains(text, "read the notes and sum them up"):
+			promptAt = i
+		case promptAt >= 0 && m.Role == "user" && strings.Contains(text, "output limit") &&
+			strings.Contains(text, "was not run") && strings.Contains(text, "smaller tool calls"):
+			return nil
+		}
+	}
+	return fmt.Errorf("the second request does not carry the corrective message after the prompt: %s", body)
+}
+
+// secondRequestHoldsNoCall: the call that was cut off is nowhere in the next
+// request - no assistant tool call, no tool result, none of its content - so a
+// provider that parses the arguments of the history is never handed half a
+// JSON document.
+func (s *turnEndState) secondRequestHoldsNoCall() error {
+	msgs, body, err := s.secondRequest()
+	if err != nil {
+		return err
+	}
+	for i, m := range msgs {
+		if m.Role == "tool" || len(m.ToolCalls) > 0 {
+			return fmt.Errorf("message %d of the second request is part of the cut-off call: %s", i, body)
+		}
+	}
+	if strings.Contains(string(body), "package module") || strings.Contains(string(body), "call_write") {
+		return fmt.Errorf("the second request carries the cut-off call: %s", body)
+	}
+	return nil
+}
+
 func (s *turnEndState) noNoticeAboutOutputLimit() error {
 	for _, e := range s.state.GetUILog() {
 		if strings.Contains(e.Message, "max_tokens") || strings.Contains(e.Message, "output limit") {
@@ -412,6 +577,13 @@ func initializeTurnEndScenario(sc *godog.ScenarioContext) {
 	sc.Step(`^the session's log carries a notice that the provider failed and the turn went on$`, s.noticeProviderRecovered)
 	sc.Step(`^the second request asked the model to keep its reasoning short and split large writes$`, s.secondRequestAskedForShortReasoning)
 	sc.Step(`^the session's log carries no notice about the output limit$`, s.noNoticeAboutOutputLimit)
+	sc.Step(`^a model whose first reply is cut off at the output limit after "([^"]+)"$`, s.modelCutOffAfter)
+	sc.Step(`^a model whose first step is a write call cut off at the output limit$`, s.modelWriteCutOff)
+	sc.Step(`^the turn ends with the rest of the sentence$`, s.turnEndsWithRestOfSentence)
+	sc.Step(`^the second request carried that part and asked the model to continue exactly where it stopped$`, s.secondRequestContinuedTheText)
+	sc.Step(`^the file the cut-off call was writing does not exist$`, s.cutOffFileDoesNotExist)
+	sc.Step(`^the second request asked the model to make the call again in smaller pieces$`, s.secondRequestAskedForSmallerPieces)
+	sc.Step(`^the second request carries no half-written call$`, s.secondRequestHoldsNoCall)
 }
 
 func TestTurnEndReasonsFeature(t *testing.T) {

@@ -18,6 +18,13 @@ Feature: A turn ends for a reason the user can see, and a sick provider does not
   the user typing "continue" (a subagent or a scheduled run has nobody who
   could).
 
+  A step can also stop at the limit in the middle of what it was writing. Text
+  the user already read is kept, and the model is asked to go on exactly where
+  it stopped. A tool call whose arguments were cut off is never run - half a
+  file written is worse than none, and the call could not be replayed to the
+  provider anyway: the call is dropped, and the model is asked to make it again
+  as several smaller calls.
+
   Scenario: Without a step limit a long task runs to its answer
     Given a model that reads a file 35 times before it answers
     And an agent with no step limit configured
@@ -48,4 +55,25 @@ Feature: A turn ends for a reason the user can see, and a sick provider does not
     Then the turn ends with the model's answer
     And the model was called 2 times
     And the second request asked the model to keep its reasoning short and split large writes
+    And the session's log carries no notice about the output limit
+
+  Scenario: A reply cut off at the output limit in the middle of its text is continued
+    Given a model whose first reply is cut off at the output limit after "The notes hold"
+    And an agent with no step limit configured
+    When the user sends a prompt
+    Then the turn ends with the rest of the sentence
+    And the model was called 2 times
+    And the transcript keeps "The notes hold" that the user already saw
+    And the second request carried that part and asked the model to continue exactly where it stopped
+    And the session's log carries no notice about the output limit
+
+  Scenario: A tool call cut off at the output limit is not run and is asked again in smaller pieces
+    Given a model whose first step is a write call cut off at the output limit
+    And an agent with no step limit configured
+    When the user sends a prompt
+    Then the turn ends with the model's answer
+    And the model was called 2 times
+    And the file the cut-off call was writing does not exist
+    And the second request asked the model to make the call again in smaller pieces
+    And the second request carries no half-written call
     And the session's log carries no notice about the output limit

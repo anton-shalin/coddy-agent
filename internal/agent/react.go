@@ -646,6 +646,22 @@ func (a *Agent) keepInterruptedAnswer(model, text, reasoning string, clockStart,
 	return strings.TrimSpace(text) != ""
 }
 
+// splitKeptAnswer takes the answer keepInterruptedAnswer added off the end of
+// stored, for a history rebuilt before the step runs again: the answer goes after
+// the messages that stood at the end of the request that failed, not before them.
+// It comes back as a request carries it, without the placement markers of shared
+// files, which are for the web UI only. ok is false when stored does not end on
+// an assistant message.
+func splitKeptAnswer(stored []llm.Message) (prior []llm.Message, answer llm.Message, ok bool) {
+	n := len(stored)
+	if n == 0 || stored[n-1].Role != llm.RoleAssistant {
+		return stored, llm.Message{}, false
+	}
+	answer = stored[n-1]
+	answer.Content = session.StripArtifactMarkers(answer.Content)
+	return stored[:n-1], answer, true
+}
+
 // maxEmptyAssistantReissues bounds how many times an empty turn is answered by
 // replaying the identical request before the model is talked to in words. One
 // model name at a proxy is usually a group of interchangeable deployments, and
@@ -667,15 +683,18 @@ const maxFirstTokenRetries = 1
 // after an empty turn.
 const emptyAssistantContinuationNudge = "Your previous message had no answer text and no tool call. Continue now: call the appropriate tool to act, or write your reply to the user."
 
-// maxOutputLimitRecoveries bounds how many times in a row a step that stopped
-// at the model's output limit (finish_reason "length", stop reason
-// "max_tokens") with nothing the agent can act on - no tool call and no visible
-// text, only thinking or nothing at all - is answered with outputLimitNudge
-// instead of ending the turn. A model with a small max_tokens can spend a whole
-// step on reasoning, or on a tool call whose arguments were cut off and dropped
-// by the server, and a replay of that request would hit the same cap, so the
-// recovery goes straight to words. Like the other recoveries it takes a slot of
-// agent.llm_retry_max and a ReAct iteration, and tool progress starts it afresh.
+// maxOutputLimitRecoveries bounds how many steps in a row the model's output
+// limit (finish_reason "length", stop reason "max_tokens") may cut off before
+// the turn ends on it instead of asking again. A model with a small max_tokens
+// can spend a whole step on reasoning, stop in the middle of its answer, or run
+// out of room inside a tool call, and a replay of that request would hit the
+// same cap, so the recovery goes straight to words: a short message at the end
+// of the history (output_limit.go has the three kinds of cut and what each is
+// answered with). Like the other recoveries it takes a slot of
+// agent.llm_retry_max and a ReAct iteration. The count is of consecutive cut
+// steps: a step that is not cut off starts it afresh, and so does a follow-up;
+// a cut step that also ran calls written whole before the cut one does not,
+// those calls being progress for the allowance but the step still being cut off.
 const maxOutputLimitRecoveries = 2
 
 // outputLimitNudge is injected into the LLM-facing message slice only (never
@@ -701,39 +720,24 @@ func emptyRecoveryProjection(messages []llm.Message, nudges ...string) []llm.Mes
 	return messages
 }
 
-// restoreRecoveries puts back, on a history rebuilt from the transcript, what
-// the recoveries in progress had done to the working slice: the steps that came
-// back empty are left out and the local-only nudges the turn has earned follow
-// the history. A rebuild happens after a compaction and after a provider
-// recovery; either one would otherwise end the history on the very step the
-// model was asked to redo, with the nudge gone. Nothing pending leaves the
-// history as it is. The last tail messages of msgs - the answer a provider
-// failure cut off, kept in the transcript after the nudges it was written
-// under - stay behind the nudges.
-func restoreRecoveries(msgs []llm.Message, tail, outputLimit, reissues, empty int) []llm.Message {
-	if outputLimit == 0 && reissues == 0 && empty == 0 {
+// restoreRecoveries puts back, on a history rebuilt from the transcript after a
+// compaction or a provider failure, what the recoveries in progress had done to
+// the working slice: the steps that came back empty are left out of its end, and
+// the local-only messages that stood there follow it. Without that the history
+// would end on the very step the model was asked to redo, with the message gone.
+// standing is the list the loop keeps of those messages (see runReActLoop):
+// every recovery appends the message it sent, in the words it was sent in, and a
+// step that leaves text or a tool call in the history clears it, since what was
+// sent before such a step was answered by it and does not stand at the end
+// anymore. recovering says a recovery is in progress, so that an empty step
+// replayed with no message at all is left out too. Nothing in progress leaves
+// the history as it is. A provider failure leaves the answer it kept out of the
+// rebuild and puts it after what stood (splitKeptAnswer).
+func restoreRecoveries(msgs []llm.Message, standing []string, recovering bool) []llm.Message {
+	if !recovering {
 		return msgs
 	}
-	cut := max(len(msgs)-tail, 0)
-	kept := append([]llm.Message(nil), msgs[cut:]...)
-	head := emptyRecoveryProjection(msgs[:cut], recoveryNudges(outputLimit, empty)...)
-	return append(head, kept...)
-}
-
-// recoveryNudges lists the local-only nudges a turn has earned so far, for a
-// history rebuilt from the transcript: one output-limit message per
-// output-limit recovery, then one wording nudge per empty-answer continuation.
-// They come back grouped by kind, not in the order they were first sent; a
-// rebuilt prefix is new to the provider's cache anyway.
-func recoveryNudges(outputLimit, empty int) []string {
-	nudges := make([]string, 0, outputLimit+empty)
-	for i := 0; i < outputLimit; i++ {
-		nudges = append(nudges, outputLimitNudge)
-	}
-	for i := 0; i < empty; i++ {
-		nudges = append(nudges, emptyAssistantContinuationNudge)
-	}
-	return nudges
+	return emptyRecoveryProjection(msgs, standing...)
 }
 
 // Loop-guard nudges are injected into the LLM-facing message slice only (never
@@ -811,9 +815,17 @@ func (a *Agent) runReActLoop(
 	// reset alongside emptyContinuations once the model makes progress.
 	var emptyReissues int
 	var firstTokenRetries int
-	// Steps in a row the model's output limit cut off before they produced
-	// anything usable, each answered with outputLimitNudge. Reset with the rest.
+	// Steps in a row the model's output limit cut off, each answered with a
+	// message of output_limit.go; reset with the rest.
 	var outputLimitRecoveries int
+	// standing is the one ordered list of the local-only messages that stand at
+	// the end of the working history: every recovery that sends a message
+	// appends it, in the words it was sent in, and any step that leaves text or
+	// a tool call in the history clears the list, because what was sent before
+	// such a step was answered by it. It is not a budget: the counters above
+	// say how many recoveries were spent, this says what a history rebuilt from
+	// the transcript has to put back (restoreRecoveries). Reset with the rest.
+	var standing []string
 	a.outputLimitRecoveriesSpent = 0
 	// Consecutive calls the provider's lane failed that the turn ran again
 	// after a pause (issue #246); reset once a call succeeds.
@@ -825,7 +837,36 @@ func (a *Agent) runReActLoop(
 	resetRetries := func(reason string) {
 		retryAllowance = nil
 		emptyContinuations, emptyReissues, firstTokenRetries, outputLimitRecoveries = 0, 0, 0, 0
+		standing = nil
 		nextCallReason = reason
+	}
+	// recovering says a recovery of the empty-answer or output-limit kind is in
+	// progress, so that the history a compaction or a provider failure rebuilds
+	// is cut like the working one.
+	recovering := func() bool {
+		return emptyReissues > 0 || emptyContinuations > 0 || outputLimitRecoveries > 0
+	}
+	// mayAskAfterOutputLimit says whether a step the output limit cut off, at
+	// iteration turn, may be answered in words rather than end the turn, and
+	// takes the slot of agent.llm_retry_max the answer costs. The message needs
+	// one more iteration to be read in: on the last allowed step nothing is
+	// spent on it and the turn ends on the output limit, which is what cut it,
+	// rather than on the step limit. A Stop ends the turn; the model is not
+	// asked again behind the user's back.
+	mayAskAfterOutputLimit := func(turn int) bool {
+		return outputLimitRecoveries < maxOutputLimitRecoveries && turn+1 < maxTurns &&
+			ctx.Err() == nil && !a.state.IsUserCancelledTurn() && retryAllowance.TakeRetry()
+	}
+	// endOnOutputLimit is the end of a turn whose last step the output limit cut
+	// off and that may not be asked again: the turn stops on the limit, and the
+	// notice says how many times the model was asked already. A turn the user
+	// stopped is a stop, whatever cut its last step.
+	endOnOutputLimit := func() (string, error) {
+		if ctx.Err() != nil || a.state.IsUserCancelledTurn() {
+			return string(acp.StopReasonCancelled), nil
+		}
+		a.outputLimitRecoveriesSpent = outputLimitRecoveries
+		return string(acp.StopReasonMaxTokens), nil
 	}
 	// Tracks whether any visible answer text was streamed to the user during this
 	// turn, so an all-reasoning turn that never answers surfaces a notice instead
@@ -928,7 +969,7 @@ func (a *Agent) runReActLoop(
 		if (turn > 0 || switched) && a.maybeAutoCompact(ctx) {
 			sys = a.buildSystemPromptParts(mode, activeSkills, toolDefs)
 			messages = a.buildMessages(sys.Content)
-			messages = restoreRecoveries(messages, 0, outputLimitRecoveries, emptyReissues, emptyContinuations)
+			messages = restoreRecoveries(messages, standing, recovering())
 			turnCtx = a.buildTurnContext(sys)
 			// The rebuilt estimate above was taken without the block; the call
 			// below sends it, so the accounting has to see it too.
@@ -1314,20 +1355,23 @@ func (a *Agent) runReActLoop(
 					return string(acp.StopReasonRefused), fmt.Errorf("LLM error: %w (the pause before running the step again was interrupted: %v)", streamErr, ctx.Err())
 				case <-timer.C:
 				}
-				messages = a.buildMessages(sys.Content)
 				// The rebuild reads the transcript, which holds the steps that came
-				// back empty and none of the nudges they earned: put back what the
-				// recoveries in progress had done to the working slice, so the step
-				// runs again as the request that failed. The answer kept above is
-				// the last message of the rebuild, and stays behind those nudges.
-				tail := 0
-				if kept && len(messages) > 0 && messages[len(messages)-1].Role == llm.RoleAssistant {
-					tail = 1
+				// back empty and none of the messages the recoveries sent: the
+				// ones that still stand at the end of the working slice are put
+				// back (restoreRecoveries), so the step runs again as the request
+				// that failed. The answer kept above is the last message of the
+				// transcript; it is left out of the rebuild and goes after those
+				// messages, where it was written, followed by the request to go
+				// on from it.
+				stored := a.state.GetMessages()
+				var keptAnswer llm.Message
+				if kept {
+					stored, keptAnswer, kept = splitKeptAnswer(stored)
 				}
-				messages = restoreRecoveries(messages, tail, outputLimitRecoveries, emptyReissues, emptyContinuations)
+				messages = restoreRecoveries(a.buildMessagesFrom(sys.Content, stored), standing, recovering())
 				if kept {
 					// LLM-facing only; never persisted to the transcript.
-					messages = append(messages, llm.Message{Role: llm.RoleUser, Content: providerRecoveryNudge})
+					messages = append(messages, keptAnswer, llm.Message{Role: llm.RoleUser, Content: providerRecoveryNudge})
 				}
 				nextCallReason = "provider_recovery"
 				retryAllowance = nil
@@ -1467,6 +1511,21 @@ func (a *Agent) runReActLoop(
 			reasoningMs = d.Milliseconds()
 		}
 
+		// The output limit can end a step in the middle of its last tool call. The
+		// call's arguments are then not a whole JSON document: it is never run
+		// (a write would at best be refused as unparseable, and a permission
+		// prompt would show half of it) and it is left out of the assistant
+		// message below, so that neither the transcript nor a later request
+		// carries arguments a provider may refuse to parse, and no tool call is
+		// left without its result. The calls before it were written whole and go
+		// on as usual; the step is answered after them (output_limit.go).
+		var cutCall *llm.ToolCall
+		if tc, ok := cutOffToolCall(response); ok {
+			cutCall = &tc
+			response.ToolCalls = response.ToolCalls[:len(response.ToolCalls)-1]
+			a.dropCutOffToolCall(tc)
+		}
+
 		// Append assistant message to history.
 		reasonStore, reasonSig := reasoningForStorage(reasonTrim, reasoningBuf.String(), response)
 		assistantMsg := llm.Message{
@@ -1493,6 +1552,11 @@ func (a *Agent) runReActLoop(
 		if strings.TrimSpace(response.Content) != "" {
 			turnHadVisibleText = true
 		}
+		// A step that leaves text or a tool call in the history answers the
+		// messages recoveries sent before it: they no longer stand at its end.
+		if strings.TrimSpace(response.Content) != "" || len(response.ToolCalls) > 0 {
+			standing = nil
+		}
 
 		// If no tool calls, we're done — unless the model produced no visible answer at
 		// all (empty content). Some models (notably gpt-oss / harmony endpoints) sometimes
@@ -1502,29 +1566,30 @@ func (a *Agent) runReActLoop(
 		// re-prompt the model a bounded number of times before giving up.
 		if len(response.ToolCalls) == 0 {
 			if response.StopReason == "max_tokens" {
-				// A step the output limit cut off before it produced anything the
-				// agent can act on - no tool call, no visible text, only thinking
-				// or nothing - is not an answer to end the turn on, and a replay
-				// of the same request would hit the same cap. Ask the model, in
-				// words, to be brief and to split large writes, a bounded number
-				// of times; a step that did produce visible text ends the turn as
-				// before. The empty step stays in the transcript and leaves the
-				// LLM-facing history, like the empty-answer recovery below. The
-				// nudge needs one more iteration to be read in: on the last allowed
-				// step nothing is spent on it, and the turn ends on the output
-				// limit, which is what cut it, rather than on the step limit.
-				if strings.TrimSpace(response.Content) == "" && outputLimitRecoveries < maxOutputLimitRecoveries &&
-					turn+1 < maxTurns && ctx.Err() == nil && !a.state.IsUserCancelledTurn() && retryAllowance.TakeRetry() {
+				// A step the output limit cut off is not an answer to end the turn
+				// on, and a replay of the same request would hit the same cap, so
+				// the model is asked again in words, a bounded number of times
+				// (output_limit.go): to be brief and split large writes when the
+				// step produced nothing the agent can act on - no visible text,
+				// only thinking or nothing at all - or when its last tool call was
+				// cut off and dropped; to go on exactly where it stopped when it
+				// was cut off in the middle of visible text. A step that said
+				// nothing stays in the transcript and leaves the LLM-facing
+				// history, like the empty-answer recovery below; text stays in
+				// both, the user having read it.
+				if mayAskAfterOutputLimit(turn) {
+					nudge := outputLimitStepNudge(response.Content, cutCall)
 					outputLimitRecoveries++
-					messages = emptyRecoveryProjection(messages, outputLimitNudge)
+					standing = append(standing, nudge)
+					messages = emptyRecoveryProjection(messages, nudge)
 					nextCallReason = "output_limit_nudge"
-					a.log.Warn("model hit its output limit with nothing to act on; asking for a shorter step",
+					a.log.Warn("model hit its output limit; asking it again in words",
 						"recovery", nextCallReason, "attempt", outputLimitRecoveries, "output_tokens", response.OutputTokens,
+						"visible_text", strings.TrimSpace(response.Content) != "", "cut_tool_call", cutCall != nil,
 						"retries_remaining", retryAllowance.Snapshot().Remaining)
 					continue
 				}
-				a.outputLimitRecoveriesSpent = outputLimitRecoveries
-				return string(acp.StopReasonMaxTokens), nil
+				return endOnOutputLimit()
 			}
 			if ctx.Err() != nil || a.state.IsUserCancelledTurn() {
 				return string(acp.StopReasonCancelled), nil
@@ -1551,6 +1616,7 @@ func (a *Agent) runReActLoop(
 					return string(acp.StopReasonMaxTurns), nil
 				}
 				emptyContinuations++
+				standing = append(standing, emptyAssistantContinuationNudge)
 				messages = emptyRecoveryProjection(messages, emptyAssistantContinuationNudge)
 				nextCallReason = "empty_nudge"
 				a.log.Warn("model answered with no text and no tool call; nudging for an answer",
@@ -1701,6 +1767,28 @@ func (a *Agent) runReActLoop(
 			toolEnv.WebSearch = webSearchSettings(a.cfg)
 			toolEnv.PreviewServer = previewServerSettings(a.cfg)
 			toolEnv.ConfigReloaded = false
+		}
+		// A step the output limit cut off inside its last tool call. The calls
+		// before that one have run and their results are in the history; the cut
+		// call is left out of it, so the model is told, after those results,
+		// that it was dropped. The calls that ran are progress for the allowance
+		// of agent.llm_retry_max, which starts afresh below, but the step was
+		// cut off all the same: the count of consecutive cut-off steps goes on,
+		// and so does the message standing at the end of the history, which a
+		// rebuild from the transcript puts back.
+		if cutCall != nil {
+			if mayAskAfterOutputLimit(turn) {
+				nudge := cutOffToolCallNudge(cutCall.Name)
+				messages = append(messages, llm.Message{Role: llm.RoleUser, Content: nudge})
+				recoveries := outputLimitRecoveries + 1
+				resetRetries("output_limit_nudge")
+				outputLimitRecoveries, standing = recoveries, []string{nudge}
+				a.log.Warn("model hit its output limit inside a tool call; asking it again in words",
+					"recovery", nextCallReason, "attempt", recoveries, "output_tokens", response.OutputTokens,
+					"tool", cutCall.Name, "calls_run", len(response.ToolCalls))
+				continue
+			}
+			return endOnOutputLimit()
 		}
 		// The model made progress (executed tool calls), so reset the empty-turn
 		// counter. The give-up notice is for CONSECUTIVE stalls (no answer and no
@@ -2416,6 +2504,12 @@ func (a *Agent) currentToolDefinitions(mode string) []llm.ToolDefinition {
 // so the LLM sees the full skill instructions immediately before the user's request.
 // The stored history content is never modified — only the slice sent to the LLM differs.
 func (a *Agent) buildMessages(systemPrompt string) []llm.Message {
+	return a.buildMessagesFrom(systemPrompt, a.state.GetMessages())
+}
+
+// buildMessagesFrom is buildMessages over stored, a transcript or the part of it
+// a request is built from.
+func (a *Agent) buildMessagesFrom(systemPrompt string, stored []llm.Message) []llm.Message {
 	// After a compaction only the last summary and the messages after it are
 	// replayed to the LLM; earlier history stays in the transcript for the UI.
 	// Read/grep result eviction is applied at the provider.Stream send boundary
@@ -2424,7 +2518,7 @@ func (a *Agent) buildMessages(systemPrompt string) []llm.Message {
 	// replayed exactly as it was stored: what a /skill or an @mention brought
 	// was written into it when it was sent (mentions.go), so no request
 	// rewrites an earlier message and the provider's cached prefix holds.
-	history := session.MessagesForLLM(a.state.GetMessages())
+	history := session.MessagesForLLM(stored)
 	// UI-only rows (a bare plan document between a call and its result) must be
 	// out of the analysis: they would cut a batch's contiguous result chain and
 	// make a healthy pair look misplaced.

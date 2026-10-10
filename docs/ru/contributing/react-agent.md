@@ -278,7 +278,7 @@ messages: [
      turn is removed from the LLM-facing message slice (the transcript keeps
      it, with signed thinking preserved). A reply stopped at `max_tokens` is
      not replayed: the same request would hit the same cap, and the
-     output-limit nudge below handles it. Consumes one slot.
+     output-limit recovery below handles it. Consumes one slot.
    - **Wording nudges.** If the re-issue also comes back empty, up to
      two nudges (**`maxEmptyAssistantContinuations`**) are sent, each consuming
      one slot and a normal **`max_turns`** iteration. The plain replay uses
@@ -286,27 +286,57 @@ messages: [
      The nudge projection also removes the empty assistant message from the
      LLM-facing history. If an auto-compaction or a provider recovery
      rebuilds that history between attempts, the pending recovery projection
-     and its nudges are restored; signed reasoning stays in the transcript. After the budget or nudge limit is exhausted the turn
+     and the nudges that still stand at its end are restored; signed reasoning
+     stays in the transcript. After the budget or nudge limit is exhausted the turn
      ends with **`StopReasonRefused`**.
-   - **Output-limit nudge.** A step that stops at `max_tokens`
-     (`finish_reason: "length"`) with no tool call and no visible text - only
-     thinking, or nothing - is answered with **`outputLimitNudge`** instead of
-     ending the turn: the previous step hit the output limit before it
-     produced an answer or a tool call, keep the reasoning short, split a
-     large file write or edit into several smaller tool calls. The empty step
-     stays in the transcript. It is left out of every request of the turn, and
-     the nudge is appended at the end of the history, so the cached prefix is
-     untouched. A history rebuilt between the attempts (an auto-compaction, a
-     provider recovery) restores the pending nudges and leaves the empty step
-     out again. At most **`maxOutputLimitRecoveries`** (2) in
-     a row. Each consumes one slot and a normal **`max_turns`** iteration
-     (on the last iteration the turn ends on the output limit, not on the step
-     limit), so
-     `llm_retry_max: 0` turns it off, and tool progress or a follow-up resets
-     the count. A step that already wrote visible text ends the turn as before.
-     Subagents and scheduled runs take the same path. When the nudges are
-     spent the turn ends with **`StopReasonMaxTokens`** and a notice
-     (**`outputLimitNotice`**) that says the model was already asked.
+   - **Output-limit recovery.** A step that stops at `max_tokens`
+     (`finish_reason: "length"`) does not end the turn and is never replayed,
+     because the same request would hit the same cap. It is answered with a
+     message appended at the end of the history, local to the request and
+     never persisted, chosen by what the step left behind (output_limit.go):
+     - Nothing to act on (no visible text, no tool call - only thinking, or
+       nothing): **`outputLimitNudge`** - keep the reasoning short, split a
+       large file write or edit into several smaller tool calls. The empty step
+       stays in the transcript and is left out of every request of the turn.
+     - Visible text that stops partway: **`outputLimitContinueNudge`** -
+       continue exactly where it stopped without repeating, keep the step
+       short. The text stays in the transcript and in the history, because the
+       user read it. The continuation is the next assistant message. No event
+       marks the seam: a live surface appends the chunks to the message it is
+       drawing, and a reloaded transcript shows two assistant messages in a
+       row, as after a provider recovery.
+     - A last tool call with arguments that are not a whole JSON document
+       (**`cutOffToolCall`**; empty arguments are a call that takes none and
+       runs): **`cutOffToolCallNudge`** names the tool (a
+       plain identifier only), says the call was cut off and not run, and asks
+       for several smaller calls. Only the last call can be cut; an earlier
+       call that does not parse is a model error and runs, and fails, as
+       before. The cut call never runs - no permission prompt, no hooks - and
+       is left out of the stored assistant message, so the tool-call pairing
+       stays whole and no provider is sent half a JSON document. Its pending
+       row closes as `failed` and its record in the tool-call store says why.
+       The calls before it were written whole and run in order; their results
+       come first, then the message.
+
+     The history only grows at its end, so the cached prefix is untouched. The
+     loop keeps one ordered list of the messages that stand at the end of the
+     working history (**`standing`**): every recovery appends the message it
+     sent, in the words it was sent in, and a step that leaves text or a tool
+     call in the history clears it, since what came before was answered. A
+     history rebuilt from the transcript between the attempts (an
+     auto-compaction, a provider recovery) puts that list back
+     (**`restoreRecoveries`**) and leaves the empty steps out again; the answer
+     a provider failure kept goes after the list, followed by the request to go
+     on. At most
+     **`maxOutputLimitRecoveries`** (2) cut-off steps in a row. Each consumes
+     one slot and a normal **`max_turns`** iteration (on the last iteration the
+     turn ends on the output limit, not on the step limit), so
+     `llm_retry_max: 0` turns it off. A follow-up and a step that is not cut
+     off reset the count; a cut-off step that also ran whole calls does not,
+     though those calls restart the allowance. Subagents and scheduled runs
+     take the same path. When the retries are spent the turn ends with
+     **`StopReasonMaxTokens`** and a notice (**`outputLimitNotice`**) that
+     says the model was already asked.
    - **Provider recovery.** A call that failed because of the provider's lane
      (**`llm.IsTransientProviderError`**: 5xx, a cut or silent stream - an event
      cut inside its JSON included, a stream frame that is not JSON at all not -
@@ -486,7 +516,7 @@ messages: [
 
 ## Обработка ошибок в цикле ReAct
 
-- Ошибка API LLM - попытки берутся из общего бюджета шага `agent.llm_retry_max` (по умолчанию 3, явный 0 отключает); повторы транспорта, повторная отправка после тайм-аута первого токена, восстановление после пустого ответа и просьба сократить шаг после упора в предел вывода делят один пул; бюджет сбрасывается, когда инструменты продвигают работу, и не ограничивает все вызовы LLM за весь ход;
+- Ошибка API LLM - попытки берутся из общего бюджета шага `agent.llm_retry_max` (по умолчанию 3, явный 0 отключает); повторы транспорта, повторная отправка после тайм-аута первого токена, восстановление после пустого ответа и восстановление после упора в предел вывода делят один пул; бюджет сбрасывается, когда инструменты продвигают работу, и не ограничивает все вызовы LLM за весь ход;
 - Поток LLM завис (после первых байтов ничего не приходит в течение `llm_stream_idle_timeout_ms`) - частичный ответ сохраняется, ход завершается ошибкой с указанием зависания; повтор в пределах оставшегося общего бюджета выполняется, только если ничего не было доставлено;
 - Ошибка выполнения инструмента - ошибка возвращается как наблюдение, следующий шаг решает LLM;
 - Отказ в разрешении - возвращается наблюдение "permission denied";
@@ -494,4 +524,4 @@ messages: [
 - Слишком длинный контекст - старые сообщения сжимаются в сводку, работа продолжается со сводкой;
 - Отмена - все операции прерываются, возвращается причина остановки `cancelled`.
 
-<!-- docsgen:source sha256=113b35cb4fcbc9dc -->
+<!-- docsgen:source sha256=0efcfa6355e2a022 -->

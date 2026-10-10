@@ -35,6 +35,14 @@ func TestPromptCacheRetryBudgetKeepsThePrefix(t *testing.T) {
 		{"output limit twice", []string{"max_tokens", "max_tokens", "answer"}, []int{0, 1, 2}},
 		{"output limit then empty answer", []string{"max_tokens", "reasoning", "reasoning", "answer"}, []int{0, 1, 1, 2}},
 		{"output limit then tool progress", []string{"max_tokens", "tool", "max_tokens", "answer"}, []int{0, 1, 3, 4}},
+		// A text cut off partway stays, and the message that asks the model to go
+		// on follows it. A tool call cut off partway is left out; what the
+		// request gains is the calls that were whole, their results and the message.
+		{"output limit in the middle of a text", []string{"text-max", "answer"}, []int{0, 2}},
+		{"output limit in the middle of a text twice", []string{"text-max", "text-max", "answer"}, []int{0, 2, 4}},
+		{"output limit in a tool call", []string{"cut-tool", "answer"}, []int{0, 1}},
+		{"output limit in a tool call after a whole one", []string{"tool-cut", "answer"}, []int{0, 3}},
+		{"output limit in a tool call then tool progress", []string{"cut-tool", "tool", "cut-tool", "answer"}, []int{0, 1, 3, 4}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newRetryBudgetFixture(t, nil, 10, tc.replies...)
