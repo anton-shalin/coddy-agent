@@ -297,6 +297,9 @@ type messageRow struct {
 		} `json:"function"`
 	} `json:"tool_calls,omitempty"`
 	CompactionSummary bool `json:"compaction_summary,omitempty"`
+	// Truncated marks an assistant row the output limit cut off; the
+	// assistant row after it goes on from its last character.
+	Truncated bool `json:"truncated,omitempty"`
 	// BackgroundWake marks the first message of a turn a finished background
 	// task started; it is replayed as the wake, not as a user message.
 	BackgroundWake *llm.BackgroundWake `json:"background_wake,omitempty"`

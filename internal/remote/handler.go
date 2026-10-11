@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/EvilFreelancer/coddy-agent/internal/acp"
+	"github.com/EvilFreelancer/coddy-agent/internal/llm"
 	"github.com/EvilFreelancer/coddy-agent/internal/session"
 	"github.com/EvilFreelancer/coddy-agent/internal/version"
 )
@@ -794,6 +795,16 @@ func hasReasoningLevel(levels []string, value string) bool {
 	return false
 }
 
+// replayedRowMessage is a REST message row as the transcript message it was,
+// as far as a replay reads it.
+func replayedRowMessage(row messageRow) llm.Message {
+	m := llm.Message{Role: llm.Role(row.Role), Content: row.Content, Truncated: row.Truncated}
+	for _, tc := range row.ToolCalls {
+		m.ToolCalls = append(m.ToolCalls, llm.ToolCall{ID: tc.ID, Name: tc.Function.Name})
+	}
+	return m
+}
+
 // replayMessages mirrors Manager.replayConversation over REST message rows.
 func (h *Handler) replayMessages(sessionID string, rows []messageRow) {
 	sender := h.currentSender()
@@ -801,7 +812,11 @@ func (h *Handler) replayMessages(sessionID string, rows []messageRow) {
 		return
 	}
 	toolNames := map[string]string{}
+	// before is what the replay has passed so far, as much of each row as the
+	// join of a continued answer reads (session.ReplayedAssistantText).
+	before := make([]llm.Message, 0, len(rows))
 	for _, row := range rows {
+		before = append(before, replayedRowMessage(row))
 		switch row.Role {
 		case "user":
 			if row.BackgroundWake != nil {
@@ -821,7 +836,7 @@ func (h *Handler) replayMessages(sessionID string, rows []messageRow) {
 				})
 			}
 		case "assistant":
-			if text := strings.TrimSpace(row.Content); text != "" {
+			if text := session.ReplayedAssistantText(before[:len(before)-1], before[len(before)-1]); text != "" {
 				_ = sender.SendSessionUpdate(sessionID, acp.MessageChunkUpdate{
 					SessionUpdate: acp.UpdateTypeAgentMessageChunk,
 					Content:       acp.ContentBlock{Type: acp.ContentTypeText, Text: text},

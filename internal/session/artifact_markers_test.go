@@ -227,8 +227,8 @@ func TestReplayedAssistantText(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.msg.Role = llm.RoleAssistant
-			if got := replayedAssistantText(tc.before, tc.msg); got != tc.want {
-				t.Fatalf("replayedAssistantText = %q, want %q", got, tc.want)
+			if got := ReplayedAssistantText(tc.before, tc.msg); got != tc.want {
+				t.Fatalf("ReplayedAssistantText = %q, want %q", got, tc.want)
 			}
 		})
 	}
