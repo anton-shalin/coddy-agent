@@ -121,3 +121,31 @@ func TestUnfinishedToolCallIsNeverRunWhateverStoppedTheStep(t *testing.T) {
 		})
 	}
 }
+
+// TestToolCallsOfAServerWithoutBlockStopsRun: an Anthropic-compatible server
+// that sends no content_block_stop at all says nothing about where a block
+// ended. A step that stopped to call its tools has them run, as before the
+// provider could report a call unfinished.
+func TestToolCallsOfAServerWithoutBlockStopsRun(t *testing.T) {
+	const callID, tool = "call_plan", "coddy_todo_plan_read"
+	open := func(block []sseFrame) []sseFrame { return block[:len(block)-1] } // without its content_block_stop
+	answer := anthropicWireMessage("tool_use", open(anthropicWireText(0, "Reading the plan.")), open(anthropicWireToolUse(1, callID, tool, `{}`)))
+	wire, p := wireProvider(t, "anthropic", answer, wireDoneAnswer("anthropic"))
+	ag, st, sender := cutCallAgent(t, p, nil)
+
+	stop, err := runOutputLimitTurn(ag)
+	if err != nil || stop != string(acp.StopReasonEndTurn) {
+		t.Fatalf("stop = %q, err = %v; want end_turn", stop, err)
+	}
+	bodies := wire.requests()
+	if len(bodies) != 2 {
+		t.Fatalf("provider requests = %d, want 2: the call runs and its result goes back", len(bodies))
+	}
+	if n := countString(wireStrings(t, bodies[1]), callID); n < 2 {
+		t.Fatalf("the second request carries the call id %d times, want the call and its result", n)
+	}
+	if got := sender.toolStatuses(callID); len(got) == 0 || got[len(got)-1] != "completed" {
+		t.Fatalf("statuses of the call = %q, want it completed", got)
+	}
+	requireWholePairing(t, st.GetMessages())
+}

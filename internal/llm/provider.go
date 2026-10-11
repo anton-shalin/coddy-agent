@@ -126,12 +126,14 @@ type ToolCall struct {
 	InputJSON string `json:"input"` // raw JSON arguments
 	// Incomplete says the provider reported that the answer ended inside this
 	// call, before the call was closed: an Anthropic tool_use block that got no
-	// content_block_stop, a Codex function_call item whose status is
-	// "incomplete". Only the agent reads it, right after the answer arrives, to
-	// tell a call the output limit cut off; it is never stored or sent. A call
-	// without it may be cut all the same - an Anthropic stream closes every
-	// block, the one the limit cut included - so the agent judges the arguments
-	// too, and a provider that closes no call (the chat completions streams)
+	// content_block_stop in a stream that closed some other block, a Codex
+	// function_call item whose status is "incomplete". Only the agent reads it,
+	// right after the answer arrives: such a call never runs, and at the output
+	// limit the model is asked to make it again. It is never stored or sent. A
+	// call without it may be cut all the same - an Anthropic stream closes
+	// every block, the one the limit cut included - so the agent judges the
+	// arguments too, and a provider that closes no call (the chat completions
+	// streams, an Anthropic-compatible server that sends no content_block_stop)
 	// never sets it.
 	Incomplete bool `json:"-"`
 }

@@ -149,12 +149,12 @@ func TestAnthropicCompatibleStreamToolUseWithoutContentBlockStopIsIncomplete(t *
 		},
 		{
 			name:      "arguments that happen to parse",
-			blocks:    [][]string{anthropicToolUseStart(0, "toolu_r", "read", wholeReadArguments)},
+			blocks:    [][]string{anthropicTextBlock(0, "Reading."), anthropicToolUseStart(1, "toolu_r", "read", wholeReadArguments)},
 			wantCalls: []ToolCall{{ID: "toolu_r", Name: "read", InputJSON: wholeReadArguments, Incomplete: true}},
 		},
 		{
 			name:      "no arguments at all",
-			blocks:    [][]string{anthropicToolUseStart(0, "toolu_n", "coddy_todo_plan_read")},
+			blocks:    [][]string{anthropicTextBlock(0, "Reading."), anthropicToolUseStart(1, "toolu_n", "coddy_todo_plan_read")},
 			wantCalls: []ToolCall{{ID: "toolu_n", Name: "coddy_todo_plan_read", InputJSON: "", Incomplete: true}},
 		},
 		{
@@ -383,5 +383,29 @@ func TestToolCallIncompleteIsNeverSerialized(t *testing.T) {
 	}
 	if back.Incomplete {
 		t.Errorf("a stored call came back marked incomplete: %+v", back)
+	}
+}
+
+// TestAnthropicCompatibleStreamWithoutAnyContentBlockStopMarksNothing: a server
+// that speaks Anthropic's Messages API but sends no content_block_stop at all
+// says nothing about where a block ended, so no call it streams is marked
+// Incomplete - at the output limit the arguments alone decide, and a step that
+// stopped to call its tools has every call run, as before the flag existed.
+func TestAnthropicCompatibleStreamWithoutAnyContentBlockStopMarksNothing(t *testing.T) {
+	for _, stop := range []string{"tool_use", "max_tokens", "end_turn"} {
+		t.Run(stop, func(t *testing.T) {
+			events := append(anthropicEvents(
+				anthropicToolUseStart(0, "toolu_r", "read", wholeReadArguments),
+				anthropicToolUseStart(1, "toolu_n", "coddy_todo_plan_read"),
+			), anthropicMessageEnd(stop)...)
+			resp, _ := streamAnthropicEvents(t, events)
+			want := []ToolCall{
+				{ID: "toolu_r", Name: "read", InputJSON: wholeReadArguments},
+				{ID: "toolu_n", Name: "coddy_todo_plan_read", InputJSON: ""},
+			}
+			if !reflect.DeepEqual(resp.ToolCalls, want) {
+				t.Errorf("tool calls = %+v, want %+v", resp.ToolCalls, want)
+			}
+		})
 	}
 }

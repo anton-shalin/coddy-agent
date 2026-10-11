@@ -129,6 +129,11 @@ func (p *anthropicProvider) Stream(ctx context.Context, messages []Message, tool
 		closed bool
 	}
 	toolUseMap := make(map[int64]*toolUseAccum)
+	// sawBlockStop says the stream closed at least one block, of any kind: only
+	// a server that closes blocks says anything by leaving one open. An
+	// Anthropic-compatible server that sends no content_block_stop at all
+	// leaves every block open, and none of its calls is reported unfinished.
+	sawBlockStop := false
 
 	// finalizeAnthropicToolUses returns every tool_use block started so far, in
 	// the order the model wrote them.
@@ -141,7 +146,7 @@ func (p *anthropicProvider) Stream(ctx context.Context, messages []Message, tool
 		var out []ToolCall
 		for _, i := range indexes {
 			acc := toolUseMap[i]
-			out = append(out, ToolCall{ID: acc.id, Name: acc.name, InputJSON: acc.input, Incomplete: !acc.closed})
+			out = append(out, ToolCall{ID: acc.id, Name: acc.name, InputJSON: acc.input, Incomplete: sawBlockStop && !acc.closed})
 		}
 		return out
 	}
@@ -185,6 +190,7 @@ func (p *anthropicProvider) Stream(ctx context.Context, messages []Message, tool
 			}
 
 		case anthropic.ContentBlockStopEvent:
+			sawBlockStop = true
 			if acc, ok := toolUseMap[e.Index]; ok {
 				acc.closed = true
 			}
