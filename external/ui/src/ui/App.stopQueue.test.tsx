@@ -754,6 +754,41 @@ test("a failed Stop of a watched turn resumes the relay after the frame it showe
   expect(screen.queryAllByText(/Watched answer/)).toHaveLength(1);
 });
 
+// The relay numbers every turn's frames from 1. A cursor kept from an earlier
+// turn would ask the next turn's relay to skip its own opening frames.
+test("a second turn watched through the relay shows its opening frames", async () => {
+  backend.replayTurn = true;
+  backend.activity.set(A, true);
+  await mount();
+  await waitFor(() => expect(backend.relays).toHaveLength(1));
+  await act(async () => {
+    backend.emitText(A, "First");
+    backend.emitText(A, " turn");
+    backend.emitText(A, " answer");
+  });
+  await screen.findByText("First turn answer");
+  backend.messages
+    .get(A)!
+    .push({ role: "assistant", content: "First turn answer" });
+  await act(async () => {
+    backend.relays[0]!.stream.raw("data: [DONE]\n\n");
+    backend.relays[0]!.stream.end();
+    backend.turn(A, false);
+  });
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument(),
+  );
+  // Another surface starts the next turn; its opening is out before this tab
+  // attaches.
+  backend.turnFrames.set(A, []);
+  backend.emitText(A, "Second opening");
+  await act(async () => {
+    backend.turn(A, true);
+  });
+  await waitFor(() => expect(backend.relays).toHaveLength(2));
+  expect(await screen.findByText("Second opening")).toBeInTheDocument();
+});
+
 test("a failed Stop does not bring an answered permission prompt back", async () => {
   backend.replayTurn = true;
   backend.override = (r) =>

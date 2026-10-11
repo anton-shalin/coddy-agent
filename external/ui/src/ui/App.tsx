@@ -751,8 +751,13 @@ export function App() {
     new Map<string, { superseded: boolean }>(),
   );
   const stoppedTurnBySidRef = useRef(new Map<string, number>());
-  /** Last composer relay frame id seen per session, so a re-attach can resume from it. */
-  const relayLastEventIdBySidRef = useRef<Map<string, string>>(new Map());
+  /** Last composer relay frame id seen per session, so a re-attach can resume from it,
+   *  with the activity generation of the turn it belongs to: every turn's relay numbers
+   *  its frames from 1, so a cursor kept from an earlier turn would skip the opening
+   *  frames of the next one. */
+  const relayLastEventIdBySidRef = useRef(
+    new Map<string, { id: string; generation: number }>(),
+  );
   /** Where this tab's reader of each session's running turn (its POST or a
    *  relay) got to, kept up to date while it reads. */
   const streamCursorBySidRef = useRef(new Map<string, ComposerStreamCursor>());
@@ -4903,6 +4908,15 @@ export function App() {
     });
   }
 
+  /** The frame cursor kept for the turn now running in `sid`, if it is that turn's. */
+  function relayCursorFor(sid: string): string {
+    const kept = relayLastEventIdBySidRef.current.get(sid);
+    if (!kept) return "";
+    if (kept.generation === turnActivity.generation(sid)) return kept.id;
+    relayLastEventIdBySidRef.current.delete(sid);
+    return "";
+  }
+
   async function rejoinComposerLiveStream(
     sid: string,
     baseline: TranscriptItem[],
@@ -4986,7 +5000,7 @@ export function App() {
       // a gap rather than a replay of the whole turn.
       const resumeFrom = resume
         ? String(resume.frames)
-        : (relayLastEventIdBySidRef.current.get(key) ?? "");
+        : relayCursorFor(key);
       const headers: Record<string, string> = { [HDR]: key };
       if (resumeFrom) {
         headers["Last-Event-ID"] = resumeFrom;
@@ -5093,7 +5107,10 @@ export function App() {
       };
 
       if (lastEventId) {
-        relayLastEventIdBySidRef.current.set(key, lastEventId);
+        relayLastEventIdBySidRef.current.set(key, {
+          id: lastEventId,
+          generation: turnActivity.generation(key),
+        });
       }
       // The relay had already dropped frames this tab never saw, so the transcript on
       // screen has a hole in it. The persisted messages are the source of truth.
