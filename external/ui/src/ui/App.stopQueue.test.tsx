@@ -810,6 +810,79 @@ test("a failed Stop does not bring an answered permission prompt back", async ()
   expect(screen.queryAllByText(/Tool output read/)).toHaveLength(1);
 });
 
+// A turn stopped while its permission prompt was open answered nothing: the
+// server records the call as refused and waits for nobody. The card does not
+// come back on the next read, and History does not mark the chat as waiting.
+test("a turn stopped at its permission prompt leaves nothing waiting for the reader", async () => {
+  await mount();
+  await send("Own A turn");
+  await act(async () => {
+    backend.emit(A, "tool_call", {
+      toolCallId: "call_1",
+      title: "run_command: make test",
+      kind: "execute",
+      status: "pending",
+    });
+    backend.emit(A, "permission", {
+      sessionId: A,
+      toolCall: {
+        toolCallId: "call_1",
+        title: "run_command: make test",
+        kind: "execute",
+      },
+      options: [
+        { optionId: "allow", name: "Allow", kind: "allow_once" },
+        { optionId: "reject", name: "Deny", kind: "reject_once" },
+      ],
+    });
+  });
+  await screen.findByRole("button", { name: /^Allow/ });
+  fireEvent.click(stop());
+  await waitFor(() =>
+    expect(backend.count(`/coddy/sessions/${A}/cancel`, "POST")).toBe(1),
+  );
+  backend.messages.get(A)!.push(
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: [
+        {
+          id: "call_1",
+          type: "function",
+          function: {
+            name: "run_command",
+            arguments: JSON.stringify({ command: "make test" }),
+          },
+        },
+      ],
+    } as never,
+    {
+      role: "tool",
+      content: "permission denied by user",
+      tool_call_id: "call_1",
+    } as never,
+  );
+  await act(async () => {
+    backend.turn(A, false);
+  });
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument(),
+  );
+  await waitFor(() =>
+    expect(backend.count(`/coddy/sessions/${A}/messages`)).toBeGreaterThan(2),
+  );
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+  expect(screen.queryByRole("button", { name: /^Allow/ })).toBeNull();
+  await act(async () => {
+    history.replaceState(null, "", "/#/history");
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  });
+  await screen.findByTestId(`session-idle-${B}`);
+  expect(screen.queryByTestId(`session-permission-${A}`)).toBeNull();
+});
+
 test("Stop releases its own stream at once, targets its original session and preserves partial text", async () => {
   const cancel = deferred<Response>();
   backend.override = (r) =>

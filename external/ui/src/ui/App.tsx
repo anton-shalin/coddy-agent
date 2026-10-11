@@ -106,6 +106,7 @@ import {
 import { pickStreamMutationBase } from "./chat/streamMutationBase";
 import { ShadowTranscriptCache } from "./chat/sessionTranscriptCache";
 import {
+  dropSettledPermissionPrompts,
   mergePermissionPromptsIntoTranscript,
   permissionPendingSessionIdsFromStorage,
   upsertPermissionPromptRecord,
@@ -3928,11 +3929,15 @@ export function App() {
     }
 
     if (!sameStream()) return null;
-    // Frames may have arrived while the messages request was in flight.
+    // Frames may have arrived while the messages request was in flight. They
+    // bring back no prompt the read has shown settled.
     const finalItems = localAligned
-      ? mergeTranscriptPreferLocalSuffix(
-          applied,
-          streamShadowBySidRef.current.get(sid),
+      ? dropSettledPermissionPrompts(
+          mergeTranscriptPreferLocalSuffix(
+            applied,
+            streamShadowBySidRef.current.get(sid),
+          ),
+          sid,
         )
       : applied;
     if (finalItems === applied) noteSnapshotRev(finalItems);
