@@ -273,14 +273,15 @@ func registryToolNamesForMode(cfg *config.Config, mode string) []string {
 // when the transcript holds none: the report of a child run. An answer the
 // output limit cut off and the model continued is several messages of the
 // transcript, and the report is all of it (session.ContinuedAnswer), not the
-// part after the last cut.
+// part after the last cut. The placement markers of shared files are for the
+// web UI and stay out of it.
 func lastAssistantPlainText(msgs []llm.Message) string {
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if msgs[i].Role != llm.RoleAssistant {
 			continue
 		}
 		if s := strings.TrimSpace(msgs[i].Content); s != "" {
-			return session.ContinuedAnswer(msgs, i)
+			return session.StripArtifactMarkers(session.ContinuedAnswer(msgs, i))
 		}
 	}
 	return ""

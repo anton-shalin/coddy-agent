@@ -1135,12 +1135,12 @@ func inlineFilesToImageParts(files []inlineFileJSON) []llm.ImagePart {
 // with: the last assistant message, with the truncated messages it goes on from
 // in front of it when the output limit cut the answer off and the model went on
 // (session.ContinuedAnswer), so the client gets the whole answer, not its last
-// part.
+// part, without the placement markers of shared files, which are for the web UI.
 func lastAssistantContent(st *session.State) string {
 	msgs := st.GetMessages()
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if msgs[i].Role == llm.RoleAssistant {
-			return session.ContinuedAnswer(msgs, i)
+			return session.StripArtifactMarkers(session.ContinuedAnswer(msgs, i))
 		}
 	}
 	return ""

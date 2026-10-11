@@ -37,6 +37,9 @@ func TestLastAssistantContentIsTheWholeContinuedAnswer(t *testing.T) {
 		{"a chain of three", []llm.Message{user, cut("a "), cut("b "), text("c")}, "a b c"},
 		{"an empty step between the parts", []llm.Message{user, cut("a "), empty, text("b")}, "a b"},
 		{"an answer after a plain one is its own", []llm.Message{user, text("first"), text("second")}, "second"},
+		// The placement markers of shared files are for the web UI: in front of
+		// a truncated text, at the end of any other.
+		{"markers stay out of the reply", []llm.Message{user, cut("<coddy_file id=\"a\"/>\n\nPress the butt"), text("on labelled Save.\n\n<coddy_file id=\"b\"/>")}, "Press the button labelled Save."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			st := &session.State{ID: "sess_last_answer", Messages: tc.msgs}

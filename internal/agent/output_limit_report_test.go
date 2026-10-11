@@ -51,7 +51,10 @@ func TestLastAssistantPlainTextIsTheWholeContinuedAnswer(t *testing.T) {
 		{"a continuation after a tool step", []llm.Message{user, call, tool, cut("a "), text("b")}, "a b"},
 		{"the chain stops at the tool step", []llm.Message{user, cut("a "), call, tool, text("b")}, "b"},
 		{"an answer after a plain one is its own", []llm.Message{user, text("first"), text("second")}, "second"},
-		{"a cut text that nothing went on from", []llm.Message{user, cut("and then ")}, "and then "},
+		{"a cut text that nothing went on from", []llm.Message{user, cut("and then ")}, "and then"},
+		// The placement markers of shared files are for the web UI: in front of
+		// a truncated text, at the end of any other; a report goes to a model.
+		{"markers stay out of the report", []llm.Message{user, cut("<coddy_file id=\"a\"/>\n\nREPORT: the cell is a butt"), text("on labelled Save.\n\n<coddy_file id=\"b\"/>")}, "REPORT: the cell is a button labelled Save."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := lastAssistantPlainText(tc.msgs); got != tc.want {
