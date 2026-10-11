@@ -1549,6 +1549,9 @@ func (a *Agent) runReActLoop(
 			response.ToolCalls = response.ToolCalls[:len(response.ToolCalls)-1]
 			a.dropCutOffToolCall(tc)
 		}
+		// A call its provider reported unfinished never runs, whatever stopped
+		// the step; only the output limit has the call made again in words.
+		a.dropUnfinishedToolCalls(response)
 
 		// Append assistant message to history.
 		reasonStore, reasonSig := reasoningForStorage(reasonTrim, reasoningBuf.String(), response)

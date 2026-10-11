@@ -24,13 +24,15 @@ type toolCallCutState struct {
 	name     string
 	// fragments are the argument fragments the call streams.
 	fragments []string
-	// cut says the output limit stopped the answer inside the call.
-	cut  bool
-	resp *Response
+	// cut says the answer stopped inside the call; filtered, that the content
+	// filter stopped it rather than the output limit.
+	cut      bool
+	filtered bool
+	resp     *Response
 }
 
 func (s *toolCallCutState) reset() {
-	s.provider, s.name, s.fragments, s.cut, s.resp = "", "", nil, false, nil
+	s.provider, s.name, s.fragments, s.cut, s.filtered, s.resp = "", "", nil, false, false, nil
 }
 
 func (s *toolCallCutState) answerStartsCall(provider, name string) error {
@@ -45,6 +47,11 @@ func (s *toolCallCutState) callArgumentsStream(arguments string) error {
 
 func (s *toolCallCutState) limitStopsInsideCall() error {
 	s.cut = true
+	return nil
+}
+
+func (s *toolCallCutState) filterStopsInsideCall() error {
+	s.cut, s.filtered = true, true
 	return nil
 }
 
@@ -68,7 +75,19 @@ func (s *toolCallCutState) streamAnswer() error {
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "text/event-stream")
-			writeCodexResponse(w, true, call)
+			if !s.filtered {
+				writeCodexResponse(w, true, call)
+				return
+			}
+			// The content filter ends the response the way the output limit
+			// does, with response.incomplete, and says so in its reason.
+			sse(w, "response.created", map[string]any{"response": map[string]any{"id": "resp_1", "status": "in_progress"}})
+			writeCodexFunctionCall(w, 0, call)
+			sse(w, "response.incomplete", map[string]any{"response": map[string]any{
+				"id": "resp_1", "status": "incomplete",
+				"incomplete_details": map[string]any{"reason": "content_filter"},
+				"usage":              map[string]any{"input_tokens": 9, "output_tokens": 4},
+			}})
 		}))
 		defer srv.Close()
 		resp, err = newCodexTestProvider(s.t, srv.URL).Stream(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, func(StreamChunk) {})
@@ -164,6 +183,7 @@ func TestToolCallCutByProviderFeature(t *testing.T) {
 			sc.Step(`^the call's arguments stream as (.+)$`, s.callArgumentsStream)
 			sc.Step(`^the output limit stops the answer inside the call$`, s.limitStopsInsideCall)
 			sc.Step(`^the call finishes before the output limit stops the answer$`, s.callFinishesBeforeLimit)
+			sc.Step(`^the content filter stops the answer inside the call$`, s.filterStopsInsideCall)
 			sc.Step(`^Coddy streams the answer$`, s.streamAnswer)
 			sc.Step(`^the answer stops at "([^"]*)"$`, s.answerStopsAt)
 			sc.Step(`^the call to "([^"]*)" is reported cut off$`, s.callIsReportedCut)

@@ -354,7 +354,11 @@ messages: [
        stays whole and no provider is sent half a JSON document. Its pending
        row closes as `failed` and its record in the tool-call store says why.
        The calls before it were written whole and run in order; their results
-       come first, then the message.
+       come first, then the message. A call the provider reported unfinished
+       never runs whatever stopped the step (**`dropUnfinishedToolCalls`**: a
+       Codex response the content filter ended can close the item it was
+       writing as `incomplete` too); its row closes as `failed` the same way,
+       and only at the output limit is the model asked to make it again.
 
      The history only grows at its end, so the cached prefix is untouched. The
      loop keeps one ordered list of the messages that stand at the end of the

@@ -116,11 +116,46 @@ func outputLimitStepNudge(content string, cutCall *llm.ToolCall) string {
 // itself is left out of the assistant message the loop stores, so it never
 // takes part in the tool-call pairing of the transcript.
 func (a *Agent) dropCutOffToolCall(tc llm.ToolCall) {
+	a.closeUnrunToolCall(tc, cutOffToolCallResult)
+}
+
+// unfinishedToolCallResult is what the row of a tool call its provider reported
+// unfinished says when no output limit cut it, and what the call's record in the
+// tool-call store holds.
+const unfinishedToolCallResult = "not run: the provider reported that the answer ended before the call was finished"
+
+// dropUnfinishedToolCalls leaves out of a response every tool call its provider
+// reported unfinished (llm.ToolCall.Incomplete) and closes the row each one
+// left open, whatever stopped the step: a call the provider says it did not
+// finish is never run. The output limit is not the only cause: a Codex response
+// the content filter ended (response.incomplete) can close the item it was
+// writing as "incomplete" as well. At the output limit cutOffToolCall has taken
+// such a call out already and the step is answered in words; under any other
+// stop reason it is not, and the turn goes on, or ends, as that stop reason
+// says.
+func (a *Agent) dropUnfinishedToolCalls(response *llm.Response) {
+	if response == nil {
+		return
+	}
+	var kept []llm.ToolCall
+	for _, tc := range response.ToolCalls {
+		if tc.Incomplete {
+			a.closeUnrunToolCall(tc, unfinishedToolCallResult)
+			continue
+		}
+		kept = append(kept, tc)
+	}
+	response.ToolCalls = kept
+}
+
+// closeUnrunToolCall finishes, as failed with the reason given, the row and the
+// tool-call record of a call that will never run.
+func (a *Agent) closeUnrunToolCall(tc llm.ToolCall, result string) {
 	sessionDir := ""
 	if st := sessionStatePtr(a.state); st != nil {
 		sessionDir = strings.TrimSpace(st.GetPersistedSessionDir())
 	}
-	a.finishToolCall(sessionDir, a.state.GetID(), tc, cutOffToolCallResult, nil, "failed")
+	a.finishToolCall(sessionDir, a.state.GetID(), tc, result, nil, "failed")
 }
 
 // stopsPartway says whether a step's text stops partway because the output limit

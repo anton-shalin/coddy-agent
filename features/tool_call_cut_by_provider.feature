@@ -16,6 +16,14 @@ Feature: A tool call the output limit cut off is told from a whole one
     And the call to "write" is reported cut off
     And the call keeps the arguments {"path":"a.go","content":"pack
 
+  Scenario: A Codex tool call the content filter cut off is reported cut
+    Given a Codex answer that starts a call to "write"
+    And the call's arguments stream as {"path":"a.go","content":"pack
+    And the content filter stops the answer inside the call
+    When Coddy streams the answer
+    Then the answer stops at "content_filter"
+    And the call to "write" is reported cut off
+
   Scenario: A Codex tool call that finished before the output limit is reported whole
     Given a Codex answer that starts a call to "read"
     And the call's arguments stream as {"path":"a.go"}
