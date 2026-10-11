@@ -1551,7 +1551,7 @@ func (a *Agent) runReActLoop(
 		}
 		// A call its provider reported unfinished never runs, whatever stopped
 		// the step; only the output limit has the call made again in words.
-		a.dropUnfinishedToolCalls(response)
+		droppedUnfinished := a.dropUnfinishedToolCalls(response)
 
 		// Append assistant message to history.
 		reasonStore, reasonSig := reasoningForStorage(reasonTrim, reasoningBuf.String(), response)
@@ -1626,6 +1626,14 @@ func (a *Agent) runReActLoop(
 			}
 			if ctx.Err() != nil || a.state.IsUserCancelledTurn() {
 				return string(acp.StopReasonCancelled), nil
+			}
+			// A step whose only output was calls its provider reported
+			// unfinished did answer: the provider ended it inside a call, under
+			// a stop reason that is not the output limit, and the call's row
+			// says so. It is not an empty answer to replay or to nudge with a
+			// message saying it held no tool call; the turn ends on it.
+			if droppedUnfinished > 0 && strings.TrimSpace(response.Content) == "" {
+				return string(acp.StopReasonEndTurn), nil
 			}
 			// First recovery is the plain replay: drop the empty turn from the
 			// LLM-facing slice so the request going out is byte for byte the one

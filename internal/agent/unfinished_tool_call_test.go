@@ -149,3 +149,29 @@ func TestToolCallsOfAServerWithoutBlockStopsRun(t *testing.T) {
 	}
 	requireWholePairing(t, st.GetMessages())
 }
+
+// TestALoneUnfinishedCallEndsTheTurnWithoutAnEmptyAnswerRecovery: a Codex
+// response the content filter ended while its only output was a function_call
+// item closes that item as "incomplete". The call is dropped and its row closes
+// as failed, and the turn ends there: the step did answer, so it is not an empty
+// answer to replay or to nudge with a message saying it held no tool call.
+func TestALoneUnfinishedCallEndsTheTurnWithoutAnEmptyAnswerRecovery(t *testing.T) {
+	const callID, tool = "call_filtered", "write"
+	answer := codexWireResponseEndedBy("content_filter",
+		codexWireCall(0, callID, tool, "incomplete", `{"path":"`+cutWritePath+`",`, `{"path":"`+cutWritePath+`",`))
+	wire, p := wireProvider(t, "codex", answer, wireDoneAnswer("codex"))
+	ag, st, sender := cutCallAgent(t, p, nil)
+
+	stop, err := runOutputLimitTurn(ag)
+	if err != nil || stop != string(acp.StopReasonEndTurn) {
+		t.Fatalf("stop = %q, err = %v; want end_turn", stop, err)
+	}
+	if n := len(wire.requests()); n != 1 {
+		t.Fatalf("provider requests = %d, want 1: no replay and no nudge after a step that only wrote a dropped call", n)
+	}
+	if got := sender.toolStatuses(callID); len(got) == 0 || got[len(got)-1] != "failed" {
+		t.Fatalf("the client was told %q about the row of the unfinished call, want it closed as failed", got)
+	}
+	requireNoFile(t, st, cutWritePath)
+	requireWholePairing(t, st.GetMessages())
+}

@@ -138,19 +138,26 @@ const unfinishedToolCallResult = "not run: the provider reported that the answer
 // step. The row and the tool-call record say the call was not run and why; a
 // step that goes on after whole calls ran sees their results and no trace of
 // the dropped one.
-func (a *Agent) dropUnfinishedToolCalls(response *llm.Response) {
+//
+// It reports how many calls it dropped. A step whose only output they were is
+// not an empty answer: it ends the turn rather than being replayed or nudged
+// with a message saying it held no tool call.
+func (a *Agent) dropUnfinishedToolCalls(response *llm.Response) int {
 	if response == nil {
-		return
+		return 0
 	}
 	var kept []llm.ToolCall
+	dropped := 0
 	for _, tc := range response.ToolCalls {
 		if tc.Incomplete {
 			a.closeUnrunToolCall(tc, unfinishedToolCallResult)
+			dropped++
 			continue
 		}
 		kept = append(kept, tc)
 	}
 	response.ToolCalls = kept
+	return dropped
 }
 
 // closeUnrunToolCall finishes, as failed with the reason given, the row and the
