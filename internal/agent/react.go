@@ -639,11 +639,16 @@ func (a *Agent) keepInterruptedAnswer(model, text, reasoning string, clockStart,
 		Content:             text,
 		Reasoning:           reasonTrim,
 		ReasoningDurationMs: reasoningMs,
-		// Not Truncated: the provider ended the stream wherever the failure hit
-		// it, and the step run again starts its answer over as often as it goes
-		// on from the last character, so the two are not one text. The history
-		// joins them with a blank line (joinAnswers) and the surfaces keep them
-		// apart, the notice of the failure between them.
+		// An answer of its own the failure cut off is not Truncated: the
+		// provider ended the stream wherever the failure hit it, and the step
+		// run again starts its answer over as often as it goes on from the last
+		// character, so the history joins the two with a blank line
+		// (joinAnswers). A part of a continued answer is another matter: the
+		// step was asked to go on exactly where a text the output limit cut off
+		// stopped, the step run again is asked to go on from this part, and
+		// every reader of the answer has to walk through it to the start
+		// (session.ContinuedAnswer), so it stays one text with them.
+		Truncated: strings.TrimSpace(text) != "" && session.FollowsTruncated(a.state.GetMessages()),
 		Model:     model,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	})

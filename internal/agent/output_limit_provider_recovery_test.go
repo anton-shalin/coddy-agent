@@ -163,11 +163,11 @@ func TestProviderRecoveryKeepsTheContinuationBeforeTheKeptAnswer(t *testing.T) {
 // the call that was to write the rest fails after streaming the start of it. The
 // request run again carries the cut text, that message, the kept start of the rest
 // and the provider's own message, in that order and as four messages: the kept
-// answer is not folded into the text it goes on from (it is not truncated, the
-// step run again may start it over), and the message that asked for it does not
-// move in front of the text. The next turn's history holds one assistant message:
-// the cut text and the kept start joined with nothing between, as they streamed,
-// then a blank line and what the step run again wrote.
+// answer is not folded into the text it goes on from within the turn, and the
+// message that asked for it does not move in front of the text. The kept start is
+// a part of the continued answer and is stored truncated, so the next turn's
+// history holds one assistant message: the cut text, the kept start and what the
+// step run again wrote, joined with nothing between, as they streamed.
 func TestProviderRecoveryDuringAContinuationKeepsTheMessagesInOrder(t *testing.T) {
 	const (
 		cutText = "Here is the first half of the module and then " // the whitespace at the end is part of the text
@@ -197,8 +197,8 @@ func TestProviderRecoveryDuringAContinuationKeepsTheMessagesInOrder(t *testing.T
 
 	stored := assistantMessages(st.GetMessages())
 	if len(stored) != 3 || !stored[0].Truncated || stored[0].Content != cutText ||
-		stored[1].Truncated || stored[1].Content != kept || stored[2].Truncated || stored[2].Content != "Done." {
-		t.Fatalf("the transcript stores %+v, want the cut text (truncated), the kept start as it streamed and the answer", stored)
+		!stored[1].Truncated || stored[1].Content != kept || stored[2].Truncated || stored[2].Content != "Done." {
+		t.Fatalf("the transcript stores %+v, want the cut text and the kept start (both truncated, as they streamed) and the answer", stored)
 	}
 
 	if _, err := ag.Run(context.Background(), []acp.ContentBlock{{Type: "text", Text: "next"}}); err != nil {
@@ -206,7 +206,7 @@ func TestProviderRecoveryDuringAContinuationKeepsTheMessagesInOrder(t *testing.T
 	}
 	next := p.seen[len(p.seen)-1]
 	requireNoAssistantInARow(t, next)
-	if got, want := assistantMessages(next), cutText+kept+"\n\nDone."; len(got) != 1 || got[0].Content != want {
+	if got, want := assistantMessages(next), cutText+kept+"Done."; len(got) != 1 || got[0].Content != want {
 		t.Fatalf("the next turn replays %+v, want one message holding %q", got, want)
 	}
 }

@@ -62,9 +62,10 @@ type Message struct {
 	// when there is one, goes on from its last character, the model having been
 	// asked to. The two are stored exactly as they were streamed at the join,
 	// with the whitespace there left alone, and a history built from them, like
-	// a reloaded transcript, joins them with nothing between. An answer a
-	// provider failure cut off is not marked: the step run again may start it
-	// over.
+	// a reloaded transcript, joins them with nothing between. An answer of its
+	// own a provider failure cut off is not marked, since the step run again
+	// may start it over; a part of a continued answer a provider failure cut
+	// off is, the step run again being asked to go on from it.
 	Truncated  bool       `json:"truncated,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"` // for RoleTool messages

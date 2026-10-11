@@ -3889,7 +3889,7 @@ func openAPISpec() map[string]interface{} {
 						},
 						"truncated": map[string]interface{}{
 							"type":        "boolean",
-							"description": "Coddy transcript extension: this assistant row's text stops partway because the model's output limit cut it off, and the assistant row after it, when there is one, goes on from its last character. Draw the two as one text, joined with nothing between; `content` is stored as streamed, whitespace at the join included.",
+							"description": "Coddy transcript extension: this assistant row's text stops partway because the model's output limit cut it off (or a provider failure cut off a part of an answer the model was continuing), and the assistant row after it, when there is one, goes on from its last character. Draw the two as one text, joined with nothing between; `content` is stored as streamed, whitespace at the join included.",
 						},
 						"background_wake": map[string]interface{}{
 							"type":                 "object",
