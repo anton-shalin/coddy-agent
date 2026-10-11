@@ -56,6 +56,8 @@ type acpSessionFeatureState struct {
 	// under through a symlink; listWire holds the session/list response.
 	realProjectDir string
 	listWire       []map[string]interface{}
+	// toolKinds maps a replayed tool call id to the ACP kind its tool must carry.
+	toolKinds map[string]string
 }
 
 func (s *acpSessionFeatureState) reset() error {
@@ -72,6 +74,7 @@ func (s *acpSessionFeatureState) reset() error {
 	s.preferredID = ""
 	s.realProjectDir = ""
 	s.listWire = nil
+	s.toolKinds = nil
 	s.stderr.Reset()
 	return nil
 }
@@ -140,6 +143,66 @@ func (s *acpSessionFeatureState) coddyACPReopensPersistedSession() error {
 	// Response, both replayed chunks, then the slash command catalog.
 	s.newWireCount = 4
 	return s.startACP("")
+}
+
+// coddyACPReopensSessionWithToolCalls seeds a session whose assistant turn
+// called every tool of the table, so session/new replays one tool_call per row.
+func (s *acpSessionFeatureState) coddyACPReopensSessionWithToolCalls(table *godog.Table) error {
+	s.sessionsRoot = filepath.Join(s.root, "sessions")
+	if err := os.MkdirAll(s.sessionsRoot, 0o755); err != nil {
+		return err
+	}
+	store := &session.FileStore{Root: s.sessionsRoot}
+	s.preferredID = "sess_reopened_tools"
+	dir, err := store.EnsureLayout(s.preferredID)
+	if err != nil {
+		return err
+	}
+	s.toolKinds = map[string]string{}
+	var calls []llm.ToolCall
+	for i, row := range table.Rows {
+		if i == 0 {
+			continue
+		}
+		id := fmt.Sprintf("call_%d", i)
+		calls = append(calls, llm.ToolCall{ID: id, Name: row.Cells[0].Value, InputJSON: "{}"})
+		s.toolKinds[id] = row.Cells[1].Value
+	}
+	seeded := &session.State{ID: s.preferredID, CWD: s.root, Mode: session.ModeAgent, SessionDir: dir}
+	seeded.ReplaceMessagesWithoutPersist([]llm.Message{
+		{Role: llm.RoleUser, Content: "touch the workspace"},
+		{Role: llm.RoleAssistant, ToolCalls: calls},
+	})
+	if err := store.Save(seeded); err != nil {
+		return err
+	}
+	// Response, the user chunk, one tool_call per row, then the slash command catalog.
+	s.newWireCount = 3 + len(calls)
+	return s.startACP("")
+}
+
+func (s *acpSessionFeatureState) replayedToolCallsCarryTheirKinds() error {
+	seen := 0
+	for _, msg := range s.newWire {
+		params, _ := msg["params"].(map[string]interface{})
+		update, _ := params["update"].(map[string]interface{})
+		if update["sessionUpdate"] != acp.UpdateTypeToolCall {
+			continue
+		}
+		id, _ := update["toolCallId"].(string)
+		kind, _ := update["kind"].(string)
+		if want := s.toolKinds[id]; kind != want {
+			return fmt.Errorf("tool call %s (%v) replayed with kind %q, want %q", id, update["title"], kind, want)
+		}
+		if !acp.IsToolKind(kind) {
+			return fmt.Errorf("tool call %s replayed with kind %q outside the ACP enum", id, kind)
+		}
+		seen++
+	}
+	if seen != len(s.toolKinds) {
+		return fmt.Errorf("replayed %d tool calls, want %d: %#v", seen, len(s.toolKinds), s.newWire)
+	}
+	return nil
 }
 
 func (s *acpSessionFeatureState) replayedTranscriptIncludes(text string) error {
@@ -493,6 +556,8 @@ func initializeACPSessionScenario(sc *godog.ScenarioContext) {
 
 	sc.Step(`^Coddy ACP has loaded skill "([^"]+)"$`, s.coddyACPHasLoadedSkill)
 	sc.Step(`^Coddy ACP reopens a persisted session holding an earlier exchange$`, s.coddyACPReopensPersistedSession)
+	sc.Step(`^Coddy ACP reopens a persisted session whose assistant called tools$`, s.coddyACPReopensSessionWithToolCalls)
+	sc.Step(`^every replayed tool call has the kind its tool maps to$`, s.replayedToolCallsCarryTheirKinds)
 	sc.Step(`^the replayed transcript includes "([^"]+)"$`, s.replayedTranscriptIncludes)
 	sc.Step(`^an ACP client creates a session$`, s.anACPClientCreatesASession)
 	sc.Step(`^the session/new response is sent before its session updates$`, s.sessionNewResponsePrecedesUpdates)
