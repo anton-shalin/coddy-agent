@@ -1631,16 +1631,15 @@ func (a *Agent) runReActLoop(
 			// unfinished did answer: the provider ended it inside a call, under
 			// a stop reason that is not the output limit, and the call's row
 			// says so. It is not an empty answer to replay or to nudge with a
-			// message saying it held no tool call; the turn ends on it.
-			if droppedUnfinished > 0 && strings.TrimSpace(response.Content) == "" {
-				return string(acp.StopReasonEndTurn), nil
-			}
+			// message saying it held no tool call; it ends the turn the way any
+			// other step does below, Stop hooks and queued messages included.
+			emptyAnswer := strings.TrimSpace(response.Content) == "" && droppedUnfinished == 0
 			// First recovery is the plain replay: drop the empty turn from the
 			// LLM-facing slice so the request going out is byte for byte the one
 			// that failed, and let the proxy hand it to another deployment. The
 			// transcript keeps that turn, because the user watched its reasoning
 			// stream in. Words come next, once a replay has not helped.
-			if strings.TrimSpace(response.Content) == "" && emptyReissues < maxEmptyAssistantReissues &&
+			if emptyAnswer && emptyReissues < maxEmptyAssistantReissues &&
 				len(messages) > 0 && messages[len(messages)-1].Role == llm.RoleAssistant && retryAllowance.TakeRetry() {
 				if turn+1 >= maxTurns {
 					return string(acp.StopReasonMaxTurns), nil
@@ -1652,7 +1651,7 @@ func (a *Agent) runReActLoop(
 					"recovery", nextCallReason, "retries_remaining", retryAllowance.Snapshot().Remaining)
 				continue
 			}
-			if strings.TrimSpace(response.Content) == "" && emptyContinuations < maxEmptyAssistantContinuations && retryAllowance.TakeRetry() {
+			if emptyAnswer && emptyContinuations < maxEmptyAssistantContinuations && retryAllowance.TakeRetry() {
 				if turn+1 >= maxTurns {
 					return string(acp.StopReasonMaxTurns), nil
 				}
@@ -1671,6 +1670,9 @@ func (a *Agent) runReActLoop(
 			// turn — otherwise the user sees no assistant reply. Seen with gpt-oss /
 			// harmony endpoints that route the tool call through the reasoning channel.
 			if strings.TrimSpace(response.Content) == "" && !turnHadVisibleText {
+				if droppedUnfinished > 0 {
+					return string(acp.StopReasonRefused), fmt.Errorf("model produced no reply: the provider ended the answer inside a tool call (stop reason %q), and the call was not run", response.StopReason)
+				}
 				return string(acp.StopReasonRefused), fmt.Errorf("model produced no reply: only internal reasoning, with no answer text or tool call")
 			}
 			// A Stop hook may send the agent back to work with a follow-up that

@@ -368,9 +368,12 @@ messages: [
        get past (the content filter would read the same call). The row and the
        tool-call record say the call was not run and why; a step that goes on
        after whole calls ran sees their results and no trace of the dropped
-       one. A step whose only output was such a call ends the turn: it is not
-       an empty answer, so it is neither replayed nor answered with the
-       message that says it held no tool call.
+       one. A step whose only output was such a call is not an empty answer:
+       it is neither replayed nor answered with the message that says it held
+       no tool call, and the turn ends the way any turn ends - the Stop hooks
+       run, queued messages are read, and a turn that showed nothing ends with
+       the notice that the model produced no reply, naming the call that was
+       not run.
 
      The history only grows at its end, so the cached prefix is untouched. The
      loop keeps one ordered list of the messages that stand at the end of the
@@ -581,4 +584,4 @@ messages: [
 - Слишком длинный контекст - старые сообщения сжимаются в сводку, работа продолжается со сводкой;
 - Отмена - все операции прерываются, возвращается причина остановки `cancelled`.
 
-<!-- docsgen:source sha256=98d0ff0486b7c023 -->
+<!-- docsgen:source sha256=c5874d219bac1070 -->

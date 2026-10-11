@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/EvilFreelancer/coddy-agent/internal/acp"
+	"github.com/EvilFreelancer/coddy-agent/internal/hooks"
+	"github.com/EvilFreelancer/coddy-agent/internal/llm"
 	"github.com/EvilFreelancer/coddy-agent/internal/session"
 )
 
@@ -153,8 +155,10 @@ func TestToolCallsOfAServerWithoutBlockStopsRun(t *testing.T) {
 // TestALoneUnfinishedCallEndsTheTurnWithoutAnEmptyAnswerRecovery: a Codex
 // response the content filter ended while its only output was a function_call
 // item closes that item as "incomplete". The call is dropped and its row closes
-// as failed, and the turn ends there: the step did answer, so it is not an empty
-// answer to replay or to nudge with a message saying it held no tool call.
+// as failed, and the turn ends there the way any turn that showed nothing ends:
+// with the notice that the model produced no reply, saying why. The step did
+// answer, so it is not an empty answer to replay or to nudge with a message
+// saying it held no tool call.
 func TestALoneUnfinishedCallEndsTheTurnWithoutAnEmptyAnswerRecovery(t *testing.T) {
 	const callID, tool = "call_filtered", "write"
 	answer := codexWireResponseEndedBy("content_filter",
@@ -163,8 +167,9 @@ func TestALoneUnfinishedCallEndsTheTurnWithoutAnEmptyAnswerRecovery(t *testing.T
 	ag, st, sender := cutCallAgent(t, p, nil)
 
 	stop, err := runOutputLimitTurn(ag)
-	if err != nil || stop != string(acp.StopReasonEndTurn) {
-		t.Fatalf("stop = %q, err = %v; want end_turn", stop, err)
+	if stop != string(acp.StopReasonRefused) || err == nil ||
+		!strings.Contains(err.Error(), "model produced no reply") || !strings.Contains(err.Error(), "not run") {
+		t.Fatalf("stop = %q, err = %v; want the no-reply notice naming the call that was not run", stop, err)
 	}
 	if n := len(wire.requests()); n != 1 {
 		t.Fatalf("provider requests = %d, want 1: no replay and no nudge after a step that only wrote a dropped call", n)
@@ -203,4 +208,49 @@ func TestAnUnclosedLastBlockOfAToolUseStepRuns(t *testing.T) {
 		t.Fatalf("statuses of the call = %q, want it completed", got)
 	}
 	requireWholePairing(t, st.GetMessages())
+}
+
+// TestALoneUnfinishedCallAfterAShownAnswerRunsTheStopHook: a turn that already
+// showed text and ran a call, whose next step's only output was a call the
+// content filter cut, ends through the ordinary end of a turn: the Stop hook
+// fires, after one request for that step and no empty-answer recovery.
+func TestALoneUnfinishedCallAfterAShownAnswerRunsTheStopHook(t *testing.T) {
+	s := &hooksFeatureState{}
+	if err := s.reset(); err != nil {
+		t.Fatal(err)
+	}
+	defer s.close()
+	if err := s.hookRecordsAny(hooks.EventStop); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.agentSession(); err != nil {
+		t.Fatal(err)
+	}
+	readPlan := llm.ToolCall{ID: "call_plan", Name: "coddy_todo_plan_read", InputJSON: `{}`}
+	textAndCall := func(_ []llm.Message, _ []llm.ToolDefinition, onChunk func(llm.StreamChunk)) *llm.Response {
+		onChunk(llm.StreamChunk{TextDelta: "Reading the plan."})
+		onChunk(llm.StreamChunk{ToolCall: &readPlan})
+		return &llm.Response{Content: "Reading the plan.", ToolCalls: []llm.ToolCall{readPlan}, StopReason: "tool_use"}
+	}
+	filtered := func(_ []llm.Message, _ []llm.ToolDefinition, onChunk func(llm.StreamChunk)) *llm.Response {
+		cut := llm.ToolCall{ID: "call_filtered", Name: "write", InputJSON: `{"path":"a.go",`, Incomplete: true}
+		onChunk(llm.StreamChunk{ToolCallNamed: &llm.ToolCall{ID: cut.ID, Name: cut.Name}})
+		return &llm.Response{ToolCalls: []llm.ToolCall{cut}, StopReason: "content_filter"}
+	}
+	if err := s.runPrompt("go", textAndCall, filtered, answerStep("never asked")); err != nil {
+		t.Fatal(err)
+	}
+	if s.turnErr != nil || s.stopReason != "end_turn" {
+		t.Fatalf("the turn ended with err = %v, stop = %q; want end_turn", s.turnErr, s.stopReason)
+	}
+	if n := s.modelCalls(); n != 2 {
+		t.Fatalf("the model was called %d times, want 2: the step that ran a call, then the filtered one", n)
+	}
+	payload, err := s.recordedPayload()
+	if err != nil {
+		t.Fatalf("the Stop hook did not fire: %v", err)
+	}
+	if payload["hook_event_name"] != hooks.EventStop {
+		t.Fatalf("recorded event = %v, want %s", payload["hook_event_name"], hooks.EventStop)
+	}
 }

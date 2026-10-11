@@ -140,8 +140,10 @@ const unfinishedToolCallResult = "not run: the provider reported that the answer
 // the dropped one.
 //
 // It reports how many calls it dropped. A step whose only output they were is
-// not an empty answer: it ends the turn rather than being replayed or nudged
-// with a message saying it held no tool call.
+// not an empty answer: it is neither replayed nor nudged with a message saying
+// it held no tool call, and it ends the turn through the ordinary end of a
+// turn (the Stop hooks, the queued messages, the notice of a turn that showed
+// nothing).
 func (a *Agent) dropUnfinishedToolCalls(response *llm.Response) int {
 	if response == nil {
 		return 0
