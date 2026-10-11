@@ -306,10 +306,12 @@ messages: [
        (`session.StripAssistantContent`); the placement markers of shared files
        go in front of a truncated text, never inside the joined one.
        No event marks the seam: a live surface appends the chunks to the
-       message it is drawing. Everything that reads the transcript back joins
-       the two with nothing between, passing over a step that came back empty
-       between them (`session.FollowsTruncated`): the history of the next turn
-       (`foldSplitAnswers` in `buildMessages`); a reloaded transcript in the
+       message it is drawing. These readers of the transcript join the two
+       with nothing between, passing over a step that came back empty between
+       them (`session.FollowsTruncated`): every history built from the
+       transcript - the next turn's, and a rebuild within the turn after a
+       provider failure or a compaction (`foldSplitAnswers` in
+       `buildMessages`); a reloaded transcript in the
        web UI (`transcriptFromMessages.ts`), which keeps them apart only where
        the stream drew them apart - the continuation began with thinking of its
        own, or a notice stands between them; a replay to the console, an ACP
@@ -320,7 +322,10 @@ messages: [
        `last_assistant_message` (`session.ContinuedAnswer`, without the
        placement markers). A paged read of the history never starts or ends a
        page between them (`session.PageMessages`). Telegram and Pachca read
-       nothing back: they stream the whole answer into one message.
+       nothing back: they stream the whole answer into one message. The goal
+       supervisor's digest of a turn (`goal_digest.go`) does not join them: it
+       reads each assistant message on its own, so the parts before the last
+       are steps of the turn and the last part alone is its closing claim.
        Assistant messages that follow each other without that mark (the text
        before a cut-off tool call and the step after it, an answer a provider
        failure cut off and the step run again after it) are joined in the
