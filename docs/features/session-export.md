@@ -48,7 +48,7 @@ The export is built before the `/export` row lands in the transcript, so the fil
 | Type | Content |
 |------|---------|
 | `user` | The prompt text, verbatim. Hydrated `@` mentions (`<coddy_attachment>` blocks) and uploaded files are reduced to an attachment list of paths and names; their bodies are not copied, and the gap they leave is closed. |
-| `assistant` | Reasoning, text, and tool calls paired with their results by `tool_call_id`; a call that showed the model a picture (`read` on an image file, [Images](images.md)) lists it under `pictures` by the copy kept with the session's assets. A copy of a picture or an uploaded file is named where the session's directory is now, even when the directory moved after the file was saved. A row with no text, reasoning, or calls (a cancelled turn) is skipped. |
+| `assistant` | Reasoning, text, and tool calls paired with their results by `tool_call_id`; a call that showed the model a picture (`read` on an image file, [Images](images.md)) lists it under `pictures` by the copy kept with the session's assets. A copy of a picture or an uploaded file is named where the session's directory is now, even when the directory moved after the file was saved. A row with no text, reasoning, or calls (a cancelled turn) is skipped. An answer the model's output limit cut off and the model continued is one entry, its parts joined as they streamed, as the web UI draws one bubble; a continuation that began with reasoning of its own stays an entry of its own. |
 | `tool_result` | A result whose call is not in the transcript. |
 | `compaction_summary` | A summary row inserted by `/compact` or automatic compaction. |
 | `plan_document` | A plan document row with its slug, name, and file path. |
@@ -82,7 +82,7 @@ The export is built before the `/export` row lands in the transcript, so the fil
 }
 ```
 
-Empty fields are omitted, with one exception: `tool_calls[].result` is present as `""` when the tool returned nothing and absent when the transcript holds no result for the call (a cancelled or still running turn). `tool_calls[].input` is the call's JSON arguments, or a JSON string when the model produced arguments that are not valid JSON. `tool_result` entries carry `tool_call_id` and `text`.
+Empty fields are omitted, with one exception: `tool_calls[].result` is present as `""` when the tool returned nothing and absent when the transcript holds no result for the call (a cancelled or still running turn). `tool_calls[].input` is the call's JSON arguments, or a JSON string when the model produced arguments that are not valid JSON. `tool_result` entries carry `tool_call_id` and `text`. An `assistant` entry whose text stops partway, because the turn ended where the output limit cut it off, carries `"truncated": true`.
 
 **JSON Lines** (`jsonl`): the first line is the header, `{"type":"session","version":1,...}` with the same fields as `session` above; every following line is one entry.
 
