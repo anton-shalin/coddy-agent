@@ -111,7 +111,7 @@ Clear the field to use the session model for summarization.
 
 ## Settings: tabs and form layout
 
-- The tabs read in groups: **Appearance** and **Sessions**; where the models come from (**LLM providers**, **Logical models**); the loop that runs them (**ReAct loop**, **Context compaction**, **Memory**); what the agent can do (**Tools and permissions**, **MCP servers**, **Skills**, **Subagents**, **Hooks**); what runs it without a person at the composer (**Scheduler**, **Gateways**); and the operation of the process (**Logger**, **Prompts**). **Prompts** holds the prompt templates and the instruction files and is always last.
+- The tabs read in groups: **Appearance** and **Sessions**; where the models come from (**LLM providers**, **Logical models**); the loop that runs them (**ReAct loop**, **Session goal**, **Context compaction**, **Memory**); what the agent can do (**Command safety (decisions)**, **Tools and permissions**, **MCP servers**, **Skills**, **Subagents**, **Hooks**); what runs it without a person at the composer (**Scheduler**, **Gateways**); and the operation of the process (**Logger**, **Prompts**). **Prompts** holds the prompt templates and the instruction files and is always last.
 - **Sessions** edits where the session bundles are stored (**Storage**, `sessions.dir`) above the table of stored sessions; the table itself acts at once, the storage path saves with **Save all**.
 - A tab's own **Enabled** switch opens the form, above every block (Subagents, Hooks, Memory, Context compaction, Scheduler). The other fields sit in fieldsets by meaning, for example **Model and turns**, **Retries**, **Stream timeouts**, **Loop guard** and **Usage limits** on **ReAct loop**; a list (definition directories, fallback models, component levels) is a block of its own beside them. Inside a nested block a list keeps its frame (the Telegram admins, user groups and per-chat overrides).
 - A list of values is its inputs, each with a trash button, and **Add** under them: no per-row label and no rule between rows. An entry of a list of objects is a frame of its own, without a numbered title.
@@ -402,7 +402,7 @@ Session title
 
 ### Session settings: permission chip, turn overrides, live mirror
 
-![The composer after a bypass from the dialog: the selectors end with a red Bypass chip, followed by "stub/qwen3.8-27b, 2 turns left"](../assets/session-settings/session-settings-composer-bypass-dark-1280.png)
+![The composer after a bypass from the dialog: the selectors end with a red Bypass chip, followed by "neuraldeep/qwen3.6-35b-a3b, 2 turns left"](../assets/session-settings/session-settings-composer-bypass-dark-1280.png)
 
 *The composer after the session was switched to bypass from a permission prompt and the model changed for two turns.*
 
@@ -479,7 +479,7 @@ Functional checklist for **Settings -> Logical models -> Reasoning levels**
 
 ![History grouped by folder, with a plus on the heading](../assets/sessions-history-grouping-dark-1280.png)
 
-*Grouped by folder: the heading is the folder name with its row count, and hovering it offers a new chat in that workspace. The first row is pinned*
+*Grouped by folder: the heading is the folder name, and the plus beside it starts a new chat in that workspace. The pinned row sits on top under Pinned*
 
 ![The pinned group, mid-drag by the row itself](../assets/sessions-history-pinned-dark-1280.png)
 
@@ -915,7 +915,7 @@ The chat transcript renders a flat list of UI message blocks. Each block has a `
 
 For the whole of a running turn, streaming text included, the typing dots carry a live status line (`TypingDotsMessage.tsx`, pure derivation in `chat/liveStatus.ts`, visual contract in `DESIGN.md`):
 
-![A running turn: 1m 54s, 2.6k tokens, 1 running task, Writing the answer](../assets/turn-progress-live-line-dark-1280.png)
+![A running turn: 18s, 99 tokens, 1 running task, Writing the answer](../assets/turn-progress-live-line-dark-1280.png)
 
 *The live line of a running turn: the turn clock, the generated tokens, the running background task and what the agent is doing*
 
@@ -1110,7 +1110,7 @@ Multiple requests keep the transcript's 10px spacing. A new request scrolls into
 
 ![Two background permission cards with the standard transcript spacing](../assets/subagents/chat-permissions-spaced-dark-1280.png)
 
-*The real ChatScreen rendered with two deterministic pending task rows, Dark theme, 1280px wide.*
+*Two background subagents of one turn asking for permission at the end of the parent chat, Dark theme, 1280px wide.*
 
 ![A background subagent asking for permission in its parent chat](../assets/subagents/chat-subagent-permission-dark-1280.png)
 
@@ -1730,7 +1730,7 @@ Automated checks:
 
 ![The swarm screen with relays, nodes and rings](../assets/swarm/map-dark-1280.png)
 
-*The swarm screen with relays, nodes and rings*
+*The swarm screen: this machine, the attached relay and the nodes one and two hops away*
 
 Guide: `docs/operate/swarm.md`. Visual contract: `DESIGN.md` (**Swarm screen**).
 

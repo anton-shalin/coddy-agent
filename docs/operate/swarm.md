@@ -217,9 +217,9 @@ like "this machine has no work".
 
 *The topology graph with a live relay*
 
-![A mounted node and its sessions](../assets/swarm/node-dark-1280.png)
+![A node driven through the relay](../assets/swarm/node-dark-1280.png)
 
-*A mounted node and its sessions*
+*A node driven through the relay: its folder and models in the composer, its name on the environment button*
 
 ![A permission prompt relayed through two relays](../assets/swarm/permission-two-relays-dark-1280.png)
 
@@ -246,8 +246,8 @@ wide as the documentation reader's, and the map fills it.
 **Choose a layout, then explore the canvas.** The map starts in **Tree layout**, the rooted view
 that shows hop tiers. The **Graph layout** is a deterministic rooted graph for inspecting rings and
 cross-links: the relay is its root, or the local computer is the root when the map shows the machine
-that started the connection. It trends down by shortest-route depth without putting every hop on a
-rigid horizontal row, and its links are smooth curves. The choice belongs only to this browser,
+that started the connection. It trends down by shortest-route depth: each relay's nodes fan out on an
+arc beneath it, chained relays hang deeper, and its links are straight lines. The choice belongs only to this browser,
 under localStorage key `coddy_swarm_layout`; it does not change the relay configuration or another
 browser. A saved legacy `star` value migrates to Graph; if the key is absent, unavailable or invalid,
 Tree remains the default.
@@ -262,7 +262,7 @@ camera inside changed graph bounds.
 
 ![The Graph layout with the canvas controls](../assets/swarm/map-graph-canvas-dark-1280.png)
 
-*The Graph layout: soft top-down placement, smooth links, and camera controls over the canvas.*
+*The Graph layout: the relay's nodes fanned out beneath it, with the camera controls over the canvas.*
 
 The route in use is an accent path. Every relay it crosses is outlined, with the relay the app is
 currently driving outlined more strongly; alternate routes remain visibly secondary. This makes a
