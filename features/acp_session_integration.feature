@@ -31,6 +31,12 @@ Feature: ACP session integrations
     When an ACP client creates a session
     Then every replayed tool call has the kind its tool maps to
 
+  Scenario: A streamed tool call is announced once and then updated
+    Given an ACP client has an active session whose model names a tool call before completing it
+    When the client sends a prompt
+    Then the tool call is announced with exactly one "tool_call"
+    And every later change of the tool call arrives as "tool_call_update"
+
   Scenario: Current mode updates use the ACP wire schema
     Given an ACP client has an active session
     When the client switches the mode to "plan"
