@@ -284,9 +284,9 @@ func TestAnthropicStreamCancelKeepsToolUseBehindText(t *testing.T) {
 	if resp == nil || resp.Content != "Writing." {
 		t.Fatalf("resp = %+v, want the text kept", resp)
 	}
-	// The stop came before the block's content_block_stop, so the stream says
-	// the answer ended inside the call.
-	want := []ToolCall{{ID: "toolu_a", Name: "write", InputJSON: `{"path":"a.go","content":"pack`, Incomplete: true}}
+	// A user stop is no output limit: the call is kept as it stands and is not
+	// reported unfinished (the turn ends on the stop, nothing runs).
+	want := []ToolCall{{ID: "toolu_a", Name: "write", InputJSON: `{"path":"a.go","content":"pack`}}
 	if !reflect.DeepEqual(resp.ToolCalls, want) {
 		t.Errorf("tool calls = %+v, want %+v", resp.ToolCalls, want)
 	}

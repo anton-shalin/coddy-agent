@@ -342,9 +342,11 @@ messages: [
        stands between the two there.
      - A last tool call the output limit cut off (**`cutOffToolCall`**): the
        provider said the answer ended inside it (**`llm.ToolCall.Incomplete`**:
-       an Anthropic block without its `content_block_stop` in a stream that
-       closes blocks - a compatible server that sends none says nothing - or a
-       Codex item whose status is `incomplete`), or it has arguments that are not a whole JSON
+       an Anthropic block of an answer the output limit ended without its
+       `content_block_stop`, in a stream that closes blocks - a compatible
+       server that sends none says nothing, and under `stop_reason: tool_use`
+       a block left open says nothing either - or a Codex item whose status is
+       `incomplete`), or it has arguments that are not a whole JSON
        document. Both count, since Anthropic closes every block, the cut one
        included. Without the provider's word, empty arguments are a call that
        takes none and runs. **`cutOffToolCallNudge`** names the tool (a
@@ -579,4 +581,4 @@ messages: [
 - Слишком длинный контекст - старые сообщения сжимаются в сводку, работа продолжается со сводкой;
 - Отмена - все операции прерываются, возвращается причина остановки `cancelled`.
 
-<!-- docsgen:source sha256=63d583b43faf084f -->
+<!-- docsgen:source sha256=98d0ff0486b7c023 -->

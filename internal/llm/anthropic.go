@@ -133,6 +133,9 @@ func (p *anthropicProvider) Stream(ctx context.Context, messages []Message, tool
 	// a server that closes blocks says anything by leaving one open. An
 	// Anthropic-compatible server that sends no content_block_stop at all
 	// leaves every block open, and none of its calls is reported unfinished.
+	// Nor is a call of an answer that stopped for any reason but the output
+	// limit: stop_reason tool_use says the model finished its calls, whatever a
+	// gateway did with the stop event of the last block.
 	sawBlockStop := false
 
 	// finalizeAnthropicToolUses returns every tool_use block started so far, in
@@ -146,7 +149,7 @@ func (p *anthropicProvider) Stream(ctx context.Context, messages []Message, tool
 		var out []ToolCall
 		for _, i := range indexes {
 			acc := toolUseMap[i]
-			out = append(out, ToolCall{ID: acc.id, Name: acc.name, InputJSON: acc.input, Incomplete: sawBlockStop && !acc.closed})
+			out = append(out, ToolCall{ID: acc.id, Name: acc.name, InputJSON: acc.input, Incomplete: stopReason == "max_tokens" && sawBlockStop && !acc.closed})
 		}
 		return out
 	}
