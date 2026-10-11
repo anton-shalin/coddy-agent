@@ -263,7 +263,7 @@ export function transcriptItemsFromMessages(p: {
       }
       const content = m.content || "";
       let textRow = -1;
-      if (joinsRow && content !== "") {
+      if (joinsRow && content.trim() !== "") {
         const row = next[joinAt] as Extract<
           TranscriptItem,
           { type: "assistant_message" }
@@ -301,6 +301,12 @@ export function transcriptItemsFromMessages(p: {
       }
       if (m.truncated === true && textRow >= 0 && textRow === next.length - 1) {
         continuableRow = textRow;
+      } else if (!content.trim() && tcs.length === 0) {
+        // A step that came back with no text and no tool call is not in the
+        // way, as on the server (session.FollowsTruncated): the answer after
+        // it still goes on from the cut text. Thinking it drew stands between
+        // them and keeps them apart, as the stream did.
+        continuableRow = joinAt;
       }
       return;
     }

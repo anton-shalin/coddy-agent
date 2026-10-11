@@ -539,6 +539,38 @@ describe("an answer cut off and continued", () => {
     ]);
   });
 
+  test("a step that came back empty between the two does not part them", () => {
+    // The empty-answer recovery stores a step with no text and no tool call;
+    // the server's join passes over it (session.FollowsTruncated), and so
+    // does the reload.
+    const msgs: RawSessionMessage[] = [
+      prompt,
+      cut("and then "),
+      { role: "assistant", content: "" },
+      { role: "assistant", content: "   " },
+      { role: "assistant", content: "the second half." },
+    ];
+    expect(shape(mapPage(msgs, 0, msgs.length))).toEqual([
+      "user:write it",
+      "answer:and then the second half.",
+    ]);
+  });
+
+  test("an empty step that thought is drawn and parts them, as the stream did", () => {
+    const msgs: RawSessionMessage[] = [
+      prompt,
+      cut("and then "),
+      { role: "assistant", content: "", reasoning: "Hmm." },
+      { role: "assistant", content: "the second half." },
+    ];
+    expect(shape(mapPage(msgs, 0, msgs.length))).toEqual([
+      "user:write it",
+      "answer:and then ",
+      "thinking:Hmm.",
+      "answer:the second half.",
+    ]);
+  });
+
   test("a chain of continuations is one row", () => {
     const msgs: RawSessionMessage[] = [
       prompt,
