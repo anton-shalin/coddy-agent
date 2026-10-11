@@ -4,11 +4,11 @@
 
 https://github.com/user-attachments/assets/753944db-3b53-4889-8972-1f2dde2480cb
 
-*Zed, три минуты. В репозитории файл лежит как [zed-acp.mp4](../../assets/video/zed-acp.mp4).*
+*Zed на версии 1.3.0, две минуты - селекторы, которые публикует Coddy, картинка, которую читает модель, `/goal` в свежем worktree, команда оболочки, которую проверка безопасности пропускает без запроса, и `/commit`. В репозитории файл лежит как [zed-acp.mp4](../../assets/video/zed-acp.mp4).*
 
 https://github.com/user-attachments/assets/7bdba217-2adb-4863-8a8a-d697a157cea1
 
-*VS Code с расширением ACP-клиента, четыре минуты. В репозитории файл лежит как [vscode-acp.mp4](../../assets/video/vscode-acp.mp4).*
+*VS Code с расширением ACP-клиента на версии 1.3.0, две минуты - селекторы, проверка безопасности команд в режиме accept edits, `/goal` с карточками правок и команды, `/commit`, сессия, восстановленная из дерева, и worktree. В репозитории файл лежит как [vscode-acp.mp4](../../assets/video/vscode-acp.mp4).*
 
 Coddy - ACP-сервер. `coddy acp` говорит по [Agent Client Protocol](https://agentclientprotocol.com/) через собственные stdin и stdout, поэтому редактор, плагин или скрипт, который реализует клиентскую сторону ACP, запускает бинарник и получает того же агента, что консоль и веб-интерфейс, - те же режимы и модели, ту же политику разрешений, те же скилы и те же бандлы сессий в `$CODDY_HOME`. В Coddy нет ничего специфичного для конкретного редактора - Zed, VS Code и харнес на Python подключаются одинаково.
 
@@ -128,4 +128,4 @@ coddy acp --remote nas02 --remote-token "$CODDY_REMOTE_TOKEN"
 
 Более общие сбои - бинарника нет в `PATH`, провайдер отвергает ключ, порт занят - описаны в разделе [Решение проблем](../getting-started/troubleshooting.md).
 
-<!-- docsgen:source sha256=aee3eb962f39bd63 -->
+<!-- docsgen:source sha256=8aa42b07f4b41192 -->

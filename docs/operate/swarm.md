@@ -2,7 +2,7 @@
 
 https://github.com/user-attachments/assets/fd4837ae-23d0-400e-8e60-52706755bb4b
 
-*A four-minute recording of a relay, two nodes and the aggregated session list, in the console and in the browser. The file is in the repository as [swarm.mp4](../assets/video/swarm.mp4).*
+*A three-minute recording on 1.3.0: two relays and three nodes in the console, then the relay as a remote of a laptop's web UI, the map canvas in Graph layout, a permission answered across two relays, and the Files and edits windows of a node behind both relays. The file is in the repository as [swarm.mp4](../assets/video/swarm.mp4).*
 
 A **swarm** is a set of coddy nodes reached through one or more **relays**. A relay is a
 stateless meeting point: nodes register into it, it carries requests to them, and it merges
