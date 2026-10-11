@@ -64,7 +64,7 @@ func TestOpenAPIDescribesATruncatedMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var doc interface{}
+	var doc map[string]interface{}
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatal(err)
 	}
