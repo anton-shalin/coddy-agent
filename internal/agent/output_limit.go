@@ -132,7 +132,12 @@ const unfinishedToolCallResult = "not run: the provider reported that the answer
 // writing as "incomplete" as well. At the output limit cutOffToolCall has taken
 // such a call out already and the step is answered in words; under any other
 // stop reason it is not, and the turn goes on, or ends, as that stop reason
-// says.
+// says. No message goes to the model then: the provider ended the answer
+// itself, for a reason writing the call again does not get past (the content
+// filter would read the same call), so asking for it again would only spend a
+// step. The row and the tool-call record say the call was not run and why; a
+// step that goes on after whole calls ran sees their results and no trace of
+// the dropped one.
 func (a *Agent) dropUnfinishedToolCalls(response *llm.Response) {
 	if response == nil {
 		return

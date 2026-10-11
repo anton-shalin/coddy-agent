@@ -360,6 +360,12 @@ messages: [
        Codex response the content filter ended can close the item it was
        writing as `incomplete` too); its row closes as `failed` the same way,
        and only at the output limit is the model asked to make it again.
+       Under another stop reason no message goes to the model: the provider
+       ended the answer itself, for a reason writing the call again does not
+       get past (the content filter would read the same call). The row and the
+       tool-call record say the call was not run and why; a step that goes on
+       after whole calls ran sees their results and no trace of the dropped
+       one.
 
      The history only grows at its end, so the cached prefix is untouched. The
      loop keeps one ordered list of the messages that stand at the end of the
