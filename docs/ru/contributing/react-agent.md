@@ -307,22 +307,32 @@ messages: [
        (`session.StripAssistantContent`); the placement markers of shared files
        go in front of a truncated text, never inside the joined one.
        No event marks the seam: a live surface appends the chunks to the
-       message it is drawing. A reloaded transcript in the web UI
-       (`transcriptFromMessages.ts`), a replay to a client
-       (`replayedAssistantText`) and the history of the next turn
-       (`foldSplitAnswers` in `buildMessages`) join the two with nothing
-       between; a paged read of the history never starts or ends a page
-       between them (`session.PageMessages`). The web UI keeps them apart only
-       when the continuation began with thinking, which the stream draws as a
-       row of its own, or a notice stands between them. Assistant messages that follow each other without
-       that mark (the text before a cut-off tool call and the step after it,
-       an answer a provider failure cut off and the step run again after it)
-       are joined in the history with a blank line, so a later turn never
-       sends two assistant messages in a row, which chat templates that insist
-       on alternation refuse; a step with signed reasoning keeps its message.
-       An answer a provider failure cut off is not marked `truncated`: the
-       stream ended wherever the failure hit it, and the step run again starts
-       the answer over as often as it goes on from the last character.
+       message it is drawing. Everything that reads the transcript back joins
+       the two with nothing between, passing over a step that came back empty
+       between them (`session.FollowsTruncated`): the history of the next turn
+       (`foldSplitAnswers` in `buildMessages`); a reloaded transcript in the
+       web UI (`transcriptFromMessages.ts`), which keeps them apart only where
+       the stream drew them apart - the continuation began with thinking of its
+       own, or a notice stands between them; a replay to the console, an ACP
+       client or a `--remote` console (`session.ReplayedAssistantText`); an
+       export (`BuildExportDocument`: one entry, `truncated` on an entry the
+       turn ended on); and the answer a turn hands over - a subagent's report,
+       the reply of a non-streaming request, the Stop hook's
+       `last_assistant_message` (`session.ContinuedAnswer`, without the
+       placement markers). A paged read of the history never starts or ends a
+       page between them (`session.PageMessages`). Telegram and Pachca read
+       nothing back: they stream the whole answer into one message.
+       Assistant messages that follow each other without that mark (the text
+       before a cut-off tool call and the step after it, an answer a provider
+       failure cut off and the step run again after it) are joined in the
+       history with a blank line, so a later turn never sends two assistant
+       messages in a row, which chat templates that insist on alternation
+       refuse; a step with signed reasoning keeps its message. An answer of its
+       own a provider failure cut off is not marked `truncated`: the stream
+       ended wherever the failure hit it, and the step run again starts the
+       answer over as often as it goes on from the last character. A part of a
+       continued answer a provider failure cut off is marked: the step run
+       again is asked to go on from it, so it stays one text with the rest.
        The requests of the turn itself are not touched: the local message
        stands between the two there.
      - A last tool call with arguments that are not a whole JSON document
@@ -547,4 +557,4 @@ messages: [
 - Слишком длинный контекст - старые сообщения сжимаются в сводку, работа продолжается со сводкой;
 - Отмена - все операции прерываются, возвращается причина остановки `cancelled`.
 
-<!-- docsgen:source sha256=3a41f9d200ca2b66 -->
+<!-- docsgen:source sha256=ee05adc1452ee59a -->
