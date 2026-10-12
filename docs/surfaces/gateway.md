@@ -903,7 +903,7 @@ What the bot does not take, it says in the chat rather than drop in silence:
 - a session whose model does not read images is told to pick one that does with `/model`, and nothing is downloaded;
 - a download that fails is reported in the chat, so the person can send the file again.
 
-The download goes through `gateways.telegram.proxy`, like every request of the bot. Somebody who is not an admin may send files too; the agent of such a turn reads nothing outside the working directory, so it sees the pictures and the text files it is shown, and cannot open a PDF from the assets.
+The download goes through `gateways.telegram.proxy`, like every request of the bot, from the file address of the Bot API origin; a self-hosted Bot API server started with `--local` answers with a path on its own disk instead, so files sent through it are reported as not downloaded. Somebody who is not an admin may send files too; the agent of such a turn reads nothing outside the working directory, so it sees the pictures and the text files it is shown, and cannot open a PDF from the assets.
 
 ## Pictures the agent looked at
 

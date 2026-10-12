@@ -191,7 +191,8 @@ func fileType(declared string, data []byte) string {
 	}
 	// The declared type is the client's word and goes into a data URL: only a
 	// well-formed media type is taken.
-	if declared, _, err := mime.ParseMediaType(declared); err == nil && declared != "" && !strings.HasPrefix(declared, "image/") {
+	// application/octet-stream says the client does not know the type.
+	if declared, _, err := mime.ParseMediaType(declared); err == nil && declared != "" && declared != "application/octet-stream" && !strings.HasPrefix(declared, "image/") {
 		return declared
 	}
 	return sniffed
@@ -259,6 +260,11 @@ func (b *Bot) downloadFile(ctx context.Context, bot *tgbotapi.BotAPI, fileID str
 	if file.FileSize > maxInboundFileBytes {
 		return nil, fmt.Errorf("getFile: the file is %d bytes, over the %d a bot downloads", file.FileSize, maxInboundFileBytes)
 	}
+	if path.IsAbs(file.FilePath) {
+		// A self-hosted Bot API server started with --local answers with a
+		// path on its own disk instead of a download address.
+		return nil, fmt.Errorf("getFile: the Bot API server answered with a path on its own disk (a server in --local mode), not a download address")
+	}
 	ctx, cancel := context.WithTimeout(ctx, fileDownloadTimeout)
 	defer cancel()
 	address := b.apiOrigin() + "/file/bot" + bot.Token + "/" + file.FilePath
@@ -309,9 +315,24 @@ func (c redactingClient) Do(req *http.Request) (*http.Response, error) {
 	var ue *url.Error
 	if err != nil && c.token != "" && errors.As(err, &ue) {
 		ue.URL = strings.ReplaceAll(ue.URL, c.token, "<token>")
+		// A redirect the client could not follow names its target in the
+		// wrapped error.
+		if inner := ue.Err; inner != nil && strings.Contains(inner.Error(), c.token) {
+			ue.Err = redactedError{text: strings.ReplaceAll(inner.Error(), c.token, "<token>"), inner: inner}
+		}
 	}
 	return resp, err
 }
+
+// redactedError is an error whose text had the bot's token taken out; it
+// still unwraps to the original, so a timeout is still told apart.
+type redactedError struct {
+	text  string
+	inner error
+}
+
+func (e redactedError) Error() string { return e.text }
+func (e redactedError) Unwrap() error { return e.inner }
 
 // pendingAlbum is an album whose items are still arriving.
 type pendingAlbum struct {

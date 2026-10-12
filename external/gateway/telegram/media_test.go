@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"image/color"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -536,6 +537,26 @@ func TestRedactingClientTakesTheTokenOut(t *testing.T) {
 	if strings.Contains(err.Error(), "SECRET") || !strings.Contains(err.Error(), "/bot<token>/setMyCommands") {
 		t.Fatalf("err = %q, want the token replaced", err)
 	}
+
+	// A redirect the client cannot follow names its target in the wrapped
+	// error; a timeout stays a timeout.
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "/file/bot123:SECRET/%zz")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer redirect.Close()
+	c = redactingClient{token: "123:SECRET", inner: &http.Client{}}
+	req, _ = http.NewRequest(http.MethodGet, redirect.URL+"/file/bot123:SECRET/documents/a.txt", nil)
+	if _, err = c.Do(req); err == nil || strings.Contains(err.Error(), "SECRET") {
+		t.Fatalf("a bad redirect: %v, want an error without the token", err)
+	}
+	slow := redactingClient{token: "123:SECRET", inner: &http.Client{Timeout: time.Nanosecond}}
+	req, _ = http.NewRequest(http.MethodGet, redirect.URL+"/bot123:SECRET/getMe", nil)
+	_, err = slow.Do(req)
+	var timeout interface{ Timeout() bool }
+	if err == nil || strings.Contains(err.Error(), "SECRET") || !errors.As(err, &timeout) || !timeout.Timeout() {
+		t.Fatalf("a timeout: %v, want a timeout without the token", err)
+	}
 }
 
 // A question asked right after an album comes after it: the album still
@@ -632,11 +653,39 @@ func TestFileTypeTakesOnlyAWellFormedDeclaredType(t *testing.T) {
 		{"application/octet-stream", pic, "image/png"},
 		{"text/csv; charset=utf-8", []byte("a,b"), "text/csv"},
 		{"text/csv,evil;base64", []byte("a,b"), "text/plain"},
+		{"application/octet-stream", []byte("%PDF-1.4\n"), "application/pdf"},
 		{"", []byte("%PDF-1.4\n"), "application/pdf"},
 		{"image/png", []byte("not a picture"), "text/plain"},
 	} {
 		if got := fileType(tc.declared, tc.data); got != tc.want {
 			t.Errorf("fileType(%q) = %q, want %q", tc.declared, got, tc.want)
 		}
+	}
+}
+
+// A self-hosted Bot API server started with --local answers getFile with a
+// path on its own disk: the bot says it could not download the file and
+// logs why, rather than asking the server for an address it does not serve.
+func TestLocalModeServerPathIsNotDownloaded(t *testing.T) {
+	logs := &logRecords{}
+	b, runner, f := mediaBot(t, true, logs)
+	msg := mustMedia(t, f, tgfake.IncomingMedia{IncomingMessage: tgfake.IncomingMessage{ChatID: 9, UserID: 9}, Type: "document", Data: []byte("notes"), FileName: "notes.txt"})
+	api := *f.api
+	api.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(r.URL.Path, "/getFile") {
+			body := `{"ok":true,"result":{"file_id":"x","file_unique_id":"ux","file_size":5,"file_path":"/var/lib/telegram-bot-api/123/documents/file_1.txt"}}`
+			return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+		}
+		if strings.HasPrefix(r.URL.Path, "/file/") {
+			t.Errorf("the bot asked for %s", r.URL.Path)
+		}
+		return http.DefaultTransport.RoundTrip(r)
+	})}
+	b.processMessage(context.Background(), &api, msg, privateKey(9))
+	if runner.turns() != 0 || len(f.repliesTo(9, msg.MessageID)) != 1 {
+		t.Fatalf("turns %d, answers %d: want no turn and one answer", runner.turns(), len(f.repliesTo(9, msg.MessageID)))
+	}
+	if rec, ok := logs.find("telegram: file download failed", map[string]any{"file": "notes.txt"}); !ok || !strings.Contains(rec["err"].(string), "--local") {
+		t.Fatalf("the log does not say why:\n%s", logs.raw())
 	}
 }
