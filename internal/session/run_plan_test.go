@@ -2,6 +2,7 @@ package session_test
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -419,5 +420,56 @@ func TestAskOnceTurnNeverRunsPlans(t *testing.T) {
 	}
 	if state.PendingPlanContext() != "" {
 		t.Fatal("the plan mention started a plan run in an ask turn")
+	}
+}
+
+// Before its turn is admitted a plan run reads the session's mode, not the
+// mode another running turn holds: a plan run started while an /ask --once
+// turn runs is refused because the session is busy, not because of a mode
+// that belongs to that other turn.
+func TestRunPlanWhileAnAskOnceTurnRunsIsRefusedAsBusy(t *testing.T) {
+	store := &session.FileStore{Root: filepath.Join(t.TempDir(), "sessions")}
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	runner := func(_ context.Context, st *session.State, _ []acp.ContentBlock, _ acp.UpdateSender) (string, error) {
+		if st.EffectiveMode() == string(session.ModeAsk) {
+			entered <- struct{}{}
+			<-release
+		}
+		return string(acp.StopReasonEndTurn), nil
+	}
+	mgr := session.NewManager(testConfig(), noopSender{}, runner, slog.Default(), t.TempDir(), store)
+	res, err := mgr.HandleSessionNew(context.Background(), acp.SessionNewParams{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := res.SessionID
+	dir, err := store.EnsureLayout(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := plans.Write(dir, "run-me", plans.DefaultContent("run-me", "Run me")); err != nil {
+		t.Fatal(err)
+	}
+
+	askDone := make(chan error, 1)
+	go func() {
+		_, err := mgr.HandleSessionPrompt(context.Background(), acp.SessionPromptParams{
+			SessionID: id,
+			Prompt:    []acp.ContentBlock{{Type: acp.ContentTypeText, Text: "/ask --once how does it work?"}},
+		})
+		askDone <- err
+	}()
+	<-entered
+	_, err = mgr.RunPlan(context.Background(), id, "run-me", nil)
+	close(release)
+	if askErr := <-askDone; askErr != nil {
+		t.Fatal(askErr)
+	}
+	if !errors.Is(err, session.ErrSessionTurnBusy) {
+		t.Fatalf("a plan run during another turn: err = %v, want the busy refusal", err)
+	}
+	if _, err := mgr.RunPlan(context.Background(), id, "run-me", nil); err != nil {
+		t.Fatalf("the plan run after the ask turn: %v", err)
 	}
 }
