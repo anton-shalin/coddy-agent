@@ -6,6 +6,7 @@ package cli
 // a question that allows one - is in features/cli_tui.feature.
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -82,8 +83,15 @@ func TestQuestionModalEmptyOwnAnswerAddsNothing(t *testing.T) {
 		Options:  []acp.QuestionOption{{Label: "postgres"}},
 		Custom:   true,
 	}
-	if got := runQuestionModal(t, single, keyDown, keyEnter, keyEnter); len(got) != 1 || len(got[0]) != 0 {
-		t.Fatalf("single choice answers %q, want one empty row", got)
+	got := runQuestionModal(t, single, keyDown, keyEnter, keyEnter)
+	// The model reads the answers as JSON: an empty row is [], never null, the
+	// shape the web card sends for a question left without an answer.
+	raw, err := json.Marshal(acp.QuestionResult{Answers: got})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != `{"answers":[[]]}` {
+		t.Fatalf("single choice answers encode as %s, want one empty row", raw)
 	}
 }
 

@@ -948,6 +948,8 @@ type QuestionPrompt struct {
 	// It is on unless the question turns it off (issue #257): a document that
 	// leaves the key out decodes as true, and the key is always written, so a
 	// client can tell a question that turned it off from one that said nothing.
+	// Only decoding applies that default: a Go literal that leaves the field
+	// out builds a question with the answer turned off.
 	Custom bool `json:"custom"`
 }
 

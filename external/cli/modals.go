@@ -161,8 +161,9 @@ func (m *questionModal) buildCustom() {
 	m.custom.SetFocused(true)
 	m.custom.OnSubmit = func(text string) {
 		// The typed text joins the options toggled with space, as on the web
-		// card; left empty, it adds nothing rather than an empty answer.
-		var answers []string
+		// card; left empty, it adds nothing rather than an empty answer. The
+		// row starts empty, not nil: the model reads [] where nil would be null.
+		answers := []string{}
 		if q != nil && q.Multiple {
 			for i, opt := range q.Options {
 				if m.selected[i] {
