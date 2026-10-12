@@ -2351,7 +2351,7 @@ func (a *Agent) sessionToolDefinitions(mode string) []llm.ToolDefinition {
 		}
 		defs = filtered
 	}
-	if toolSet.Unrestricted() || mode == "plan" {
+	if modeOffersMCP(mode) {
 		defs = append(defs, mcpToolDefinitions(a.state.GetMCPClients(), a.state.GetMCPToolFilter())...)
 	}
 	if a.subagent != nil {
