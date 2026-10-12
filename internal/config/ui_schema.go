@@ -757,8 +757,8 @@ func UISchemaMap() map[string]interface{} {
 		"compaction": objectSchema("Context compaction", "Summarize older conversation history so long sessions keep fitting the model context window.",
 			map[string]interface{}{
 				"enable":            boolProp("Enabled", "Master switch for compaction (manual command and automatic trigger). Defaults to true."),
-				"auto_enable":       boolProp("Automatic compaction", "Enable the threshold trigger while keeping manual compaction available when off. Defaults to true."),
-				"threshold_percent": intProp("Auto threshold (%)", "Auto-compact when the estimated context reaches this percent of the model's context window (1..100, default 80): its max_context_tokens, else the window its provider reports, else 128000."),
+				"auto_enable":       boolProp("Enabled", "Compact on its own: fold older turns at the threshold, or the earlier steps of a long turn when there is no earlier turn, and compact and ask again once when the provider refuses a request as larger than its context window. Off keeps manual compaction available. Defaults to true."),
+				"threshold_percent": intProp("Threshold (%)", "Compact when the estimated context reaches this percent of the model's context window (1..100, default 80): its max_context_tokens, else the window its provider reports, else 128000."),
 				"keep_recent_turns": intProp("Keep recent turns", "How many most recent user turns stay verbatim after compaction (default 2; 0 summarizes everything). With no more turns than that, automatic compaction still folds the older ones and keeps the prompt being answered."),
 				"model":             strProp("Summarizer model", "Optional models[].model for the summarization call; empty uses the session model."),
 				"fallback_models": map[string]interface{}{
@@ -767,13 +767,6 @@ func UISchemaMap() map[string]interface{} {
 					"title":       "Fallback summarizer models",
 					"description": "Summarizer models tried in order when the one before them fails. The session's own model is the last resort whether or not it is listed here.",
 				},
-				"in_turn": objectSchema("In-turn compaction",
-					"Fold the earlier steps of the turn being answered when the context reaches the compaction threshold and there is no earlier turn to fold, and compact and ask again once when the provider refuses a request as larger than its context window. The prompt being answered stays verbatim at the start of the summary row. Does nothing while automatic compaction (auto_enable) is off.",
-					map[string]interface{}{
-						"enable": boolProp("Enabled", "Master switch for the in-turn fold and the recovery from a refused request. Defaults to true; false restores the behavior before they existed. Has no effect while automatic compaction (auto_enable) is off: both need the automatic trigger."),
-					},
-					[]string{"enable"},
-					nil),
 				"result_eviction": objectSchema("Tool result eviction",
 					"Collapse superseded tool results (read pages, grep dumps, and the listings of glob, print_tree, websearch and webfetch) to placeholders when building the LLM request; the persisted transcript is untouched. Read and grep results survive when marked (keep_result / keep:true) or among the most recent; listings survive within the latest three steps.",
 					map[string]interface{}{
@@ -785,7 +778,7 @@ func UISchemaMap() map[string]interface{} {
 					[]string{"enable", "keep_recent", "min_result_bytes", "start_percent"},
 					nil),
 			},
-			[]string{"enable", "auto_enable", "threshold_percent", "keep_recent_turns", "model", "in_turn", "result_eviction"},
+			[]string{"enable", "auto_enable", "threshold_percent", "keep_recent_turns", "model", "result_eviction"},
 			nil),
 		"gateways": objectSchema("Messenger gateways", "Telegram and Pachca bots (require the gateway build tag, or gateway.telegram / gateway.pachca for one of them).",
 			map[string]interface{}{

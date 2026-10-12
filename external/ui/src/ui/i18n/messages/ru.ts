@@ -276,6 +276,7 @@ export const messagesRu: Record<string, string> = {
   "settings.group.hooks.main": "Настройки хуков",
   "settings.group.hooks.mainDesc":
     "Как выполняются хуки, то есть можно ли запускать файлы, пришедшие с чекаутом, сколько может длиться один процесс хука без своего таймаута, сколько раз хук Stop может вернуть агента к работе и сколько текста может передать один хук.",
+  "settings.group.compaction.auto": "Автоматическое сжатие",
   "settings.group.compaction.summary": "Суммаризация",
   "settings.group.supervisor.checks": "Проверки цели",
   "settings.group.supervisor.watchdog": "Сторож",
@@ -703,10 +704,10 @@ export const messagesRu: Record<string, string> = {
   "settings.schema.compaction.enable.label": "Включено",
   "settings.schema.compaction.enable.desc":
     "Главный выключатель сжатия (ручная команда и автоматический триггер). По умолчанию включено.",
-  "settings.schema.compaction.auto_enable.label": "Автоматическое сжатие",
+  "settings.schema.compaction.auto_enable.label": "Включено",
   "settings.schema.compaction.auto_enable.desc":
-    "Включает сжатие по порогу. При выключении ручное сжатие остаётся доступным. По умолчанию включено.",
-  "settings.schema.compaction.threshold_percent.label": "Порог авто-сжатия (%)",
+    "Сжимать самостоятельно: сворачивать старые ходы на пороге, а если их нет, более ранние шаги длинного хода, и один раз сжать и повторить запрос, который провайдер отклонил как слишком большой для окна контекста. При выключении ручное сжатие остаётся доступным. По умолчанию включено.",
+  "settings.schema.compaction.threshold_percent.label": "Порог (%)",
   "settings.schema.compaction.threshold_percent.desc":
     "Авто-сжатие, когда оценка контекста достигает этой доли от окна контекста модели (1..100, по умолчанию 80): её max_context_tokens, иначе окно, которое сообщает провайдер, иначе 128000.",
   "settings.schema.compaction.keep_recent_turns.label":
@@ -716,12 +717,6 @@ export const messagesRu: Record<string, string> = {
   "settings.schema.compaction.model.label": "Модель суммаризации",
   "settings.schema.compaction.model.desc":
     "Необязательный models[].model для вызова суммаризации; пусто — модель сессии.",
-  "settings.schema.compaction.in_turn.label": "Сжатие внутри хода",
-  "settings.schema.compaction.in_turn.desc":
-    "Сворачивает более ранние шаги хода, на который идёт ответ, когда контекст достигает порога сжатия, а более ранних ходов для сворачивания нет, и один раз сжимает ход и повторяет запрос, когда провайдер отказывает запросу как слишком большому для окна контекста. Промпт, на который идёт ответ, остаётся дословным в начале строки сводки. Ничего не делает, пока автоматическое сжатие (auto_enable) выключено.",
-  "settings.schema.compaction.in_turn.enable.label": "Включено",
-  "settings.schema.compaction.in_turn.enable.desc":
-    "Главный выключатель сворачивания внутри хода и восстановления после отклонённого запроса. По умолчанию включено; false возвращает прежнее поведение. Не действует, пока автоматическое сжатие (auto_enable) выключено: обоим нужен автоматический триггер.",
   "settings.schema.compaction.result_eviction.label":
     "Вытеснение результатов инструментов",
   "settings.schema.compaction.result_eviction.desc":
@@ -737,6 +732,14 @@ export const messagesRu: Record<string, string> = {
     "Мин. размер результата, байт",
   "settings.schema.compaction.result_eviction.min_result_bytes.desc":
     "Результаты этого размера и меньше никогда не вытесняются (по умолчанию 2000; 0 — кандидат любой результат).",
+  "settings.schema.compaction.fallback_models.label":
+    "Резервные модели суммаризации",
+  "settings.schema.compaction.fallback_models.desc":
+    "Модели суммаризации, которые пробуются по порядку, если предыдущая не сработала. Собственная модель сессии - последний вариант, указана она здесь или нет.",
+  "settings.schema.compaction.result_eviction.start_percent.label":
+    "Начинать с (%)",
+  "settings.schema.compaction.result_eviction.start_percent.desc":
+    "Вытеснять, только когда оценка контекста достигла этого процента окна контекста модели (по умолчанию 50; 0 - с первого результата). Ниже порога история отправляется без изменений, и кэш промптов провайдера сохраняется. Результаты read и grep модели без max_context_tokens вытесняются с первого результата.",
 
   "settings.schema.scheduler.label": "Планировщик",
   "settings.schema.scheduler.enable.label": "Включено",

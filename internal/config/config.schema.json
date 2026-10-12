@@ -886,7 +886,7 @@
             "boolean",
             "null"
           ],
-          "description": "Enable automatic compaction at threshold_percent. Set false to keep manual /compact and the Context popover action available without automatic compaction. Defaults to true.",
+          "description": "Compact automatically: at threshold_percent, older turns are folded into a summary, or, when the window holds no earlier turn, the earlier steps of the turn being answered (the summary row then starts with the prompt itself, verbatim, and at most the four latest steps stay); and a request the provider refuses as larger than its context window is compacted once and asked again. Set false to keep manual /compact and the Context popover action available without any of this. Defaults to true.",
           "default": true
         },
         "threshold_percent": {
@@ -916,22 +916,6 @@
             "type": "string"
           },
           "description": "Summarizer models tried in order when the one before them fails (models[].model ids). The session's own model is the last resort whether or not it is listed, so a compaction is not blocked by one unreachable summarizer."
-        },
-        "in_turn": {
-          "type": "object",
-          "title": "In-turn compaction",
-          "description": "Folds the earlier steps of the turn being answered into a summary when the context reaches the compaction threshold and the window holds no earlier turn to fold, and, when the provider refuses a request as larger than its context window, compacts the turn once and asks again. The summary row starts with the prompt itself, verbatim; at most the four latest steps stay as they were, fewer when they would not leave the next request room under the threshold. enable: false restores the behavior before this section existed: such a turn is not folded and a refused request ends the turn. The section does nothing when compaction.auto_enable is false: the fold and the recovery both need the automatic trigger.",
-          "additionalProperties": false,
-          "properties": {
-            "enable": {
-              "type": [
-                "boolean",
-                "null"
-              ],
-              "description": "Master switch for the in-turn fold and for the recovery from a refused request. Defaults to true. Has no effect when compaction.auto_enable is false: the fold and the recovery both need the automatic trigger.",
-              "default": true
-            }
-          }
         },
         "result_eviction": {
           "type": "object",

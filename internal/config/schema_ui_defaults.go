@@ -80,9 +80,6 @@ func SchemaExampleConfigJSON() *ConfigJSON {
 			ThresholdPercent: CompactionDefaultThresholdPercent,
 			KeepRecentTurns:  intPtr(CompactionDefaultKeepRecentTurns),
 			Model:            "",
-			InTurn: InTurnJSON{
-				Enabled: boolPtr(true),
-			},
 		},
 		Memory: MemoryJSON{
 			Enabled:          false,

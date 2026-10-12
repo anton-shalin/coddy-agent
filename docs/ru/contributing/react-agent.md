@@ -151,7 +151,7 @@ Already on disk:
 проекцию метаться между двумя формами. Запрос, который провайдер отклонил как слишком большой,
 открывает этот порог до конца хода (**`Agent.evictionForced`**): кэш, который порог защищает,
 теряет смысл, когда провайдер отказался читать префикс. Сворачивание внутри хода
-(**`compaction.in_turn`**) устроено по тому же компромиссу: оно переписывает историю только на
+(**`compact_in_turn.go`**) устроено по тому же компромиссу: оно переписывает историю только на
 пороге сжатия, а строка сводки, которую оно пишет, начинается с промпта, поэтому переписанный
 префикс по-прежнему открывается тем, о чём модель спросили. См.
 [compaction.md](../features/compaction.md).
@@ -322,8 +322,8 @@ messages: [
      of the turn (**`Agent.evictionForced`**), writes a **`notice`** row, and
      uses a normal **`max_turns`** iteration. A second refusal of the same
      step, a fold that fails or has nothing to fold, and
-     **`compaction.in_turn.enable: false`** (or no automatic compaction) end
-     the turn with **`contextOverflowError`**.
+     **`compaction.auto_enable: false`** end the turn with
+     **`contextOverflowError`**.
 
    An explicit **`llm_retry_max: 0`** disables all of the above except the
    overflow recovery, which is a compaction and not a retry of the same
@@ -425,4 +425,4 @@ messages: [
 - Слишком длинный контекст - старые сообщения сжимаются в сводку, работа продолжается со сводкой;
 - Отмена - все операции прерываются, возвращается причина остановки `cancelled`.
 
-<!-- docsgen:source sha256=ab38ddf68e48c0f4 -->
+<!-- docsgen:source sha256=a567ea6e0f9be993 -->

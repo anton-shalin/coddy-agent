@@ -1345,7 +1345,7 @@ func (a *Agent) runReActLoop(
 			if llm.IsContextOverflow(streamErr) {
 				if !streamedAny && overflowRecoveries < maxOverflowRecoveries && ctx.Err() == nil &&
 					!a.state.IsUserCancelledTurn() && turn+1 < maxTurns &&
-					a.cfg.Compaction.IsAutoEnabled() && a.cfg.Compaction.InTurn.IsEnabled() {
+					a.cfg.Compaction.IsAutoEnabled() {
 					overflowRecoveries++
 					a.evictionForced = true
 					if a.recoverFromContextOverflow(ctx, streamErr, estimateAtSend) {

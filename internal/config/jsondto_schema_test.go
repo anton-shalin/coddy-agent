@@ -305,11 +305,11 @@ func TestRulesUIAndFallbackModelsSurviveTheJSONDTO(t *testing.T) {
 	}
 }
 
-// The Settings form is drawn from UISchemaMap: compaction.in_turn is a section
-// of its own with the one switch, placed before result_eviction, and
+// The Settings form is drawn from UISchemaMap: compaction has no in_turn
+// section (the fold of the turn and the recovery are part of auto_enable), and
 // result_eviction offers only the read/grep knobs (the listing tools and their
 // step window are fixed in the agent, so the form has no control for them).
-func TestUISchemaCompactionOffersTheInTurnSwitch(t *testing.T) {
+func TestUISchemaCompactionOffersNoInTurnSection(t *testing.T) {
 	doc := config.UISchemaMap()
 	compaction := doc["properties"].(map[string]interface{})["compaction"].(map[string]interface{})
 	props := compaction["properties"].(map[string]interface{})
@@ -323,22 +323,11 @@ func TestUISchemaCompactionOffersTheInTurnSwitch(t *testing.T) {
 		return got
 	}
 
-	inTurn, ok := props["in_turn"].(map[string]interface{})
-	if !ok || inTurn["type"] != "object" {
-		t.Fatalf("compaction.in_turn = %#v, want an object section", props["in_turn"])
+	if _, ok := props["in_turn"]; ok {
+		t.Fatalf("compaction.in_turn = %#v, want no such section", props["in_turn"])
 	}
-	fields := inTurn["properties"].(map[string]interface{})
-	if f, ok := fields["enable"].(map[string]interface{}); !ok || f["type"] != "boolean" {
-		t.Fatalf("in_turn.enable = %#v, want a boolean", fields["enable"])
-	}
-	if len(fields) != 1 {
-		t.Fatalf("in_turn fields = %v, want the switch alone", fields)
-	}
-	if got, want := order(inTurn), []string{"enable"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("in_turn field order %v, want %v", got, want)
-	}
-	if got := order(compaction); len(got) < 2 || !reflect.DeepEqual(got[len(got)-2:], []string{"in_turn", "result_eviction"}) {
-		t.Fatalf("compaction field order %v: in_turn must sit before result_eviction", got)
+	if got, want := order(compaction), []string{"enable", "auto_enable", "threshold_percent", "keep_recent_turns", "model", "result_eviction"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("compaction field order %v, want %v", got, want)
 	}
 
 	re := props["result_eviction"].(map[string]interface{})
@@ -347,132 +336,6 @@ func TestUISchemaCompactionOffersTheInTurnSwitch(t *testing.T) {
 	if got := order(re); !reflect.DeepEqual(got, want) || len(reFields) != len(want) {
 		t.Fatalf("result_eviction fields %v (order %v), want %v", reFields, got, want)
 	}
-}
-
-// compaction.in_turn.enable rides the Settings round trip like every other key:
-// the pointer keeps the difference between an absent key (the default, on) and
-// an explicit value.
-func TestInTurnSwitchSurvivesTheJSONDTO(t *testing.T) {
-	roundTrip := func(t *testing.T, in config.InTurn) (string, config.InTurn) {
-		t.Helper()
-		cfg := &config.Config{}
-		cfg.Compaction.InTurn = in
-		raw, err := json.Marshal(config.ConfigToJSONDTO(cfg))
-		if err != nil {
-			t.Fatal(err)
-		}
-		var j config.ConfigJSON
-		if err := json.Unmarshal(raw, &j); err != nil {
-			t.Fatal(err)
-		}
-		return string(raw), config.JSONDTOToConfig(&j, config.Paths{}).Compaction.InTurn
-	}
-
-	t.Run("an unset switch stays unset", func(t *testing.T) {
-		raw, back := roundTrip(t, config.InTurn{})
-		var doc struct {
-			Compaction struct {
-				InTurn map[string]json.RawMessage `json:"in_turn"`
-			} `json:"compaction"`
-		}
-		if err := json.Unmarshal([]byte(raw), &doc); err != nil {
-			t.Fatal(err)
-		}
-		if _, ok := doc.Compaction.InTurn["enable"]; ok {
-			t.Fatalf("an unset enable was written: %s", raw)
-		}
-		if back.Enabled != nil {
-			t.Fatalf("an unset switch came back set: %v", *back.Enabled)
-		}
-		if !back.IsEnabled() {
-			t.Fatal("an unset switch must still mean on")
-		}
-	})
-
-	t.Run("an explicit false is kept", func(t *testing.T) {
-		off := false
-		raw, back := roundTrip(t, config.InTurn{Enabled: &off})
-		if !strings.Contains(raw, `"in_turn":{"enable":false}`) {
-			t.Fatalf("GET DTO dropped the explicit false: %s", raw)
-		}
-		if back.Enabled == nil || *back.Enabled || back.IsEnabled() {
-			t.Fatalf("PUT path lost the explicit false: %+v", back)
-		}
-		// The copy must not alias the source.
-		*back.Enabled = true
-		if off {
-			t.Fatal("the DTO conversion shares the switch with its source")
-		}
-	})
-
-	t.Run("an explicit true is kept", func(t *testing.T) {
-		on := true
-		_, back := roundTrip(t, config.InTurn{Enabled: &on})
-		if back.Enabled == nil || !*back.Enabled {
-			t.Fatalf("PUT path lost the explicit true: %+v", back)
-		}
-	})
-}
-
-// The same through the whole Settings save - GET document, PUT body, YAML on
-// disk, reload.
-func TestInTurnSwitchSurvivesASettingsSave(t *testing.T) {
-	const head = `providers:
-  - name: valera
-    type: openai
-    api_base: "http://127.0.0.1:9/v1"
-    api_key: "k"
-models:
-  - model: "valera/m"
-    max_tokens: 4096
-agent:
-  model: "valera/m"
-compaction:
-  threshold_percent: 70
-`
-	save := func(t *testing.T, extra string) (*config.Config, string) {
-		t.Helper()
-		p := writeConfig(t, head+extra)
-		cur, err := config.Load(p)
-		if err != nil {
-			t.Fatal(err)
-		}
-		body, err := json.Marshal(config.ConfigToJSONDTO(cur))
-		if err != nil {
-			t.Fatal(err)
-		}
-		reloaded := saveThroughSettings(t, p, body)
-		raw, err := os.ReadFile(p)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return reloaded, string(raw)
-	}
-
-	t.Run("an absent section stays absent", func(t *testing.T) {
-		cfg, raw := save(t, "")
-		in := cfg.Compaction.InTurn
-		if in.Enabled != nil {
-			t.Fatalf("a save invented the switch: %v", *in.Enabled)
-		}
-		if strings.Contains(raw, "in_turn") {
-			t.Fatalf("saved YAML must omit the unset section:\n%s", raw)
-		}
-		if !in.IsEnabled() {
-			t.Fatal("the default (on) was lost")
-		}
-	})
-
-	t.Run("an explicit false survives", func(t *testing.T) {
-		cfg, raw := save(t, "  in_turn:\n    enable: false\n")
-		in := cfg.Compaction.InTurn
-		if in.Enabled == nil || in.IsEnabled() {
-			t.Fatalf("enable: false was lost: %+v\n%s", in, raw)
-		}
-		if !strings.Contains(raw, "in_turn:") || !strings.Contains(raw, "enable: false") {
-			t.Fatalf("saved YAML dropped the explicit switch:\n%s", raw)
-		}
-	})
 }
 
 // Every yaml-tagged field of Config must have a ConfigJSON counterpart, or a

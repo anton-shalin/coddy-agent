@@ -65,35 +65,10 @@ type Compaction struct {
 	// it; the session's own model is always the last resort, whether or not it
 	// is listed here (issue #247).
 	FallbackModels []string `yaml:"fallback_models"`
-	// InTurn controls the fold of the turn being answered: the automatic
-	// trigger's fallback when there is no earlier turn to fold, and the
-	// recovery from a request the provider refused as too large.
-	InTurn InTurn `yaml:"in_turn"`
 	// ResultEviction controls pruning of superseded tool results (read pages,
 	// grep dumps, and the listings of glob, print_tree, websearch and webfetch)
 	// from the LLM projection (the persisted transcript is never rewritten).
 	ResultEviction ResultEviction `yaml:"result_eviction"`
-}
-
-// InTurn is the YAML compaction.in_turn section: folding the earlier steps of
-// the turn being answered. The automatic trigger folds earlier user turns; when
-// the window holds only the turn in progress it has nothing of that kind to fold,
-// and a long turn (one prompt, dozens of tool steps) grows past the model's
-// window. With the section on, the trigger then folds the turn's own earlier
-// steps into a summary row that starts with the prompt itself, and a request the
-// provider refuses as larger than its window is compacted that way once and sent
-// again.
-type InTurn struct {
-	// Enabled toggles both. A nil pointer means the default (true); false
-	// restores the behaviour before the section existed. Both need the automatic
-	// trigger, so it does nothing while compaction.auto_enable is false.
-	Enabled *bool `yaml:"enable"`
-}
-
-// IsEnabled reports whether the in-turn fold and the overflow recovery are
-// active. Defaults to true when unset.
-func (i *InTurn) IsEnabled() bool {
-	return i.Enabled == nil || *i.Enabled
 }
 
 // ResultEviction is the YAML compaction.result_eviction section: collapsing

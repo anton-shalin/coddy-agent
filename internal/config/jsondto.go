@@ -287,14 +287,7 @@ type CompactionJSON struct {
 	KeepRecentTurns  *int               `json:"keep_recent_turns,omitempty"`
 	Model            string             `json:"model,omitempty"`
 	FallbackModels   []string           `json:"fallback_models,omitempty"`
-	InTurn           InTurnJSON         `json:"in_turn,omitempty"`
 	ResultEviction   ResultEvictionJSON `json:"result_eviction,omitempty"`
-}
-
-// InTurnJSON mirrors InTurn. The pointer keeps the unset/explicit distinction
-// (enable defaults to true).
-type InTurnJSON struct {
-	Enabled *bool `json:"enable,omitempty"`
 }
 
 // ResultEvictionJSON mirrors ResultEviction. Pointer fields keep the
@@ -572,9 +565,6 @@ func ConfigToJSONDTO(c *Config) *ConfigJSON {
 		KeepRecentTurns:  cloneIntPtr(c.Compaction.KeepRecentTurns),
 		Model:            c.Compaction.Model,
 		FallbackModels:   append([]string(nil), c.Compaction.FallbackModels...),
-		InTurn: InTurnJSON{
-			Enabled: cloneBoolPtr(c.Compaction.InTurn.Enabled),
-		},
 		ResultEviction: ResultEvictionJSON{
 			Enabled:        cloneBoolPtr(c.Compaction.ResultEviction.Enabled),
 			KeepRecent:     cloneIntPtr(c.Compaction.ResultEviction.KeepRecent),
@@ -810,9 +800,6 @@ func JSONDTOToConfig(j *ConfigJSON, paths Paths) *Config {
 		KeepRecentTurns:  cloneIntPtr(j.Compaction.KeepRecentTurns),
 		Model:            j.Compaction.Model,
 		FallbackModels:   append([]string(nil), j.Compaction.FallbackModels...),
-		InTurn: InTurn{
-			Enabled: cloneBoolPtr(j.Compaction.InTurn.Enabled),
-		},
 		ResultEviction: ResultEviction{
 			Enabled:        cloneBoolPtr(j.Compaction.ResultEviction.Enabled),
 			KeepRecent:     cloneIntPtr(j.Compaction.ResultEviction.KeepRecent),

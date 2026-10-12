@@ -171,9 +171,6 @@ func (a *Agent) CompactSession(ctx context.Context, opts CompactOptions) (*Compa
 		return projected
 	}
 	if opts.InTurn {
-		if !a.cfg.Compaction.InTurn.IsEnabled() {
-			return nil, ErrNothingToCompact
-		}
 		var planErr error
 		if plan, planErr = a.planInTurn(opts, msgs, visibleStart, project()); planErr != nil {
 			return nil, planErr
@@ -198,12 +195,8 @@ func (a *Agent) CompactSession(ctx context.Context, opts CompactOptions) (*Compa
 		// would fold the opening prompt into a plain summary. Only the user
 		// messages up to the opening prompt are boundaries. A manual compaction
 		// keeps every user message as a boundary - it folds the prompt on purpose.
-		// So does the automatic one when compaction.in_turn.enable is false, which
-		// restores the behaviour before the section existed: a long turn with queued
-		// follow-ups can fold at the latest one, as session.CompactionSplitIndex
-		// counts them.
 		last := len(msgs) - 1
-		if !force && a.cfg.Compaction.InTurn.IsEnabled() {
+		if !force {
 			if open, found := session.OpeningPromptIndex(msgs); found {
 				last = open
 			}
@@ -586,7 +579,7 @@ func (a *Agent) maybeAutoCompact(ctx context.Context) bool {
 	}
 	res, err := a.CompactSession(ctx, CompactOptions{})
 	scale := a.providerScale()
-	if errors.Is(err, ErrNothingToCompact) && comp.InTurn.IsEnabled() && !a.inTurnFoldSpent {
+	if errors.Is(err, ErrNothingToCompact) && !a.inTurnFoldSpent {
 		// No earlier turn to fold: the window holds the turn being answered and
 		// nothing else, so the turn's own earlier steps are what there is.
 		res, err = a.CompactSession(ctx, CompactOptions{InTurn: true})
@@ -603,8 +596,7 @@ func (a *Agent) maybeAutoCompact(ctx context.Context) bool {
 					"contextTokens", used,
 					"contextWindow", window,
 					"contextWindowSource", source,
-					"thresholdPercent", comp.EffectiveThresholdPercent(),
-					"inTurn", comp.InTurn.IsEnabled())
+					"thresholdPercent", comp.EffectiveThresholdPercent())
 			}
 		case errors.Is(err, ErrCompactionBlocked):
 			a.log.Info("auto-compaction vetoed by a hook; continuing uncompacted", "error", err)

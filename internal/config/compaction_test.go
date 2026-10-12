@@ -2,7 +2,6 @@ package config
 
 import (
 	"encoding/json"
-	"os"
 	"strings"
 	"testing"
 )
@@ -163,121 +162,6 @@ func TestResultEvictionValidate(t *testing.T) {
 	}
 }
 
-// compaction.in_turn has one key, its switch: the fold of the turn being
-// answered and the recovery from a refused request are on unless the operator
-// turns them off, with or without ApplyDefaults.
-func TestInTurnDefaults(t *testing.T) {
-	var c Compaction
-	c.ApplyDefaults()
-	if !c.InTurn.IsEnabled() {
-		t.Fatal("in-turn compaction must be on by default")
-	}
-	if c.InTurn.Enabled != nil {
-		t.Fatalf("ApplyDefaults must leave the switch unset, got %v", *c.InTurn.Enabled)
-	}
-	if !(&InTurn{}).IsEnabled() {
-		t.Fatal("the zero value must mean the default (on)")
-	}
-}
-
-func TestInTurnExplicitValues(t *testing.T) {
-	off, on := false, true
-	if (&InTurn{Enabled: &off}).IsEnabled() {
-		t.Fatal("enable: false must switch the fold off")
-	}
-	if !(&InTurn{Enabled: &on}).IsEnabled() {
-		t.Fatal("enable: true must keep the fold on")
-	}
-	c := Compaction{InTurn: InTurn{Enabled: &off}}
-	c.ApplyDefaults()
-	if c.InTurn.IsEnabled() {
-		t.Fatal("explicit enable: false must survive defaults")
-	}
-}
-
-// An absent key stays nil (the default) and an explicit enable: false is read
-// back as written.
-func TestInTurnYAML(t *testing.T) {
-	load := func(extra string) (*Config, error) {
-		return parseValidateYAMLBytes(`
-providers:
-  - name: fake
-    type: openai
-    api_key: k
-models:
-  - model: fake/m
-agent:
-  model: fake/m
-compaction:
-`+extra, Paths{})
-	}
-
-	absent, err := load("  threshold_percent: 70\n")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if absent.Compaction.InTurn.Enabled != nil {
-		t.Fatalf("an absent key must stay nil, got %v", *absent.Compaction.InTurn.Enabled)
-	}
-	if !absent.Compaction.InTurn.IsEnabled() {
-		t.Fatal("an absent key must mean the default (on)")
-	}
-
-	set, err := load("  in_turn:\n    enable: false\n")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if set.Compaction.InTurn.Enabled == nil || set.Compaction.InTurn.IsEnabled() {
-		t.Fatalf("enable: false lost: %+v", set.Compaction.InTurn)
-	}
-}
-
-// The agent stages compaction.in_turn.enable through config_set, which edits the
-// YAML tree: a switch turned off has to reach the file and read back off.
-func TestCommitUCICommandsInTurnSwitchReachesTheFile(t *testing.T) {
-	paths := testPathConfig(t, "compaction:\n  threshold_percent: 70\n")
-
-	if _, err := CommitUCICommands(paths, mustParseUCI(t, "set compaction.in_turn.enable=false")); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := LoadWithPaths(paths)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Compaction.InTurn.Enabled == nil || cfg.Compaction.InTurn.IsEnabled() {
-		t.Fatalf("in_turn = %+v, want an explicit enable: false", cfg.Compaction.InTurn)
-	}
-	raw, err := os.ReadFile(paths.ConfigPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(raw), "in_turn:") || !strings.Contains(string(raw), "enable: false") {
-		t.Fatalf("the switch did not reach the file:\n%s", raw)
-	}
-}
-
-// A save of a config that never named the section does not materialize it, and
-// an explicit enable: false is kept.
-func TestMarshalConfigYAMLKeepsInTurnOnlyWhenSet(t *testing.T) {
-	cfg := loadForRewrite(t, sparseConfig)
-	cfg.Agent.MaxTurns = 42
-	saved := rewrite(t, cfg, sparseConfig)
-	if strings.Contains(saved, "in_turn") {
-		t.Errorf("saved config materializes in_turn the file never had:\n%s", saved)
-	}
-
-	const withSwitch = sparseConfig + `compaction:
-  in_turn:
-    enable: false
-`
-	cfg = loadForRewrite(t, withSwitch)
-	cfg.Agent.MaxTurns = 42
-	saved = rewrite(t, cfg, withSwitch)
-	if !strings.Contains(saved, "enable: false") || !strings.Contains(saved, "in_turn:") {
-		t.Errorf("saved config dropped the explicit in_turn switch:\n%s", saved)
-	}
-}
-
 // descendant walks the properties of a JSON-schema-shaped document by name.
 func descendant(t *testing.T, node map[string]interface{}, path ...string) map[string]interface{} {
 	t.Helper()
@@ -306,24 +190,6 @@ func describedSchemas(t *testing.T) map[string]map[string]interface{} {
 	return map[string]map[string]interface{}{"config.schema.json": schema, "UISchemaMap": UISchemaMap()}
 }
 
-// compaction.in_turn.enable does nothing while compaction.auto_enable is false:
-// the fold and the recovery from a refused request both need the automatic
-// trigger. Every description a person reads the key by says so (the web UI
-// dictionaries, the Russian descriptions and the bundled skill carry the same
-// sentence and are held by docs-check and by review).
-func TestInTurnDescriptionsSayTheyNeedTheAutomaticTrigger(t *testing.T) {
-	for name, root := range describedSchemas(t) {
-		section := descendant(t, root, "compaction", "in_turn")
-		enable := descendant(t, section, "enable")
-		for label, node := range map[string]map[string]interface{}{"compaction.in_turn": section, "compaction.in_turn.enable": enable} {
-			desc, _ := node["description"].(string)
-			if !strings.Contains(desc, "auto_enable") {
-				t.Errorf("%s: the description of %s does not say it needs compaction.auto_enable: %q", name, label, desc)
-			}
-		}
-	}
-}
-
 // result_eviction also collapses the listings of a fixed set of tools, so the
 // section no longer calls itself read/grep only and names each listing tool it
 // takes.
@@ -338,6 +204,26 @@ func TestResultEvictionDescriptionsNameTheListingTools(t *testing.T) {
 		for _, tool := range []string{"glob", "print_tree", "websearch", "webfetch"} {
 			if !strings.Contains(desc, tool) {
 				t.Errorf("%s: the description of compaction.result_eviction does not name %s: %q", name, tool, desc)
+			}
+		}
+	}
+}
+
+// The fold of a long turn's earlier steps and the recovery from a request the
+// provider refused as too large are part of automatic compaction, with no
+// switch of their own: compaction has no in_turn section, and the description
+// of auto_enable, in both documents a person reads the key by, names both.
+func TestAutoEnableDescriptionsNameTheInTurnFoldAndTheRecovery(t *testing.T) {
+	for name, root := range describedSchemas(t) {
+		section := descendant(t, root, "compaction")
+		props, _ := section["properties"].(map[string]interface{})
+		if _, ok := props["in_turn"]; ok {
+			t.Errorf("%s: compaction still has an in_turn section", name)
+		}
+		desc, _ := descendant(t, section, "auto_enable")["description"].(string)
+		for _, want := range []string{"earlier steps", "refuses"} {
+			if !strings.Contains(desc, want) {
+				t.Errorf("%s: the description of compaction.auto_enable does not mention %q: %q", name, want, desc)
 			}
 		}
 	}

@@ -151,7 +151,7 @@ mark and make the projection flap between two shapes. A request the provider
 refused as too large opens the gate for the rest of that turn
 (**`Agent.evictionForced`**): the cache the gate protects is moot once the
 provider has refused to read the prefix. The fold inside a turn
-(**`compaction.in_turn`**) is the same trade: it rewrites the history only at the
+(**`compact_in_turn.go`**) is the same trade: it rewrites the history only at the
 compaction threshold, and the summary row it writes starts with the prompt, so the
 rewritten prefix still opens with what the model was asked. See
 [compaction.md](../features/compaction.md).
@@ -322,8 +322,8 @@ messages: [
      of the turn (**`Agent.evictionForced`**), writes a **`notice`** row, and
      uses a normal **`max_turns`** iteration. A second refusal of the same
      step, a fold that fails or has nothing to fold, and
-     **`compaction.in_turn.enable: false`** (or no automatic compaction) end
-     the turn with **`contextOverflowError`**.
+     **`compaction.auto_enable: false`** end the turn with
+     **`contextOverflowError`**.
 
    An explicit **`llm_retry_max: 0`** disables all of the above except the
    overflow recovery, which is a compaction and not a retry of the same

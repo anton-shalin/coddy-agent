@@ -582,7 +582,6 @@ func TestOverflowAfterStreamedOutputIsNotRecovered(t *testing.T) {
 func TestOverflowRecoveryIsOffWithTheSection(t *testing.T) {
 	off := false
 	for name, comp := range map[string]config.Compaction{
-		"in_turn.enable false":  {InTurn: config.InTurn{Enabled: &off}},
 		"auto_enable false":     {AutoEnabled: &off},
 		"compaction.enable off": {Enabled: &off},
 	} {

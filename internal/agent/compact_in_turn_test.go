@@ -604,19 +604,6 @@ func TestCompactSessionInTurnNeedsAtLeastTwoSteps(t *testing.T) {
 	}
 }
 
-func TestCompactSessionInTurnIsNothingToCompactWithTheSectionOff(t *testing.T) {
-	off := false
-	st := inTurnSession(t, "p", 6)
-	provider := &compactCannedProvider{t: t, summary: "unused"}
-	ag := inTurnAgent(t, st, config.Compaction{InTurn: config.InTurn{Enabled: &off}}, provider)
-	if _, err := ag.CompactSession(context.Background(), CompactOptions{InTurn: true}); !errors.Is(err, ErrNothingToCompact) {
-		t.Fatalf("err = %v, want ErrNothingToCompact while compaction.in_turn.enable is false", err)
-	}
-	if len(provider.requests) != 0 {
-		t.Fatal("the summarizer was called")
-	}
-}
-
 // Folding twice keeps one copy of the prompt: the second row's head holds the
 // first row, whose prompt is not written again beside the new one.
 func TestChainedInTurnFoldsKeepOnePromptCopy(t *testing.T) {
@@ -1049,51 +1036,6 @@ func TestAutomaticSplitOfAOneTurnSessionWithAFollowUpHasNothingToFold(t *testing
 	}
 }
 
-// compaction.in_turn.enable: false restores the behaviour before the section
-// existed, the automatic split included: every user message is a turn start
-// again, so a long turn with a queued follow-up folds at the latest one. The
-// opening prompt goes into a plain summary, which is what the operator turned
-// the protection off for.
-func TestAutomaticSplitWithInTurnOffCutsAtTheLatestFollowUp(t *testing.T) {
-	turn := concatMsgs([]llm.Message{userText(followUpPrompt)}, steps("a", 2), []llm.Message{queuedFollowUp("Also keep the tests green.")}, steps("b", 2))
-	off := false
-	comp := config.Compaction{InTurn: config.InTurn{Enabled: &off}}
-
-	t.Run("off: it folds everything before the follow-up", func(t *testing.T) {
-		st := stateOf(t, turn)
-		provider := &compactCannedProvider{t: t, summary: "the prompt and the first two steps"}
-		ag := inTurnAgent(t, st, comp, provider)
-
-		res, err := ag.CompactSession(context.Background(), CompactOptions{})
-		if err != nil {
-			t.Fatalf("the turn has a follow-up to cut at and the section is off: %v", err)
-		}
-		if res.InTurn || res.CompactedMessages != 1+2*2 || res.KeptMessages != 1+2*2 {
-			t.Fatalf("result = %+v, want a plain fold of the prompt and two steps, keeping the follow-up and two steps", res)
-		}
-		window := windowOf(st)
-		if !window[0].CompactionSummary || !strings.HasPrefix(window[0].Content, "The earlier conversation was compacted.") {
-			t.Fatalf("want the plain row, got %q", firstChars(window[0].Content, 100))
-		}
-		if window[1].Content != "Also keep the tests green." {
-			t.Fatalf("the window must continue with the follow-up, got %s", transcriptText(window[:2]))
-		}
-	})
-
-	t.Run("on: the same turn has nothing to fold", func(t *testing.T) {
-		st := stateOf(t, turn)
-		provider := &compactCannedProvider{t: t, summary: "must not be asked"}
-		ag := inTurnAgent(t, st, config.Compaction{}, provider)
-
-		if _, err := ag.CompactSession(context.Background(), CompactOptions{}); !errors.Is(err, ErrNothingToCompact) {
-			t.Fatalf("err = %v, want ErrNothingToCompact: the prompt would have been folded into a plain summary", err)
-		}
-		if len(provider.requests) != 0 {
-			t.Fatal("the summarizer was called")
-		}
-	})
-}
-
 // A regular compaction of the turns before the prompt puts a row in front of it,
 // and the next fold of the turn still finds the prompt, not the follow-up that
 // came after it.
@@ -1237,28 +1179,6 @@ func TestMaybeAutoCompactStillFoldsEarlierTurnsFirst(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), "auto-compacted the turn in progress") {
 		t.Fatalf("the turn in progress was folded although earlier turns could be:\n%s", logs)
-	}
-}
-
-func TestMaybeAutoCompactWithInTurnOffRestoresTheSkip(t *testing.T) {
-	off := false
-	st := inTurnSession(t, "Audit every module.", 6)
-	provider := &compactCannedProvider{t: t, summary: "must not be asked"}
-	ag, logs := overThresholdAgent(t, st, config.Compaction{InTurn: config.InTurn{Enabled: &off}}, provider)
-
-	for i := 0; i < 3; i++ {
-		if ag.maybeAutoCompact(context.Background()) {
-			t.Fatal("in_turn.enable: false must leave a one-turn window alone")
-		}
-	}
-	if len(provider.requests) != 0 {
-		t.Fatalf("the summarizer was asked %d times", len(provider.requests))
-	}
-	if got := strings.Count(logs.String(), "auto-compaction skipped"); got != 1 {
-		t.Fatalf("skip logged %d times in one turn, want once:\n%s", got, logs)
-	}
-	if summaryRowsOf(st) != 0 {
-		t.Fatal("no summary row expected")
 	}
 }
 

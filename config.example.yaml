@@ -193,20 +193,14 @@ sessions:
 # model context window. Manual /compact command plus automatic trigger.
 # compaction:
 #   enable: true             # master switch (manual command and automation)
-#   auto_enable: true        # turn off the threshold trigger but keep manual compaction
+#   auto_enable: true        # automatic compaction: the threshold trigger, the fold of a long turn's
+#                            # earlier steps behind its prompt, and one compaction and retry after a
+#                            # request the provider refused as too large; false keeps manual /compact
 #   threshold_percent: 80    # auto-compact at this percent of the model's context window (1..100)
 #   keep_recent_turns: 2     # last N user turns stay verbatim; 0 summarizes everything
 #   model: ""                # optional models[].model for the summarizer; empty = session model
 #   fallback_models: []      # tried in order when the summarizer above them fails; the session
 #                            # model is the last resort whether or not it is listed
-#   # Fold the earlier steps of the turn being answered when the context reaches
-#   # the threshold and the window holds no earlier turn to fold, and compact and
-#   # ask again once when the provider refuses a request as larger than its window.
-#   # The summary row starts with the prompt itself, verbatim; at most the four
-#   # latest steps stay as they were.
-#   in_turn:
-#     enable: true           # false restores the behavior before: such a turn is not folded and a
-#                            # refused request ends the turn; needs auto_enable: true
 #   # Collapse superseded tool results to placeholders in the LLM request (the
 #   # persisted transcript stays complete). read/grep results survive while marked
 #   # or recent; glob, print_tree, websearch and webfetch results survive in the
