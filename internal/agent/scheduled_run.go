@@ -135,11 +135,11 @@ func RunScheduledJob(ctx context.Context, cfg *config.Config, rt SubagentRuntime
 	resolve := func(mcpTools []string) []string {
 		all := append(append([]string(nil), registryNames...), mcpTools...)
 		if def != nil {
-			return subagents.EffectiveTools(all, ToolSetForMode(mode), def, exclusions)
+			return subagents.EffectiveTools(all, modeToolNames(mode, all), def, exclusions)
 		}
-		return subagents.EffectiveTools(all, ToolSetForMode(mode), nil, exclusions)
+		return subagents.EffectiveTools(all, modeToolNames(mode, all), nil, exclusions)
 	}
-	connectMCP := mode != string(session.ModeAsk)
+	connectMCP := modeOffersMCP(mode)
 	if connectMCP && def != nil {
 		connectMCP = false
 		for _, server := range spec.MCPServerNames {

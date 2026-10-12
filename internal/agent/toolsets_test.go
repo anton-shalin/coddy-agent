@@ -290,3 +290,31 @@ func TestResumeAfterPermissionInPlanModeRunsAnAllowedTool(t *testing.T) {
 	}
 	t.Fatal("missing tool result for the resumed read")
 }
+
+// A child or a scheduled run is narrowed by what its mode admits, and plan
+// mode admits the MCP tools it offers: narrowing by the bare allowlist would
+// drop them. Ask admits none, and agent mode narrows nothing.
+func TestModeToolNamesKeepsMCPToolsWhereTheModeOffersThem(t *testing.T) {
+	names := []string{"read", "write", "run_command", "srv__tool", "spawn_agent"}
+	for _, tc := range []struct {
+		mode string
+		want []string
+	}{
+		{"plan", []string{"read", "run_command", "srv__tool", "spawn_agent"}},
+		{"ask", []string{"read"}},
+	} {
+		got := modeToolNames(tc.mode, names)
+		if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+			t.Errorf("%s mode narrows %v to %v, want %v", tc.mode, names, got, tc.want)
+		}
+		if offers := modeOffersMCP(tc.mode); offers != containsString(got, "srv__tool") {
+			t.Errorf("%s mode offers MCP tools = %v but its narrowing keeps them = %v", tc.mode, offers, !offers)
+		}
+	}
+	if got := modeToolNames("agent", names); got != nil {
+		t.Errorf("agent mode narrows to %v, want nil (unrestricted)", got)
+	}
+	if empty := modeToolNames("ask", []string{"write"}); empty == nil || len(empty) != 0 {
+		t.Errorf("a restricted mode that admits none of the names must narrow to an empty set, not to nil (unrestricted): %#v", empty)
+	}
+}
