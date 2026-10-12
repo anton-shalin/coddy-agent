@@ -518,6 +518,8 @@ HTTP **`POST /v1/responses`** принимает тот же хук через J
 
 Статусы вызова инструмента - `pending` | `in_progress` | `completed` | `failed` | `cancelled`
 
+Виды вызова инструмента берутся из перечисления `ToolKind` спецификации ACP, других Coddy не отправляет. `edit` получают `write`, `edit`, `apply_patch`, `mkdir`, `touch`, `config_commit` и `config_rollback`, `delete` - `rm` и `rmdir`, `move` - `mv`, `execute` - `run_command` и `ssh_run_command`, `search` - `glob`, `grep` и `coddy_docs_search`, `fetch` - `webfetch`, `websearch` и `http_request`, `read` - остальные читающие инструменты, а `other` - всё прочее, включая инструменты MCP. Тот же вид уходит в `toolCall` запроса `session/request_permission`.
+
 ### Собственные обновления сессии Coddy (`token_usage`, `usage_update`, `provider_usage`)
 
 Coddy отправляет три вида `session/update`, которых нет в спецификации
@@ -710,7 +712,7 @@ false`); такая строка никогда не читается, и обн
     "toolCall": {
       "toolCallId": "call_002",
       "title": "Run: go build ./...",
-      "kind": "run_command",
+      "kind": "execute",
       "status": "pending",
       "content": [
         { "type": "text", "text": "Execute: go build ./..." }
@@ -802,4 +804,4 @@ false`); такая строка никогда не читается, и обн
 }
 ```
 
-<!-- docsgen:source sha256=ee3fc69f57543dfb -->
+<!-- docsgen:source sha256=421ae5e0c5d0b5eb -->

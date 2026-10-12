@@ -596,7 +596,7 @@ A phone gives the shell 360 to 430 CSS px. Everything below lives in one **`@med
 ### Narrow-rail hover tooltips
 
 - Shown **only** when the rail is **narrow** (no wide labels column). Labels visible in wide rail substitute for tooltips; do not show floating tip rows there.
-- **Copy**: brand area **New Chat**, **History** nav control **History**, **Scheduler** nav control **Scheduler**, external links match their labels. Reference accent chrome in **`docs/assets/ref-navbar-narrow-tooltips-accent.png`**.
+- **Copy**: brand area **New Chat**, **History** nav control **History**, **Scheduler** nav control **Scheduler**, external links match their labels. External accent reference (from another product, colours only) in **`docs/assets/ref-navbar-narrow-tooltips-accent.png`**.
 - **While a control owns an open overlay** (example **History** with the list visible and **`.is-active`** on the trigger), **hide that row's tooltip** even if the mouse still hovers (**nav stacking can sit above backdrop**). Same for **Scheduler** when its drawer is open.
 - Tooltip **horizontal offset** must use the **same gutter math** as the History drawer (**column padding + nav floating gutter (+ border shim where needed)**), not a shorter offset from icon-only **`rail-tip-host`** width alone.
 
