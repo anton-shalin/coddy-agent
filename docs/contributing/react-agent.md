@@ -209,7 +209,7 @@ messages: [
   { role: "user",      content: <user_prompt> },
   { role: "assistant", content: "", tool_calls: [{ id: "call_1", name: "read", args: {...} }] },
   { role: "tool",      tool_call_id: "call_1", content: <file_contents> },
-  { role: "assistant", content: "", tool_calls: [{ id: "call_2", name: "write_file", args: {...} }] },
+  { role: "assistant", content: "", tool_calls: [{ id: "call_2", name: "write", args: {...} }] },
   { role: "tool",      tool_call_id: "call_2", content: "OK" },
   { role: "assistant", content: <final_answer> }
 ]

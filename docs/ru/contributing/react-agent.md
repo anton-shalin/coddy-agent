@@ -210,7 +210,7 @@ messages: [
   { role: "user",      content: <user_prompt> },
   { role: "assistant", content: "", tool_calls: [{ id: "call_1", name: "read", args: {...} }] },
   { role: "tool",      tool_call_id: "call_1", content: <file_contents> },
-  { role: "assistant", content: "", tool_calls: [{ id: "call_2", name: "write_file", args: {...} }] },
+  { role: "assistant", content: "", tool_calls: [{ id: "call_2", name: "write", args: {...} }] },
   { role: "tool",      tool_call_id: "call_2", content: "OK" },
   { role: "assistant", content: <final_answer> }
 ]
@@ -404,4 +404,4 @@ messages: [
 - Слишком длинный контекст - старые сообщения сжимаются в сводку, работа продолжается со сводкой;
 - Отмена - все операции прерываются, возвращается причина остановки `cancelled`.
 
-<!-- docsgen:source sha256=41e02da58e5ce18c -->
+<!-- docsgen:source sha256=264bd420422e9767 -->

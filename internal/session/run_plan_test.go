@@ -499,3 +499,46 @@ func TestRunPlanWhileAnAskOnceTurnRunsIsRefusedAsBusy(t *testing.T) {
 		t.Fatalf("the plan run after the ask turn: %v", err)
 	}
 }
+
+// An ask session never runs a plan, also when /agent --once lends one turn
+// agent mode: a plan that turn mentions is reading material, not a run that
+// the ask session would then refuse with an error.
+func TestAskSessionAgentOnceTurnReadsAMentionedPlan(t *testing.T) {
+	mgr, state, modes := newRunPlanSession(t, noopSender{})
+	state.SetMode(string(session.ModeAsk))
+	armMode(t, mgr, state.GetID(), "/agent --once")
+	if _, err := mgr.HandleSessionPrompt(context.Background(), acp.SessionPromptParams{
+		SessionID: state.GetID(),
+		Prompt:    []acp.ContentBlock{{Type: acp.ContentTypeText, Text: "Please review @plans/run-me.plan.md and explain it."}},
+	}); err != nil {
+		t.Fatalf("a plan mention in an /agent --once turn of an ask session failed: %v", err)
+	}
+	if len(*modes) != 1 || (*modes)[0] != string(session.ModeAgent) {
+		t.Fatalf("expected one agent-mode turn reading the plan, got %v", *modes)
+	}
+	if state.PendingPlanContext() != "" {
+		t.Fatal("the plan mention started a plan run in an ask session")
+	}
+	if got := state.GetMode(); got != string(session.ModeAsk) {
+		t.Fatalf("the ask session moved to %q", got)
+	}
+}
+
+// A plan mention that runs the plan in an agent session ends a /plan detour
+// the same way the run-plan metadata does.
+func TestPlanMentionRunEndsAnArmedModeDetour(t *testing.T) {
+	mgr, state, modes := newRunPlanSession(t, noopSender{})
+	armMode(t, mgr, state.GetID(), "/plan --count=3")
+	if _, err := mgr.HandleSessionPrompt(context.Background(), acp.SessionPromptParams{
+		SessionID: state.GetID(),
+		Prompt:    []acp.ContentBlock{{Type: acp.ContentTypeText, Text: "Implement the plan @plans/run-me.plan.md"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(*modes) != 1 || (*modes)[0] != string(session.ModeAgent) {
+		t.Fatalf("the plan run ran in %v, want one agent-mode turn", *modes)
+	}
+	if got := modeOverrides(state); len(got) != 0 {
+		t.Fatalf("the plan detour outlived the plan run: %+v", got)
+	}
+}

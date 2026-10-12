@@ -258,7 +258,7 @@ YAML-based configuration. Resolution uses **`CODDY_HOME`** (default **`~/.coddy`
 
 ### `plan` mode
 - Narrow **registry** tool surface enforced by **`internal/agent.ToolSetForMode("plan")`**
-- **`read`**, **`glob`**, **`grep`**, **`print_tree`**, **`websearch`**, **`webfetch`**, **`run_command`**, **`question`**, **`spawn_agent`** (a child of a plan-mode parent stays in plan mode), plus any **MCP** tools from configured servers
+- **`read`**, **`glob`**, **`grep`**, **`print_tree`**, **`websearch`**, **`webfetch`**, **`run_command`**, **`question`**, **`spawn_agent`** (a child of a plan-mode parent stays in plan mode), the **`plan_*`** document tools and the rest of the allowlist ([Operating modes](../features/modes.md#plan) has the whole list), plus any **MCP** tools from configured servers
 - No built-in workspace writes or **coddy** todo tools in the advertised set (switch to **agent** for those)
 - Like **ask**, the allowlist is also enforced at execution time (**`toolCallRefusedByMode`**, on the permission-resume path as well): a tool call outside the set, for example one replayed from history, is refused with a notice instead of being executed, and approving a pending call with **allow always** records no grant. MCP tool names pass the check and are left to **`callMCPTool`**
 - Suitable for: design docs, specs, architecture planning, external research, and light shell or MCP inspection without offering full mutating builtins

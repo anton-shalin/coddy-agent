@@ -1668,12 +1668,15 @@ func (m *Manager) HandleSessionPromptWithSender(ctx context.Context, params acp.
 	subagentTurn := opts != nil && opts.subagentTurn
 	// Ask mode is read-only: a plan mention below stays material to read
 	// (HydrateSessionPlanMentions inlines the document) instead of turning
-	// into a run request. The mode is the turn's, which the settings bracket
-	// above has just fixed: an /ask --once turn in an agent session reads a
-	// plan it mentions, too. The run-plan metadata is an explicit request to
-	// run: only an ask session refuses it (refuseAskModePlanRun), and a run in
-	// any other session ends a mode detour the turn holds.
+	// into a run request, in an ask session and in an ask turn alike. The
+	// turn's mode is the one the settings bracket above has just fixed: an
+	// /ask --once turn in an agent session reads a plan it mentions, and so
+	// does an /agent --once turn of an ask session, which may not run one.
+	// The run-plan metadata is an explicit request to run: only an ask
+	// session refuses it (refuseAskModePlanRun), and a run in any other
+	// session ends a mode detour the turn holds.
 	askMode := state.EffectiveMode() == string(ModeAsk)
+	planMentionRuns := !askMode && state.GetMode() != string(ModeAsk)
 
 	// A restricted turn (a messenger user who is not the bot's admin) does not
 	// run a plan: running one switches the session's mode, which is the
@@ -1705,7 +1708,7 @@ func (m *Manager) HandleSessionPromptWithSender(ctx context.Context, params acp.
 	if err != nil {
 		return nil, err
 	}
-	if sd := strings.TrimSpace(state.GetPersistedSessionDir()); sd != "" && !subagentTurn && !askMode && !restricted {
+	if sd := strings.TrimSpace(state.GetPersistedSessionDir()); sd != "" && !subagentTurn && planMentionRuns && !restricted {
 		if mentionSlug := ExtractRunPlanSlugFromPromptText(contentBlocksToPlainText(hydrated)); mentionSlug != "" {
 			return m.runPlanAdmitted(turnCtx, params.SessionID, mentionSlug, state, sender)
 		}
