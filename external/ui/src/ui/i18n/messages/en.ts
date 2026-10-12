@@ -708,13 +708,9 @@ export const messagesEn: Record<string, string> = {
   "settings.schema.compaction.in_turn.enable.label": "Enabled",
   "settings.schema.compaction.in_turn.enable.desc":
     "Master switch for the in-turn fold and the recovery from a refused request. Defaults to true; false restores the behavior before they existed. Has no effect while automatic compaction (auto_enable) is off: both need the automatic trigger.",
-  "settings.schema.compaction.in_turn.keep_recent_steps.label":
-    "Keep recent steps",
-  "settings.schema.compaction.in_turn.keep_recent_steps.desc":
-    "The largest number of the turn's latest steps the fold leaves verbatim (default 4, at least 1; a step is one assistant message with all its parallel tool results). The fold keeps fewer when the kept steps would not leave the next request room under the threshold.",
   "settings.schema.compaction.result_eviction.label": "Tool result eviction",
   "settings.schema.compaction.result_eviction.desc":
-    "Collapse superseded tool results (read pages, grep dumps, and the listings of glob, print_tree, websearch and webfetch) to placeholders when building the LLM request; the persisted transcript is untouched. Read and grep results survive when marked (keep_result / keep:true) or among the most recent; listings survive within the latest steps.",
+    "Collapse superseded tool results (read pages, grep dumps, and the listings of glob, print_tree, websearch and webfetch) to placeholders when building the LLM request; the persisted transcript is untouched. Read and grep results survive when marked (keep_result / keep:true) or among the most recent; listings survive within the latest three steps.",
   "settings.schema.compaction.result_eviction.enable.label": "Enabled",
   "settings.schema.compaction.result_eviction.enable.desc":
     "Master switch for tool result eviction. Defaults to true.",
@@ -722,10 +718,6 @@ export const messagesEn: Record<string, string> = {
     "Keep recent results",
   "settings.schema.compaction.result_eviction.keep_recent.desc":
     "How many most recent read and grep results stay intact as a working window (default 2 - enough to hold a read and a grep at once; 0 keeps none).",
-  "settings.schema.compaction.result_eviction.keep_recent_steps.label":
-    "Keep recent steps",
-  "settings.schema.compaction.result_eviction.keep_recent_steps.desc":
-    "How many of the most recent steps holding a listing result keep all of their listing results (default 3, at least 1: the latest step that holds a listing always keeps its results). A step is one assistant message with all its parallel tool results.",
   "settings.schema.compaction.result_eviction.min_result_bytes.label":
     "Min result bytes",
   "settings.schema.compaction.result_eviction.min_result_bytes.desc":

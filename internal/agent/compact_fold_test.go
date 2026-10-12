@@ -6,10 +6,8 @@ package agent
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"strings"
 	"testing"
 
@@ -449,6 +447,10 @@ func TestFoldFailsOverAtOnceOnARefusalThatIsNotAboutSize(t *testing.T) {
 	}
 }
 
+// A pass the provider refused as too large is sent again with half of what it
+// carried, by the estimate the pass was sized with. The figures a refusal may
+// carry are logged, never aimed at: a limit the provider reports can be far from
+// the one it enforces, and halving is what the fold can count on.
 func TestFoldShrinksAPassTheProviderFoundTooLarge(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -464,11 +466,13 @@ func TestFoldShrinksAPassTheProviderFoundTooLarge(t *testing.T) {
 			wantCovered:  1,
 		},
 		{
-			name: "figures in the refusal: straight under the limit",
+			// A refusal that names a limit sixteen times smaller than what was
+			// sent: a pass aimed at it would fit at once, halving takes two cuts.
+			name: "figures in the refusal: halving all the same",
 			refusal: func(sent int) error {
 				return fmt.Errorf("400 Bad Request: This model's maximum context length is %d tokens. However, your messages resulted in %d tokens.", sent/16, sent)
 			},
-			wantRefusals: 1,
+			wantRefusals: 2,
 			wantCovered:  1,
 		},
 	} {
@@ -496,27 +500,6 @@ func TestFoldShrinksAPassTheProviderFoundTooLarge(t *testing.T) {
 			}
 			if covered != tc.wantCovered {
 				t.Errorf("the pass covered %d messages, want %d", covered, tc.wantCovered)
-			}
-		})
-	}
-}
-
-func TestShrunkenPassTokens(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		body   int
-		detail llm.OverflowDetail
-		want   int
-	}{
-		{"no figures: half", 8000, llm.OverflowDetail{}, 4000},
-		{"a limit alone: half", 8000, llm.OverflowDetail{Limit: 8000}, 4000},
-		{"over by a little: never less than halving", 8000, llm.OverflowDetail{Prompt: 9000, Limit: 8000}, 4000},
-		{"far over: aim under the limit", 8000, llm.OverflowDetail{Prompt: 80000, Limit: 8000}, 640},
-		{"a prompt under its own limit says nothing about the overflow", 8000, llm.OverflowDetail{Prompt: 1000, Limit: 8000}, 4000},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := shrunkenPassTokens(tc.body, tc.detail); got != tc.want {
-				t.Fatalf("shrunkenPassTokens(%d, %+v) = %d, want %d", tc.body, tc.detail, got, tc.want)
 			}
 		})
 	}
@@ -629,24 +612,6 @@ func TestFoldDoesNotCutForAStatusThatIsNotAboutSize(t *testing.T) {
 				t.Fatalf("a %d was asked %d times, want once", status, len(broken.requests))
 			}
 		})
-	}
-}
-
-// A refusal can say anything. Figures no window has must not reach arithmetic
-// that wraps (2^62 * 100 is 0 in 64 bits).
-func TestShrunkenPassTokensSurvivesAbsurdFigures(t *testing.T) {
-	text := errors.New("400: prompt is too long: 4611686018427387904 tokens > 1 maximum")
-	if got := shrunkenPassTokens(8000, llm.OverflowDetailOf(text)); got != 4000 {
-		t.Fatalf("shrunkenPassTokens on the figures of %q = %d, want halving", text, got)
-	}
-	for _, d := range []llm.OverflowDetail{
-		{Prompt: 4611686018427387904, Limit: 1},
-		{Prompt: math.MaxInt, Limit: math.MaxInt - 1},
-		{Prompt: math.MaxInt, Limit: 1},
-	} {
-		if got := shrunkenPassTokens(8000, d); got < 0 || got > 4000 {
-			t.Errorf("shrunkenPassTokens(8000, %+v) = %d, want a figure between 0 and the half", d, got)
-		}
 	}
 }
 

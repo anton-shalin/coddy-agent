@@ -202,25 +202,19 @@ sessions:
 #   # Fold the earlier steps of the turn being answered when the context reaches
 #   # the threshold and the window holds no earlier turn to fold, and compact and
 #   # ask again once when the provider refuses a request as larger than its window.
-#   # The summary row starts with the prompt itself, verbatim.
+#   # The summary row starts with the prompt itself, verbatim; at most the four
+#   # latest steps stay as they were.
 #   in_turn:
 #     enable: true           # false restores the behavior before: such a turn is not folded and a
 #                            # refused request ends the turn; needs auto_enable: true
-#     keep_recent_steps: 4   # at most this many latest steps of the turn stay verbatim (>= 1); the
-#                            # fold keeps fewer when they would not fit under the threshold
 #   # Collapse superseded tool results to placeholders in the LLM request (the
 #   # persisted transcript stays complete). read/grep results survive while marked
 #   # or recent; glob, print_tree, websearch and webfetch results survive in the
-#   # latest steps and, for glob, until a write lands under the folder it listed;
-#   # a print_tree, which shows names only, until a write that can create, remove
-#   # or move a file or folder does.
+#   # latest three steps that hold one and, for glob and print_tree, until a write
+#   # lands under the folder they listed.
 #   result_eviction:
 #     enable: true           # master switch
 #     keep_recent: 2         # most recent evictable read/grep results kept as a working window; 0 keeps none
-#     tools: [glob, print_tree, websearch, webfetch]  # listing tools evicted by whole steps (the
-#                            # default); [] evicts read/grep only; no other name is accepted
-#     keep_recent_steps: 3   # latest steps whose listing results stay whole; at least 1, so the
-                           # listing just asked for always reaches the model
 #     min_result_bytes: 2000 # results this size or smaller are never evicted
 #     start_percent: 50      # wait until the context is this full before evicting; 0 = from the
 #                            # first result. A placeholder written into the middle of the history

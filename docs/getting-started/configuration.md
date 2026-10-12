@@ -302,7 +302,6 @@ compaction:
     enable: true           # fold the earlier steps of the turn being answered at the threshold, and
                            # compact and ask again once when the provider refuses a request as too large;
                            # needs auto_enable: true
-    keep_recent_steps: 4   # at most this many latest steps of the turn stay verbatim (>= 1)
 
 # Optional long-term memory subagent (Go: config.MemoryConfig, internal/config/memory.go; logic in external/memory).
 # Linked with the memory build tag; enable at runtime with memory.enable. Every user turn then starts a memory

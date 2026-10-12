@@ -46,12 +46,6 @@ type SessionState interface {
 	EffectiveModelID(cfg *config.Config) string
 	EffectiveReasoning(cfg *config.Config) string
 	AddMessage(msg llm.Message)
-	// AddTurnOpening appends the message a turn opens with and records where it
-	// is; TurnAnchor reads the record back, kept in step with the summary rows
-	// inserted in front of it. Compactions use it to tell the prompt being
-	// answered from the follow-ups queued after it (session.OpeningPromptIndex).
-	AddTurnOpening(msg llm.Message)
-	TurnAnchor() session.TurnAnchor
 	GetMessages() []llm.Message
 	InsertCompactionSummary(idx int, msg llm.Message)
 	GetMCPClients() []*mcp.Client
@@ -147,10 +141,10 @@ type Agent struct {
 	// autoCompactSkipLogged records that this turn already logged an
 	// automatic compaction with nothing to fold (compact.go).
 	autoCompactSkipLogged bool
-	// autoCompactFutileLogged is the same for an automatic fold of the turn's
-	// steps skipped because it could not bring the request under the threshold
-	// (checkFoldGain).
-	autoCompactFutileLogged bool
+	// inTurnFoldSpent records that an automatic fold of this turn's steps left
+	// the request over the threshold, so the turn makes no more of them
+	// (maybeAutoCompact): each would be a summarizer call per step.
+	inTurnFoldSpent bool
 	// evictionForced is set once the provider refused a request of this turn as
 	// larger than its window: from then on result eviction projects the history
 	// whatever start_percent says. The gate exists to keep the provider's prompt
@@ -330,22 +324,14 @@ func (a *Agent) Run(ctx context.Context, prompt []acp.ContentBlock) (string, err
 			Content:       acp.ContentBlock{Type: acp.ContentTypeText, Text: messageContent},
 		})
 	}
-	opening := llm.Message{
+	a.state.AddMessage(llm.Message{
 		Role:           llm.RoleUser,
 		Content:        messageContent,
 		ImageParts:     imageParts,
 		CreatedAt:      time.Now().UTC().Format(time.RFC3339),
 		BackgroundWake: wake,
 		GoalTurn:       goalTurn,
-	}
-	// The session records where the turn opened: the request being answered,
-	// which a compaction must keep. Follow-ups the user queues during the turn are
-	// user messages too, and only this record tells them from the prompt
-	// (session.OpeningPromptIndex). It lives on the session rather than on this
-	// Agent so that it follows the rows a compaction inserts in front of it, and so
-	// that a turn resumed after a permission answer, which runs on a new Agent over
-	// the same session, finds it.
-	a.state.AddTurnOpening(opening)
+	})
 	a.setHookTurn(session.CountUserTurns(a.state.GetMessages()))
 	// The turn's clock is announced before anything slow happens - the memory
 	// run below, the first model call - so a surface counts from the start.

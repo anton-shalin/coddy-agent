@@ -9,15 +9,12 @@ package agent
 //     recent working window of results), were marked useful (keep:true on the
 //     call, or a keep_result pin), and have not been made stale by a later write
 //     to a file they covered;
-//   - the listings of glob, print_tree, websearch and webfetch (the tools named
-//     by compaction.result_eviction.tools) survive only inside the last
-//     keep_recent_steps steps that hold one (never fewer than the latest) - a
-//     step is the assistant message that issued a batch of calls with every
-//     result of that batch, so a fan-out of ten parallel calls is one step -
-//     and, for glob and print_tree, until a write lands under the folder they
-//     listed (any write for glob, which is sorted by modification time; only
-//     one that can create, remove or move an entry for print_tree, which shows
-//     names). They have no pins.
+//   - the listings of glob, print_tree, websearch and webfetch survive only
+//     inside the last listingKeepRecentSteps steps that hold one - a step is the
+//     assistant message that issued a batch of calls with every result of that
+//     batch, so a fan-out of ten parallel calls is one step - and, for glob and
+//     print_tree, until a write lands under the folder they listed. They have no
+//     pins.
 //
 // Everything else collapses to a short placeholder that keeps the
 // tool_call/tool_result pairing valid for the provider: role, tool call id and
@@ -36,6 +33,19 @@ import (
 	"github.com/EvilFreelancer/coddy-agent/internal/tools"
 )
 
+// listingTools are the read-only listing tools whose results are evicted
+// besides read and grep. A result of theirs can be asked for again by repeating
+// the call and says nothing the call does not. run_command and MCP tools are
+// deliberately not here: a shell command or a remote server may not give the
+// same answer twice, or may have changed something by running, so a placeholder
+// would withhold what cannot be fetched again.
+var listingTools = map[string]bool{"glob": true, "print_tree": true, "websearch": true, "webfetch": true}
+
+// listingKeepRecentSteps is how many of the latest steps that hold a listing
+// result keep all of those results intact. Counting steps rather than results
+// keeps one fan-out of parallel calls from filling the window by itself.
+const listingKeepRecentSteps = 3
+
 // resultEvictionOptions configures pruneToolResults.
 type resultEvictionOptions struct {
 	Enabled        bool
@@ -43,31 +53,26 @@ type resultEvictionOptions struct {
 	MinResultBytes int // results at or below this size are never candidates
 	CWD            string
 	// ListingTools names the read-only listing tools evicted besides read and
-	// grep (glob, print_tree, websearch, webfetch). Empty evicts read and grep only.
+	// grep (listingTools). Empty evicts read and grep only.
 	ListingTools map[string]bool
 	// KeepRecentSteps is how many of the latest steps that hold a listing
-	// result keep all of those results intact. A value below 1 behaves as 1: the
-	// latest such step always keeps its results, so a listing the model has just
-	// asked for reaches it instead of being collapsed in the next request and
-	// asked for again (the configuration refuses 0; this is the same floor for
-	// options built in code).
+	// result keep all of those results intact (listingKeepRecentSteps). A value
+	// below 1 behaves as 1: the latest such step always keeps its results, so a
+	// listing the model has just asked for reaches it instead of being collapsed
+	// in the next request and asked for again.
 	KeepRecentSteps int
 }
 
 // evictionOptions reads the effective result-eviction settings for this agent.
 func (a *Agent) evictionOptions() resultEvictionOptions {
 	re := &a.cfg.Compaction.ResultEviction
-	listing := make(map[string]bool)
-	for _, name := range re.EffectiveTools() {
-		listing[name] = true
-	}
 	return resultEvictionOptions{
 		Enabled:         re.IsEnabled(),
 		KeepRecent:      re.EffectiveKeepRecent(),
 		MinResultBytes:  re.EffectiveMinResultBytes(),
 		CWD:             a.state.GetCWD(),
-		ListingTools:    listing,
-		KeepRecentSteps: re.EffectiveKeepRecentSteps(),
+		ListingTools:    listingTools,
+		KeepRecentSteps: listingKeepRecentSteps,
 	}
 }
 
@@ -86,7 +91,34 @@ func (a *Agent) prunedForLLM(msgs []llm.Message) []llm.Message {
 	if !a.evictionDue(msgs) {
 		return msgs
 	}
-	return pruneToolResults(msgs, a.evictionOptions())
+	opt := a.evictionOptions()
+	if !a.listingEvictionDue(msgs) {
+		opt.ListingTools = nil
+	}
+	return pruneToolResults(msgs, opt)
+}
+
+// listingEvictionDue is evictionDue for the listing results, measured against
+// the window the session works with (contextWindow: the model entry's
+// max_context_tokens, else the window its provider reports, else the default)
+// rather than the model entry alone. A model entry without max_context_tokens
+// evicts read and grep from the first result, as it always did; listings
+// collapsing from the first request too would rewrite the middle of the history
+// at nearly every step, which is the churn start_percent exists to prevent.
+func (a *Agent) listingEvictionDue(msgs []llm.Message) bool {
+	if a.evictionForced {
+		return true
+	}
+	start := a.cfg.Compaction.ResultEviction.EffectiveStartPercent()
+	if start <= 0 {
+		return true
+	}
+	window, _ := a.contextWindow()
+	if window <= 0 {
+		return true
+	}
+	total := a.requestOverhead() + conversationTokens(msgs, a.modelReadsImages())
+	return total*100 >= start*window
 }
 
 // evictionDue reports whether the conversation has grown far enough into the
@@ -184,10 +216,6 @@ type evGrepPin struct {
 type evWrite struct {
 	msgIdx int
 	path   string // absolute
-	tool   string // the write tool's name
-	// structural is true when the write can create, remove or move a directory
-	// entry (writeStructural). Only that changes what a name listing shows.
-	structural bool
 }
 
 // grepLineRe captures the leading "path:line:" of a grep record. The non-greedy
@@ -234,9 +262,8 @@ func pruneToolResults(history []llm.Message, opt resultEvictionOptions) []llm.Me
 		// Only completed mutations make prior observations stale. Permission
 		// denials, tool errors, and loop-guard placeholders leave files untouched.
 		if filesystemWriteTool(call.Name) && writeResultSucceeded(m.Content) {
-			structural := writeStructural(call.Name, call.InputJSON)
 			for _, p := range writeTargets(call.Name, call.InputJSON, opt.CWD) {
-				writes = append(writes, evWrite{msgIdx: i, path: p, tool: call.Name, structural: structural})
+				writes = append(writes, evWrite{msgIdx: i, path: p})
 			}
 		}
 		// Skip tiny results: not worth a placeholder, and they do not consume the
@@ -647,24 +674,16 @@ func staleGrepWrite(g evGrepResult, writes []evWrite) (evWrite, bool) {
 }
 
 // staleListingWrite reports the first successful write after the listing that
-// touched its folder, or a folder around it. What counts depends on what the
-// listing shows. glob is sorted by modification time, so any write under its
-// root can reorder it. print_tree shows names only, sorted by name: only a write
-// that can create, remove or move an entry changes it, and an edit of a file
-// that was there leaves it as it was. The web tools have no root and are never
-// stale.
+// touched its folder, or a folder around it: the listing may no longer match the
+// disk. The web tools have no root and are never stale.
 func staleListingWrite(l evListing, writes []evWrite) (evWrite, bool) {
 	if l.root == "" {
 		return evWrite{}, false
 	}
 	for _, w := range writes {
-		if w.msgIdx <= l.msgIdx || !pathsRelated(w.path, l.root) {
-			continue
+		if w.msgIdx > l.msgIdx && pathsRelated(w.path, l.root) {
+			return w, true
 		}
-		if l.tool == "print_tree" && !w.structural {
-			continue
-		}
-		return w, true
 	}
 	return evWrite{}, false
 }
@@ -797,61 +816,4 @@ func listingStalePlaceholder(l evListing, w evWrite, cwd string) string {
 	}
 	return fmt.Sprintf("[evicted: %s of %s is stale after %s was modified; re-run if needed]",
 		l.tool, relForDisplay(l.root, cwd), relForDisplay(w.path, cwd))
-}
-
-// writeStructural reports whether a successful call of a filesystem write tool
-// can create, remove or move a directory entry, which is what a listing of names
-// (print_tree) shows. write may create its file, and mkdir, rmdir, touch, rm and
-// mv exist to change entries. edit and apply_patch read their file first and fail
-// when it is missing, so they only rewrite an entry that was already there and
-// every name stays where it was. A patch that names a file to add, delete or move
-// counts as structural, and so does one whose input cannot be read: the tool
-// today applies the hunks to its path alone and skips those headers, but a
-// listing dropped for nothing costs one repeated call and a listing trusted
-// wrongly costs a wrong picture of the tree.
-func writeStructural(tool, argsJSON string) bool {
-	switch tool {
-	case "edit":
-		return false
-	case "apply_patch":
-		return patchChangesEntries(argsJSON)
-	default:
-		return true
-	}
-}
-
-// patchChangesEntries reads an apply_patch input the way the tool does (patch,
-// else the legacy diff) and reports whether the patch adds, deletes or moves a
-// file, in the Codex format ("*** Add File:", "*** Delete File:", "*** Move to:")
-// or as a unified diff from or to /dev/null. An input it cannot read, or a
-// missing patch, reports true.
-func patchChangesEntries(argsJSON string) bool {
-	var a struct {
-		Patch string `json:"patch"`
-		Diff  string `json:"diff"`
-	}
-	if json.Unmarshal([]byte(argsJSON), &a) != nil {
-		return true
-	}
-	body := a.Patch
-	if strings.TrimSpace(body) == "" {
-		body = a.Diff
-	}
-	if strings.TrimSpace(body) == "" {
-		return true
-	}
-	for _, line := range strings.Split(body, "\n") {
-		trimmed := strings.TrimSpace(line)
-		switch {
-		case strings.HasPrefix(trimmed, "*** Add File:"),
-			strings.HasPrefix(trimmed, "*** Delete File:"),
-			strings.HasPrefix(trimmed, "*** Move to:"):
-			return true
-		case strings.HasPrefix(line, "--- "), strings.HasPrefix(line, "+++ "):
-			if name := strings.Fields(line[4:]); len(name) > 0 && name[0] == "/dev/null" {
-				return true
-			}
-		}
-	}
-	return false
 }

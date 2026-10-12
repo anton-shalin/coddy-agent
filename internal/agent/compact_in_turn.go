@@ -16,18 +16,14 @@ package agent
 // The prompt cannot be summarized away - a model that is not told what it was
 // asked answers nothing - so the summary row, which becomes the first message
 // of the replay window, begins with the prompt itself, verbatim, capped to a
-// share of the window, and only then carries the summary. The follow-ups the
-// user queued while the turn was being worked on go with it (inTurnPromptPrefix).
+// share of the window, and only then carries the summary.
 //
-// How many steps stay is decided by a budget, not only by compaction.in_turn.
-// keep_recent_steps: the fold aims the next request at half of the share of the
-// window that triggers compaction. Without that aim, a fold that kept four huge
-// steps would leave the request over the threshold and fold again at the next
-// step.
+// How many steps stay is decided by a budget, not only by inTurnKeepRecentSteps:
+// the fold aims the next request at half of the share of the window that
+// triggers compaction. Without that aim, a fold that kept four huge steps would
+// leave the request over the threshold and fold again at the next step.
 
 import (
-	"fmt"
-	"math"
 	"strings"
 
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
@@ -36,6 +32,9 @@ import (
 )
 
 const (
+	// inTurnKeepRecentSteps is the most steps of the turn an in-turn fold keeps
+	// verbatim; the budget keeps fewer when they would not fit.
+	inTurnKeepRecentSteps = 4
 	// inTurnAimPercent is how much of the threshold share of the window an
 	// in-turn fold aims the next request at. The fold aims at half of it, so the
 	// turn has room for its next steps (and for the summary, which the budget
@@ -54,24 +53,17 @@ const (
 // whole at the start of the summary row. The full text stays in the transcript.
 const inTurnPromptCutMarker = "\n[... %d characters omitted from the middle of this request by Coddy to keep it within its share of the context window ...]\n"
 
-// inTurnFollowUpIntro introduces each follow-up the user sent during the turn in
-// the prefix of the summary row.
-const inTurnFollowUpIntro = "Follow-up the user sent while this request was being worked on:"
-
 // inTurnSplitRequest is everything the choice of an in-turn boundary reads.
 type inTurnSplitRequest struct {
 	// msgs is the whole transcript; visibleStart is where the replay window
 	// begins in it. Every index is absolute.
 	msgs         []llm.Message
 	visibleStart int
-	// anchor is the record of the message the turn opened with; the zero value
-	// is none (session.OpeningPromptIndex says what then).
-	anchor session.TurnAnchor
 	// projected is the window as the fold summarizes it and as the next request
 	// replays it (result eviction applied), index-aligned with
 	// msgs[visibleStart:]. The kept tail is measured on it.
 	projected []llm.Message
-	// keepSteps is compaction.in_turn.keep_recent_steps: the most steps kept.
+	// keepSteps is the most steps kept (inTurnKeepRecentSteps).
 	keepSteps int
 	// recovery marks a request the provider refused: the floor is no step kept
 	// instead of one, and a regular split is preferred while the turn in
@@ -114,14 +106,14 @@ func chooseInTurnSplit(r inTurnSplitRequest) (inTurnSplit, error) {
 	tail := func(idx int) int {
 		return conversationTokens(r.projected[idx-r.visibleStart:], r.readsImages)
 	}
-	steps := session.TurnStepCount(r.msgs, r.anchor)
+	steps := session.TurnStepCount(r.msgs)
 	hasSteps := steps > 0
 
 	if r.recovery {
 		// The regular candidate cuts at user turns only, and a follow-up the
 		// user sent during this turn is not one: it would fold the opening prompt.
 		last := len(r.msgs) - 1
-		if open, ok := session.OpeningPromptIndex(r.msgs, r.anchor); ok {
+		if open, ok := session.OpeningPromptIndex(r.msgs); ok {
 			last = open
 		}
 		if idx, ok := session.CompactionSplitIndexUpTo(r.msgs, 1, last); ok && idx >= r.visibleStart {
@@ -141,10 +133,9 @@ func chooseInTurnSplit(r inTurnSplitRequest) (inTurnSplit, error) {
 	var last inTurnSplit
 	found := false
 	// At most steps-1 can stay (the head holds a step at least, or nothing at
-	// all in a recovery), whatever the cap says: a cap of a million is no reason
-	// to walk a million boundaries.
+	// all in a recovery), whatever the cap says.
 	for k := min(r.keepSteps, steps-1); k >= floor; k-- {
-		idx, ok := session.TurnStepSplitIndex(r.msgs, k, r.anchor)
+		idx, ok := session.TurnStepSplitIndex(r.msgs, k)
 		if !ok {
 			continue
 		}
@@ -171,36 +162,15 @@ func inTurnTargetTokens(limit, thresholdPercent int) int {
 	return limit * thresholdPercent * inTurnAimPercent / 10000
 }
 
-// inTurnPromptPrefix is what goes in front of the summary: the opening prompt
-// and then each follow-up the user sent during the turn that the fold takes
-// away, every one introduced by a line of its own (inTurnFollowUpIntro). It is
+// inTurnPromptPrefix is what goes in front of the summary: the opening prompt,
 // verbatim when it fits its share of the limit, else cut in the middle with a
-// marker of its own that says so; the share is the same one for the whole, so a
-// long prompt and a long run of follow-ups together never take more than a tenth
-// of the window, and the cut keeps both ends of it - the head of the prompt and
-// the latest follow-up.
-//
-// A follow-up is the user's own words correcting or extending the request, and
-// usually short. A summarizer that paraphrases it can drop the correction, so it
-// is carried like the request is. A Stop-hook follow-up is hook output, not the
-// user's text, and is summarized with the rest of the head; session.TurnFollowUps
-// leaves it out.
-func inTurnPromptPrefix(prompt string, followUps []string, limit int) string {
-	text := prompt
-	if len(followUps) > 0 {
-		var b strings.Builder
-		b.WriteString(prompt)
-		for _, f := range followUps {
-			b.WriteString("\n\n" + inTurnFollowUpIntro + "\n")
-			b.WriteString(f)
-		}
-		text = b.String()
-	}
+// marker of its own that says so, so both ends of it survive.
+func inTurnPromptPrefix(prompt string, limit int) string {
 	maxTokens := max(inTurnPromptMinTokens, limit*inTurnPromptSharePercent/100)
-	if session.EstimateContextTokens(text) <= maxTokens {
-		return text
+	if session.EstimateContextTokens(prompt) <= maxTokens {
+		return prompt
 	}
-	return elideToTokensMarked(text, maxTokens, inTurnPromptCutMarker)
+	return elideToTokensMarked(prompt, maxTokens, inTurnPromptCutMarker)
 }
 
 // promptShareLimit is the limit the share of the prefix is taken of: the limit
@@ -217,36 +187,22 @@ func (a *Agent) promptShareLimit(limitTokens int) int {
 	return limit
 }
 
-// inTurnPrefix is the prefix of the summary row of a compaction that cuts at
-// split while a turn is in progress, and ok says whether the row has one: it has
-// when the turn's opening prompt lies before the split (in the head, or hidden
-// behind the summary row an earlier fold wrote) and carries text. The follow-ups
-// are the ones the user queued between the prompt and the split; those in the kept
-// tail stay where they are, so nothing is written twice. source is who wrote the
-// opening message - the user, the goal supervisor or a finished background task -
-// which the row says in front of its summary (session.TurnSourceOf).
-func (a *Agent) inTurnPrefix(msgs []llm.Message, split, limit int) (prefix string, source session.TurnSource, ok bool) {
-	open, found := session.OpeningPromptIndex(msgs, a.state.TurnAnchor())
+// inTurnPrefix is the prefix of the summary row of an in-turn fold that cuts at
+// split, and ok says whether the row has one: it has when the turn's opening
+// prompt lies before the split and carries text.
+func (a *Agent) inTurnPrefix(msgs []llm.Message, split, limit int) (prefix string, ok bool) {
+	open, found := session.OpeningPromptIndex(msgs)
 	if !found || open >= split || strings.TrimSpace(msgs[open].Content) == "" {
-		return "", session.TurnSourceUser, false
+		return "", false
 	}
-	return inTurnPromptPrefix(msgs[open].Content, session.TurnFollowUps(msgs, open, split), limit), session.TurnSourceOf(msgs[open]), true
+	return inTurnPromptPrefix(msgs[open].Content, limit), true
 }
 
 // withInTurnSummaryInstructions tells the summarizer the transcript it reads
-// stops in the middle of the work, and that the request it serves is kept
-// verbatim in front of its summary.
-func withInTurnSummaryInstructions(instructions string, source session.TurnSource) string {
-	// The message the turn answers is named for who wrote it, as the row's
-	// preamble names it: in a goal turn or a woken turn it is not the user's.
-	what := "the user's latest request"
-	switch source {
-	case session.TurnSourceSupervisor:
-		what = "the instruction the session's goal supervisor started this turn with"
-	case session.TurnSourceBackground:
-		what = "the notice that woke this turn when a background task finished"
-	}
-	note := "The transcript ends in the middle of the agent's work on " + what + ". " +
+// stops in the middle of the work, and that the message the turn answers is
+// kept verbatim in front of its summary.
+func withInTurnSummaryInstructions(instructions string) string {
+	note := "The transcript ends in the middle of the agent's work on the message this turn started with. " +
 		"That message stays verbatim in front of your summary, so do not repeat it. " +
 		"Summarize what was done for it so far, what it found, the files touched, and what remains to be done."
 	if instructions == "" {
@@ -267,99 +223,13 @@ func (a *Agent) requestOverhead() int {
 	return 0
 }
 
-// foldFutileError is why an automatic fold inside the turn was not made: the
-// smallest request it can produce is not under the threshold, so the very next
-// step would trigger it again. It unwraps to ErrNothingToCompact, the answer the
-// loop already continues on, and carries the numbers the skip is logged with.
-type foldFutileError struct {
-	// estimate is the smallest request the fold can produce, in the units the
-	// threshold is measured in: the sum of the four parts below, in estimate
-	// tokens, times scale.
-	estimate int
-	// threshold is compaction.threshold_percent of the window, the trigger.
-	threshold int
-	// overhead is what every request carries besides the conversation.
-	overhead int
-	// row is the summary row's own text apart from the summary: the prefix and
-	// the preamble.
-	row int
-	// summary is the estimate of the summary itself.
-	summary int
-	// tail is the kept tail at the floor of one step.
-	tail int
-	// scale is how many tokens the provider counted for each token Coddy estimated
-	// for the last request (providerScale), 1 when it reported none.
-	scale float64
-}
-
-func (e *foldFutileError) Error() string {
-	units := ""
-	if e.scale != 1 {
-		units = fmt.Sprintf(", estimate tokens, times %.2f as the provider counts", e.scale)
-	}
-	return fmt.Sprintf("folding the earlier steps of the turn cannot bring the request under the threshold: "+
-		"the smallest request is about %d tokens (%d overhead + %d prefix and preamble + %d summary + %d latest step%s) against %d",
-		e.estimate, e.overhead, e.row, e.summary, e.tail, units, e.threshold)
-}
-
-func (e *foldFutileError) Unwrap() error { return ErrNothingToCompact }
-
-// checkFoldGain refuses an automatic fold inside the turn that cannot bring the
-// request under the threshold. The smallest request the fold can produce is the
-// request's overhead, the summary row's prefix and preamble, an estimate of the
-// summary, and the kept tail at the floor of one step. The summary is estimated
-// as the one the window opens with, when it opens with one: the next summary
-// folds that one and what came after it, so it will be about as long; a window
-// that opens with a prompt has no summary to go by and counts 0.
-//
-// The bar is the threshold, the trigger itself. A request at or above it triggers
-// the fold again at the next step, which is a summarizer call per step and a
-// summary of a summary. The aim of the fold is lower, half of the threshold share
-// (inTurnAimPercent), and a fold that lands between the aim and the threshold
-// still buys several steps before the next one; only a fold that cannot get under
-// the trigger is futile, so that is what is refused. The recovery from a refused
-// request does not come here: it runs once and aims at the refusal's limit.
-//
-// The trigger measures the context by the provider's own count of the last
-// request (maybeAutoCompact), so the smallest request is scaled the same way
-// before it meets the threshold: by how many tokens the provider counted for each
-// one Coddy estimated (providerScale). Compared as a bare estimate, a provider
-// that counts denser would see a fold pass that lands over the real threshold and
-// folds again at the next step, and one that counts lighter would see a fold
-// refused that fits.
-func (a *Agent) checkFoldGain(msgs []llm.Message, visibleStart int, projected []llm.Message, limit int) error {
-	floor, ok := session.TurnStepSplitIndex(msgs, 1, a.state.TurnAnchor())
-	if !ok {
-		return nil
-	}
-	pct := a.cfg.Compaction.EffectiveThresholdPercent()
-	e := &foldFutileError{
-		overhead:  a.requestOverhead(),
-		threshold: limit * pct / 100,
-		tail:      conversationTokens(projected[floor-visibleStart:], a.modelReadsImages()),
-		scale:     a.providerScale(),
-	}
-	if prefix, source, ok := a.inTurnPrefix(msgs, floor, limit); ok {
-		e.row = session.EstimateContextTokens(session.NewInTurnCompactionSummaryMessage(source, prefix, "", "").Content)
-	} else {
-		e.row = session.EstimateContextTokens(session.NewCompactionSummaryMessage("", "").Content)
-	}
-	if visibleStart < len(msgs) && msgs[visibleStart].CompactionSummary {
-		e.summary = session.EstimateContextTokens(session.SummaryBody(msgs[visibleStart].Content))
-	}
-	e.estimate = int(math.Round(float64(e.overhead+e.row+e.summary+e.tail) * e.scale))
-	if e.estimate*100 < limit*pct {
-		return nil
-	}
-	return e
-}
-
 // providerScale is how many tokens the provider counted for each token Coddy
 // estimated, read off the last request that came back with a count: the
 // provider's input tokens over the estimate of that same prompt (the context
 // breakdown's ProviderInputTokens and ProviderEstimateTokens). It is 1 when
 // there is no such pair, which is the case before the first response and after a
-// compaction, and when either number is not positive.
+// compaction, and when either number is not positive. The trigger measures the
+// context by the provider's count, so an in-turn fold scales its aim by it.
 func (a *Agent) providerScale() float64 {
 	rs, ok := a.state.(rulesState)
 	if !ok {
@@ -379,9 +249,6 @@ type inTurnPlan struct {
 	// prompt is the text that begins the summary row of a step boundary, already
 	// capped; empty for a regular boundary and for a history with no prompt.
 	prompt string
-	// source is who wrote the message the prompt starts with (session.TurnSource);
-	// the row's preamble says so.
-	source session.TurnSource
 }
 
 // planInTurn decides where an in-turn compaction cuts, and the prompt that goes
@@ -391,23 +258,28 @@ func (a *Agent) planInTurn(opts CompactOptions, msgs []llm.Message, visibleStart
 	comp := &a.cfg.Compaction
 	limit := a.promptShareLimit(opts.LimitTokens)
 	target := inTurnTargetTokens(limit, comp.EffectiveThresholdPercent())
+	if !opts.Recovery {
+		// The trigger counts the provider's tokens and the budget below counts
+		// Coddy's estimate: a provider that counts denser would otherwise see a
+		// kept tail that lands over the threshold and folds again at the next
+		// step. A recovery's limit is already in estimate units.
+		if s := a.providerScale(); s > 1 {
+			target = int(float64(target) / s)
+		}
+	}
 	overhead := a.requestOverhead()
 
-	// The budget is measured with the largest prefix the fold can write, every
-	// follow-up of the turn included: the prefix of the boundary chosen below holds
-	// no more of them, so a fold never keeps more than the budget it was given.
 	prefixTokens := 0
-	if prefix, source, ok := a.inTurnPrefix(msgs, len(msgs), limit); ok {
-		prefixTokens = session.EstimateContextTokens(session.NewInTurnCompactionSummaryMessage(source, prefix, "", "").Content)
+	if prefix, ok := a.inTurnPrefix(msgs, len(msgs), limit); ok {
+		prefixTokens = session.EstimateContextTokens(session.NewInTurnCompactionSummaryMessage(prefix, "", "").Content)
 	}
 	regularPreamble := session.EstimateContextTokens(session.NewCompactionSummaryMessage("", "").Content)
 
 	choice, err := chooseInTurnSplit(inTurnSplitRequest{
 		msgs:          msgs,
 		visibleStart:  visibleStart,
-		anchor:        a.state.TurnAnchor(),
 		projected:     projected,
-		keepSteps:     comp.InTurn.EffectiveKeepRecentSteps(),
+		keepSteps:     inTurnKeepRecentSteps,
 		recovery:      opts.Recovery,
 		budget:        target - overhead - prefixTokens,
 		regularBudget: target - overhead - regularPreamble,
@@ -416,14 +288,19 @@ func (a *Agent) planInTurn(opts CompactOptions, msgs []llm.Message, visibleStart
 	if err != nil {
 		return nil, err
 	}
-	if !opts.Recovery {
-		if err := a.checkFoldGain(msgs, visibleStart, projected, limit); err != nil {
-			return nil, err
-		}
-	}
 	plan := &inTurnPlan{inTurnSplit: choice}
 	if !choice.regular {
-		plan.prompt, plan.source, _ = a.inTurnPrefix(msgs, choice.idx, limit)
+		plan.prompt, _ = a.inTurnPrefix(msgs, choice.idx, limit)
 	}
 	return plan, nil
+}
+
+// inTurnRequestTokens is the size of the next request after a fold, in the
+// provider's tokens as far as they are known: what every request carries besides
+// the conversation, plus the window the fold left, scaled by scale (the
+// providerScale read before the fold, since a compaction clears it).
+func (a *Agent) inTurnRequestTokens(scale float64) int {
+	window := session.MessagesForLLM(a.state.GetMessages())
+	n := a.requestOverhead() + conversationTokens(a.prunedForLLM(window), a.modelReadsImages())
+	return int(float64(n) * scale)
 }

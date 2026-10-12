@@ -1,13 +1,14 @@
 package agent
 
-// Prompt-cache check of result eviction inside one long turn (issue #490): a
-// placeholder written into the middle of the replayed history costs the provider
-// its cached copy of everything behind it, so eviction waits for
-// compaction.result_eviction.start_percent. One user prompt, a model that fans
-// out parallel glob and print_tree calls step after step, and a context window
-// sized so the gate is crossed halfway through. Below it every request has to
-// repeat the previous one and add to it; above it the only bytes that move are
-// listing results turned into placeholders.
+// Prompt-cache checks of what rewrites the replayed history inside one long turn
+// (issue #490). A provider caches a request by its prefix, so a placeholder or a
+// summary written into the middle of the history costs it its cached copy of
+// everything behind it. Below the gates every request repeats the previous one
+// and adds to it; result eviction, once the conversation reaches
+// compaction.result_eviction.start_percent of the window, only turns listing
+// results into placeholders; and a fold, at the compaction threshold, is the
+// only other place the history is rewritten. Every test here is named
+// TestPromptCache*, so make test-cache runs them.
 
 import (
 	"context"
@@ -24,10 +25,18 @@ import (
 	"github.com/EvilFreelancer/coddy-agent/internal/session"
 )
 
+// --- result eviction ---------------------------------------------------------------
+
+// One user prompt, a model that fans out parallel glob and print_tree calls step
+// after step, and a context window sized so the gate is crossed partway through.
+// Below it every request has to repeat the previous one and add to it; above it
+// the only bytes that move are listing results turned into placeholders.
+
 const (
 	pcEvictFolders = 7  // fan-out steps of the turn, one folder each
 	pcEvictFiles   = 30 // files per folder, so a listing is a few KB
-	pcEvictKeep    = 2  // keep_recent_steps of the run
+	// pcEvictKeep is the step window of the listings, fixed in the agent.
+	pcEvictKeep = listingKeepRecentSteps
 )
 
 // pcEvictWorkspace creates the folders the model will list.
@@ -75,7 +84,6 @@ func runPCacheListingTurn(t *testing.T, cwd string, maxContext int) pcEvictTurn 
 	off := false
 	enabled := true
 	minBytes := 200
-	keepSteps := pcEvictKeep
 	cfg := &config.Config{
 		Providers: []config.ProviderConfig{{Name: "fake", Type: "openai", APIKey: "test"}},
 		Models:    []config.ModelEntry{{Model: "fake/model", MaxTokens: 100, MaxContextTokens: maxContext}},
@@ -86,7 +94,7 @@ func runPCacheListingTurn(t *testing.T, cwd string, maxContext int) pcEvictTurn 
 		Compaction: config.Compaction{
 			AutoEnabled: &off,
 			ResultEviction: config.ResultEviction{
-				Enabled: &enabled, MinResultBytes: &minBytes, KeepRecentSteps: &keepSteps,
+				Enabled: &enabled, MinResultBytes: &minBytes,
 			},
 		},
 	}
@@ -119,13 +127,13 @@ func withoutTurnContext(req []llm.Message) []llm.Message {
 }
 
 // largestWindowForGate is the largest context window, in tokens, at which the
-// eviction gate is still due for msgs: due means the conversation is at least
+// listing gate is still due for msgs: due means the conversation is at least
 // start_percent of the window, so the answer is the most window the
 // conversation still fills that far.
 func largestWindowForGate(ag *Agent, msgs []llm.Message) int {
 	due := func(window int) bool {
 		ag.cfg.Models[0].MaxContextTokens = window
-		return ag.evictionDue(msgs)
+		return ag.listingEvictionDue(msgs)
 	}
 	lo, hi := 1, 1<<30
 	for lo < hi {
@@ -160,7 +168,9 @@ func TestPromptCacheInTurnEvictionKeepsThePrefixBelowTheGate(t *testing.T) {
 			}
 		}
 	}
-	const crossAt = 4 // the first request that finds the gate open
+	// The first request that finds the gate open: the one after the first that
+	// carries a step outside the window, so a gate that opened early shows up.
+	const crossAt = pcEvictKeep + 2
 	below := largestWindowForGate(plain.ag, withoutTurnContext(plain.reqs[crossAt-1]))
 	above := largestWindowForGate(plain.ag, withoutTurnContext(plain.reqs[crossAt]))
 	if above-below < 1000 {
@@ -196,8 +206,9 @@ func TestPromptCacheInTurnEvictionKeepsThePrefixBelowTheGate(t *testing.T) {
 		t.Fatal("no request carried a placeholder: the gate never opened, nothing was tested")
 	}
 	// The window was sized so that request crossAt is the first to find the gate
-	// open. Three steps already sit outside a window of two at request 3, so a
-	// gate that opened early would show up as a collapse there.
+	// open. Request crossAt-1 already carries a step outside the window of
+	// pcEvictKeep steps, so a gate that opened a request early would show up as a
+	// collapse there.
 	if gate != crossAt {
 		t.Fatalf("the gate opened at request %d, the window was sized to open it at request %d", gate, crossAt)
 	}
@@ -223,10 +234,7 @@ func TestPromptCacheInTurnEvictionKeepsThePrefixBelowTheGate(t *testing.T) {
 			toolOf[tc.ID] = tc.Name
 		}
 	}
-	listing := map[string]bool{}
-	for _, name := range config.ResultEvictionListingTools {
-		listing[name] = true
-	}
+	listing := listingTools
 
 	for i := 1; i < len(hist); i++ {
 		prev, cur := hist[i-1], hist[i]
@@ -303,5 +311,143 @@ func TestPromptCacheInTurnEvictionKeepsThePrefixBelowTheGate(t *testing.T) {
 		if kept == isPlaceholder(m) {
 			t.Fatalf("result %s of step %d: collapsed=%v, want %v", m.ToolCallID, stepOfCall[m.ToolCallID], isPlaceholder(m), !kept)
 		}
+	}
+}
+
+// --- the fold inside the turn ---------------------------------------------------
+
+// One prompt, a model that reads files in parallel step after step, and a window
+// the turn outgrows several times. Between folds every request has to repeat the
+// previous one and add to it; a fold is the only place the history is rewritten,
+// and what it leaves is the prompt at the start of the summary row followed by
+// the kept steps exactly as they were.
+func TestPromptCacheInTurnFoldRewritesTheHistoryOnlyAtTheFold(t *testing.T) {
+	// The window is sized so that a fold keeps two steps (the aim leaves room for
+	// them beside the request's fixed overhead) and the trigger fires every few
+	// steps: the run folds several times, which is what makes the check mean
+	// something.
+	dirs := []string{}
+	tempDir := func() (string, error) {
+		d, err := os.MkdirTemp("", "coddy-pcache-inturn-*")
+		if err == nil {
+			dirs = append(dirs, d)
+		}
+		return d, err
+	}
+	t.Cleanup(func() {
+		for _, d := range dirs {
+			_ = os.RemoveAll(d)
+		}
+	})
+	w, err := inTurnLongTurn{window: 60000, steps: 16, fanOut: 4, evictOff: true}.run(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.runErr != nil {
+		t.Fatalf("the turn failed: %v", w.runErr)
+	}
+	reqs := w.provider.accepted
+	hist := make([][]llm.Message, len(reqs))
+	for i, r := range reqs {
+		hist[i] = withoutTurnContext(r)
+	}
+	if got := len(hist); got != 16+1 {
+		t.Fatalf("the run made %d requests, want %d: a request per step and the answer", got, 17)
+	}
+
+	// The system message is the same bytes in every request, folds included.
+	for i, h := range hist {
+		if h[0].Role != llm.RoleSystem || h[0].Content != hist[0][0].Content {
+			t.Fatalf("request %d does not open with the system message of request 0", i)
+		}
+	}
+
+	// Transcript content of every message by tool call id, for what the kept
+	// steps must still read as.
+	stored := map[string]llm.Message{}
+	for _, m := range w.st.GetMessages() {
+		if m.Role == llm.RoleTool {
+			stored[m.ToolCallID] = m
+		}
+	}
+
+	folds, appends, keptAsSent := 0, 0, 0
+	for i := 1; i < len(hist); i++ {
+		prev, cur := hist[i-1], hist[i]
+		if len(cur) > len(prev) && reflect.DeepEqual(prev, cur[:len(prev)]) {
+			// Between folds: the previous request, repeated, with the step that
+			// came after it added.
+			appends++
+			continue
+		}
+		folds++
+		// A fold is the one place the history is rewritten. It is a smaller
+		// request that opens, after the system message, with the summary row, and
+		// the row begins with the prompt, verbatim.
+		if estimateMessagesTokens(cur) >= estimateMessagesTokens(prev) {
+			t.Fatalf("request %d rewrote the history without shrinking it: %d tokens after %d", i, estimateMessagesTokens(cur), estimateMessagesTokens(prev))
+		}
+		row := cur[1]
+		if !row.CompactionSummary || !strings.HasPrefix(row.Content, inTurnPrompt+"\n\n") {
+			t.Fatalf("request %d: the message after the system message is not the summary row that begins with the prompt: %q", i, firstChars(row.Content, 100))
+		}
+		if got := strings.Count(transcriptText(cur), inTurnPrompt); got != 1 {
+			t.Fatalf("request %d holds the prompt %d times, want once", i, got)
+		}
+		// What follows the row is the latest steps of the turn, byte for byte what
+		// the previous request carried (or, for the step that came after it, what
+		// the transcript stored), and whole steps: it opens on an assistant message.
+		kept := cur[2:]
+		if len(kept) == 0 || kept[0].Role != llm.RoleAssistant {
+			t.Fatalf("request %d: the kept steps do not open on an assistant message: %+v", i, kept)
+		}
+		before := map[string]llm.Message{}
+		for _, m := range prev {
+			if m.Role == llm.RoleTool {
+				before[m.ToolCallID] = m
+			}
+		}
+		for j, m := range kept {
+			if m.Role != llm.RoleTool {
+				continue
+			}
+			want, ok := before[m.ToolCallID]
+			if ok {
+				keptAsSent++
+			} else {
+				want = stored[m.ToolCallID]
+			}
+			if !reflect.DeepEqual(m, want) {
+				t.Fatalf("request %d: kept message %d (%s) is not the one it was before the fold:\nafter:  %+v\nbefore: %+v", i, j, m.ToolCallID, m, want)
+			}
+		}
+		if issues := session.ValidateToolPairing(cur); len(issues) != 0 {
+			t.Fatalf("request %d breaks the tool-call pairing: %v", i, issues)
+		}
+	}
+
+	// Both phases have to be exercised, or the test passes without testing
+	// anything: the run folds more than once and spends most of its requests
+	// appending.
+	if folds < 2 || appends < 8 {
+		t.Fatalf("the run folded %d time(s) and appended %d time(s): too little of either to mean anything", folds, appends)
+	}
+	// And a fold has to keep a step that an earlier request had already sent, or
+	// "kept exactly as it was" compares nothing but the newest step to the
+	// transcript.
+	if keptAsSent == 0 {
+		t.Fatal("no fold kept a step the previous request carried: the window leaves room for the latest step only")
+	}
+	t.Logf("%d requests: %d folds, %d appends", len(hist), folds, appends)
+
+	// Each fold left a row in the transcript; none was lost.
+	rows := 0
+	for _, m := range w.st.GetMessages() {
+		if m.CompactionSummary {
+			rows++
+		}
+	}
+	if rows != folds {
+		t.Fatalf("the transcript holds %d summary rows for %d folds", rows, folds)
 	}
 }

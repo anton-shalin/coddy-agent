@@ -85,9 +85,6 @@ type evFeatureState struct {
 	sessionDir   string
 	outputLimits config.ToolOutputLimits
 	startPercent int
-	// keepSteps is compaction.result_eviction.keep_recent_steps; nil leaves the
-	// default.
-	keepSteps *int
 	// folders are the workspace folders of the listing scenario, in the order
 	// the model lists them, and filesPerFolder the files each holds.
 	folders        []string
@@ -102,7 +99,6 @@ func (s *evFeatureState) reset() error {
 	s.provider = &evScriptProvider{}
 	s.outputLimits = config.ToolOutputLimits{}
 	s.startPercent = 0
-	s.keepSteps = nil
 	s.folders = nil
 	s.filesPerFolder = 0
 	var err error
@@ -154,7 +150,6 @@ func (s *evFeatureState) buildAgent() {
 		Agent:     config.Agent{Model: "fake/model"},
 		Compaction: config.Compaction{ResultEviction: config.ResultEviction{
 			Enabled: &enabled, KeepRecent: &keepRecent, MinResultBytes: &minBytes, StartPercent: &startPercent,
-			KeepRecentSteps: s.keepSteps,
 		}},
 		Tools: config.Tools{PermissionMode: config.PermModeBypass, OutputLimits: s.outputLimits},
 	}
@@ -385,8 +380,13 @@ func (s *evFeatureState) foldersWithFiles(folders, files int) error {
 	return nil
 }
 
+// listingStepsKept states the step window of the listings. It is fixed in the
+// agent (listingKeepRecentSteps), not configured, so the step checks that the
+// scenario names the window the product has.
 func (s *evFeatureState) listingStepsKept(n int) error {
-	s.keepSteps = &n
+	if n != listingKeepRecentSteps {
+		return fmt.Errorf("the scenario says %d steps, the agent keeps the listings of the last %d", n, listingKeepRecentSteps)
+	}
 	return nil
 }
 
@@ -560,7 +560,7 @@ func initializeResultEvictionScenario(sc *godog.ScenarioContext) {
 	sc.Step(`^the persisted transcript still contains both grep results in full$`, s.transcriptHasBothGreps)
 
 	sc.Step(`^a workspace with (\d+) folders of (\d+) files each$`, s.foldersWithFiles)
-	sc.Step(`^listing results are evicted outside the last (\d+) steps$`, s.listingStepsKept)
+	sc.Step(`^listing results are kept for the last (\d+) steps that hold one$`, s.listingStepsKept)
 	sc.Step(`^the model lists each folder in its own step, with a glob and a tree each, then answers$`, s.modelListsEachFolder)
 	sc.Step(`^the next LLM request replaces the listings of the first step with placeholders$`, s.requestEvictsFirstStepListings)
 	sc.Step(`^the next LLM request keeps the listings of the last (\d+) steps verbatim$`, s.requestKeepsLastStepListings)

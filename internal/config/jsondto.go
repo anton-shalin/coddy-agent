@@ -291,25 +291,19 @@ type CompactionJSON struct {
 	ResultEviction   ResultEvictionJSON `json:"result_eviction,omitempty"`
 }
 
-// InTurnJSON mirrors InTurn. Pointer fields keep the unset/explicit distinction
-// (enable defaults to true, keep_recent_steps to 4).
+// InTurnJSON mirrors InTurn. The pointer keeps the unset/explicit distinction
+// (enable defaults to true).
 type InTurnJSON struct {
-	Enabled         *bool `json:"enable,omitempty"`
-	KeepRecentSteps *int  `json:"keep_recent_steps,omitempty"`
+	Enabled *bool `json:"enable,omitempty"`
 }
 
 // ResultEvictionJSON mirrors ResultEviction. Pointer fields keep the
-// unset/explicit distinction (enabled defaults to true, keep_recent to 2,
-// keep_recent_steps to 3). Tools is a pointer to a slice for the same reason as
-// ModelEntry.ReasoningLevels: an absent key means the default listing tools and
-// an explicit [] means none, and a plain slice would merge the two.
+// unset/explicit distinction (enabled defaults to true, keep_recent to 2).
 type ResultEvictionJSON struct {
-	Enabled         *bool     `json:"enable,omitempty"`
-	KeepRecent      *int      `json:"keep_recent,omitempty"`
-	Tools           *[]string `json:"tools,omitempty"`
-	KeepRecentSteps *int      `json:"keep_recent_steps,omitempty"`
-	MinResultBytes  *int      `json:"min_result_bytes,omitempty"`
-	StartPercent    *int      `json:"start_percent,omitempty"`
+	Enabled        *bool `json:"enable,omitempty"`
+	KeepRecent     *int  `json:"keep_recent,omitempty"`
+	MinResultBytes *int  `json:"min_result_bytes,omitempty"`
+	StartPercent   *int  `json:"start_percent,omitempty"`
 }
 
 // MemoryJSON mirrors MemoryConfig.
@@ -579,16 +573,13 @@ func ConfigToJSONDTO(c *Config) *ConfigJSON {
 		Model:            c.Compaction.Model,
 		FallbackModels:   append([]string(nil), c.Compaction.FallbackModels...),
 		InTurn: InTurnJSON{
-			Enabled:         cloneBoolPtr(c.Compaction.InTurn.Enabled),
-			KeepRecentSteps: cloneIntPtr(c.Compaction.InTurn.KeepRecentSteps),
+			Enabled: cloneBoolPtr(c.Compaction.InTurn.Enabled),
 		},
 		ResultEviction: ResultEvictionJSON{
-			Enabled:         cloneBoolPtr(c.Compaction.ResultEviction.Enabled),
-			KeepRecent:      cloneIntPtr(c.Compaction.ResultEviction.KeepRecent),
-			Tools:           cloneStringsPtr(c.Compaction.ResultEviction.Tools),
-			KeepRecentSteps: cloneIntPtr(c.Compaction.ResultEviction.KeepRecentSteps),
-			MinResultBytes:  cloneIntPtr(c.Compaction.ResultEviction.MinResultBytes),
-			StartPercent:    cloneIntPtr(c.Compaction.ResultEviction.StartPercent),
+			Enabled:        cloneBoolPtr(c.Compaction.ResultEviction.Enabled),
+			KeepRecent:     cloneIntPtr(c.Compaction.ResultEviction.KeepRecent),
+			MinResultBytes: cloneIntPtr(c.Compaction.ResultEviction.MinResultBytes),
+			StartPercent:   cloneIntPtr(c.Compaction.ResultEviction.StartPercent),
 		},
 	}
 	out.Memory = MemoryJSON{
@@ -820,16 +811,13 @@ func JSONDTOToConfig(j *ConfigJSON, paths Paths) *Config {
 		Model:            j.Compaction.Model,
 		FallbackModels:   append([]string(nil), j.Compaction.FallbackModels...),
 		InTurn: InTurn{
-			Enabled:         cloneBoolPtr(j.Compaction.InTurn.Enabled),
-			KeepRecentSteps: cloneIntPtr(j.Compaction.InTurn.KeepRecentSteps),
+			Enabled: cloneBoolPtr(j.Compaction.InTurn.Enabled),
 		},
 		ResultEviction: ResultEviction{
-			Enabled:         cloneBoolPtr(j.Compaction.ResultEviction.Enabled),
-			KeepRecent:      cloneIntPtr(j.Compaction.ResultEviction.KeepRecent),
-			Tools:           cloneStringsPtr(j.Compaction.ResultEviction.Tools),
-			KeepRecentSteps: cloneIntPtr(j.Compaction.ResultEviction.KeepRecentSteps),
-			MinResultBytes:  cloneIntPtr(j.Compaction.ResultEviction.MinResultBytes),
-			StartPercent:    cloneIntPtr(j.Compaction.ResultEviction.StartPercent),
+			Enabled:        cloneBoolPtr(j.Compaction.ResultEviction.Enabled),
+			KeepRecent:     cloneIntPtr(j.Compaction.ResultEviction.KeepRecent),
+			MinResultBytes: cloneIntPtr(j.Compaction.ResultEviction.MinResultBytes),
+			StartPercent:   cloneIntPtr(j.Compaction.ResultEviction.StartPercent),
 		},
 	}
 	cfg.Memory = MemoryConfig{

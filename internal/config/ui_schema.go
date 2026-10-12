@@ -770,28 +770,19 @@ func UISchemaMap() map[string]interface{} {
 				"in_turn": objectSchema("In-turn compaction",
 					"Fold the earlier steps of the turn being answered when the context reaches the compaction threshold and there is no earlier turn to fold, and compact and ask again once when the provider refuses a request as larger than its context window. The prompt being answered stays verbatim at the start of the summary row. Does nothing while automatic compaction (auto_enable) is off.",
 					map[string]interface{}{
-						"enable":            boolProp("Enabled", "Master switch for the in-turn fold and the recovery from a refused request. Defaults to true; false restores the behavior before they existed. Has no effect while automatic compaction (auto_enable) is off: both need the automatic trigger."),
-						"keep_recent_steps": intProp("Keep recent steps", "The largest number of the turn's latest steps the fold leaves verbatim (default 4, at least 1; a step is one assistant message with all its parallel tool results). The fold keeps fewer when the kept steps would not leave the next request room under the threshold."),
+						"enable": boolProp("Enabled", "Master switch for the in-turn fold and the recovery from a refused request. Defaults to true; false restores the behavior before they existed. Has no effect while automatic compaction (auto_enable) is off: both need the automatic trigger."),
 					},
-					[]string{"enable", "keep_recent_steps"},
+					[]string{"enable"},
 					nil),
-				// compaction.result_eviction.tools is left out of the form on purpose:
-				// an absent list (all four listing tools) and an empty one (none)
-				// would both be drawn as an empty list, so a person adding one name
-				// to what looks empty would narrow the set instead of widening it.
-				// Telling the two apart needs a control of its own, as
-				// models[].reasoning_levels has; until then the key is set in
-				// config.yaml, and a save from the form keeps it as it was.
 				"result_eviction": objectSchema("Tool result eviction",
-					"Collapse superseded tool results (read pages, grep dumps, and the listings of glob, print_tree, websearch and webfetch) to placeholders when building the LLM request; the persisted transcript is untouched. Read and grep results survive when marked (keep_result / keep:true) or among the most recent; listings survive within the latest steps.",
+					"Collapse superseded tool results (read pages, grep dumps, and the listings of glob, print_tree, websearch and webfetch) to placeholders when building the LLM request; the persisted transcript is untouched. Read and grep results survive when marked (keep_result / keep:true) or among the most recent; listings survive within the latest three steps.",
 					map[string]interface{}{
-						"enable":            boolProp("Enabled", "Master switch for tool result eviction. Defaults to true."),
-						"keep_recent":       intProp("Keep recent results", "How many most recent read and grep results stay intact as a working window (default 2 - enough to hold a read and a grep at once; 0 keeps none)."),
-						"keep_recent_steps": intProp("Keep recent steps", "How many of the most recent steps holding a listing result keep all of their listing results (default 3, at least 1: the latest step that holds a listing always keeps its results). A step is one assistant message with all its parallel tool results."),
-						"min_result_bytes":  intProp("Min result bytes", "Results at or below this size are never evicted (default 2000; 0 makes every result a candidate)."),
-						"start_percent":     intProp("Start at (%)", "Evict only once the estimated context reaches this percent of the model's max_context_tokens (default 50; 0 evicts from the first result). Below it the history is sent untouched so the provider's prompt cache holds."),
+						"enable":           boolProp("Enabled", "Master switch for tool result eviction. Defaults to true."),
+						"keep_recent":      intProp("Keep recent results", "How many most recent read and grep results stay intact as a working window (default 2 - enough to hold a read and a grep at once; 0 keeps none)."),
+						"min_result_bytes": intProp("Min result bytes", "Results at or below this size are never evicted (default 2000; 0 makes every result a candidate)."),
+						"start_percent":    intProp("Start at (%)", "Evict only once the estimated context reaches this percent of the model's max_context_tokens (default 50; 0 evicts from the first result). Below it the history is sent untouched so the provider's prompt cache holds."),
 					},
-					[]string{"enable", "keep_recent", "keep_recent_steps", "min_result_bytes", "start_percent"},
+					[]string{"enable", "keep_recent", "min_result_bytes", "start_percent"},
 					nil),
 			},
 			[]string{"enable", "auto_enable", "threshold_percent", "keep_recent_turns", "model", "in_turn", "result_eviction"},

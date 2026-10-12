@@ -61,11 +61,6 @@ const (
 	// compactionCharsPerToken is how many ASCII characters one token of
 	// session.EstimateContextTokens stands for, the unit passes are sized in.
 	compactionCharsPerToken = 3
-	// compactionRetryAimPercent is how much of the provider's own limit a pass
-	// refused with figures aims for: the system prompt, the carried summary and
-	// the distance between the estimate and the provider's tokenizer take the
-	// rest.
-	compactionRetryAimPercent = 80
 )
 
 // compactionProgress reports a pass of a multi-step fold. step counts from 1;
@@ -291,7 +286,7 @@ func (a *Agent) foldOnePass(
 			// Cut what was actually sent, not the room it was allowed: the
 			// budget can be far larger than the pass that filled it, and
 			// cutting the allowance would send the identical request again.
-			target := shrunkenPassTokens(session.EstimateContextTokens(chunk.body), detail)
+			target := session.EstimateContextTokens(chunk.body) / 2
 			refused := []any{
 				"model", cand.modelID, "estimatedTokens", estimateMessagesTokens(req),
 				"providerTokens", detail.Prompt, "providerLimit", detail.Limit,
@@ -319,24 +314,6 @@ func (a *Agent) foldOnePass(
 		}
 	}
 	return "", "", 0, fmt.Errorf("compaction LLM call: %w", lastErr)
-}
-
-// shrunkenPassTokens is how many tokens of transcript the next try of a refused
-// pass may hold, given the tokens the refused one held. Half, unless the
-// provider said how far over its limit the request was: then the aim is under
-// that limit - compactionRetryAimPercent of it, scaled to the transcript - and
-// the figure never asks for less shrinking than halving does.
-func shrunkenPassTokens(bodyTokens int, detail llm.OverflowDetail) int {
-	half := bodyTokens / 2
-	if detail.Prompt > 0 && detail.Limit > 0 && detail.Prompt > detail.Limit {
-		// In floating point: the figures are a refusal's own words, and the
-		// product of three of them wraps an int64.
-		aimed := int(float64(bodyTokens) * float64(detail.Limit) / float64(detail.Prompt) * compactionRetryAimPercent / 100)
-		if aimed < half {
-			return aimed
-		}
-	}
-	return half
 }
 
 // estimateMessagesTokens is session.EstimateContextTokens over a whole request.

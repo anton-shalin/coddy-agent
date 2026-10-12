@@ -305,47 +305,58 @@ func TestRulesUIAndFallbackModelsSurviveTheJSONDTO(t *testing.T) {
 	}
 }
 
-// The Settings form is drawn from UISchemaMap: the eviction section offers the
-// step window as a number and no longer calls itself read/grep only. The list of
-// listing tools is not on the form: an absent list (all four tools) and an empty
-// one (none) would be drawn alike, so the key stays in config.yaml until the form
-// has a control that tells them apart.
-func TestUISchemaResultEvictionOffersTheStepWindow(t *testing.T) {
+// The Settings form is drawn from UISchemaMap: compaction.in_turn is a section
+// of its own with the one switch, placed before result_eviction, and
+// result_eviction offers only the read/grep knobs (the listing tools and their
+// step window are fixed in the agent, so the form has no control for them).
+func TestUISchemaCompactionOffersTheInTurnSwitch(t *testing.T) {
 	doc := config.UISchemaMap()
 	compaction := doc["properties"].(map[string]interface{})["compaction"].(map[string]interface{})
-	re := compaction["properties"].(map[string]interface{})["result_eviction"].(map[string]interface{})
-	props := re["properties"].(map[string]interface{})
+	props := compaction["properties"].(map[string]interface{})
 
-	if _, ok := props["tools"]; ok {
-		t.Fatal("tools must stay off the form: an empty list there reads as the default but means none")
-	}
-	if steps, ok := props["keep_recent_steps"].(map[string]interface{}); !ok || steps["type"] != "integer" {
-		t.Fatalf("keep_recent_steps = %#v, want an integer field", props["keep_recent_steps"])
+	order := func(node map[string]interface{}) []string {
+		var got []string
+		raw, _ := node["x-coddy-property-order"].([]interface{})
+		for _, v := range raw {
+			got = append(got, v.(string))
+		}
+		return got
 	}
 
-	order, _ := re["x-coddy-property-order"].([]interface{})
-	var got []string
-	for _, v := range order {
-		got = append(got, v.(string))
+	inTurn, ok := props["in_turn"].(map[string]interface{})
+	if !ok || inTurn["type"] != "object" {
+		t.Fatalf("compaction.in_turn = %#v, want an object section", props["in_turn"])
 	}
-	want := []string{"enable", "keep_recent", "keep_recent_steps", "min_result_bytes", "start_percent"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("result_eviction field order %v, want %v", got, want)
+	fields := inTurn["properties"].(map[string]interface{})
+	if f, ok := fields["enable"].(map[string]interface{}); !ok || f["type"] != "boolean" {
+		t.Fatalf("in_turn.enable = %#v, want a boolean", fields["enable"])
 	}
-	if strings.Contains(re["title"].(string), "Read/grep") || strings.Contains(re["description"].(string), "read/grep") {
-		t.Fatalf("the section still describes itself as read/grep only: %q / %q", re["title"], re["description"])
+	if len(fields) != 1 {
+		t.Fatalf("in_turn fields = %v, want the switch alone", fields)
+	}
+	if got, want := order(inTurn), []string{"enable"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("in_turn field order %v, want %v", got, want)
+	}
+	if got := order(compaction); len(got) < 2 || !reflect.DeepEqual(got[len(got)-2:], []string{"in_turn", "result_eviction"}) {
+		t.Fatalf("compaction field order %v: in_turn must sit before result_eviction", got)
+	}
+
+	re := props["result_eviction"].(map[string]interface{})
+	reFields := re["properties"].(map[string]interface{})
+	want := []string{"enable", "keep_recent", "min_result_bytes", "start_percent"}
+	if got := order(re); !reflect.DeepEqual(got, want) || len(reFields) != len(want) {
+		t.Fatalf("result_eviction fields %v (order %v), want %v", reFields, got, want)
 	}
 }
 
-// compaction.result_eviction.tools and keep_recent_steps ride the Settings
-// round trip like every other key, and tools keeps the difference between an
-// absent key (the default listing tools) and an explicit [] (read and grep only)
-// exactly as models[].reasoning_levels does.
-func TestResultEvictionListingKeysSurviveTheJSONDTO(t *testing.T) {
-	roundTrip := func(t *testing.T, re config.ResultEviction) (string, config.ResultEviction) {
+// compaction.in_turn.enable rides the Settings round trip like every other key:
+// the pointer keeps the difference between an absent key (the default, on) and
+// an explicit value.
+func TestInTurnSwitchSurvivesTheJSONDTO(t *testing.T) {
+	roundTrip := func(t *testing.T, in config.InTurn) (string, config.InTurn) {
 		t.Helper()
 		cfg := &config.Config{}
-		cfg.Compaction.ResultEviction = re
+		cfg.Compaction.InTurn = in
 		raw, err := json.Marshal(config.ConfigToJSONDTO(cfg))
 		if err != nil {
 			t.Fatal(err)
@@ -354,66 +365,58 @@ func TestResultEvictionListingKeysSurviveTheJSONDTO(t *testing.T) {
 		if err := json.Unmarshal(raw, &j); err != nil {
 			t.Fatal(err)
 		}
-		return string(raw), config.JSONDTOToConfig(&j, config.Paths{}).Compaction.ResultEviction
+		return string(raw), config.JSONDTOToConfig(&j, config.Paths{}).Compaction.InTurn
 	}
 
-	t.Run("unset keys stay unset", func(t *testing.T) {
-		raw, back := roundTrip(t, config.ResultEviction{})
+	t.Run("an unset switch stays unset", func(t *testing.T) {
+		raw, back := roundTrip(t, config.InTurn{})
 		var doc struct {
 			Compaction struct {
-				ResultEviction map[string]json.RawMessage `json:"result_eviction"`
+				InTurn map[string]json.RawMessage `json:"in_turn"`
 			} `json:"compaction"`
 		}
 		if err := json.Unmarshal([]byte(raw), &doc); err != nil {
 			t.Fatal(err)
 		}
-		for _, key := range []string{"tools", "keep_recent_steps"} {
-			if _, ok := doc.Compaction.ResultEviction[key]; ok {
-				t.Fatalf("an unset %s was written: %s", key, raw)
-			}
+		if _, ok := doc.Compaction.InTurn["enable"]; ok {
+			t.Fatalf("an unset enable was written: %s", raw)
 		}
-		if back.Tools != nil || back.KeepRecentSteps != nil {
-			t.Fatalf("unset keys came back set: %+v", back)
+		if back.Enabled != nil {
+			t.Fatalf("an unset switch came back set: %v", *back.Enabled)
 		}
-	})
-
-	t.Run("an explicit empty list and an explicit count are kept", func(t *testing.T) {
-		empty := []string{}
-		one := 1
-		raw, back := roundTrip(t, config.ResultEviction{Tools: &empty, KeepRecentSteps: &one})
-		if !strings.Contains(raw, `"tools":[]`) || !strings.Contains(raw, `"keep_recent_steps":1`) {
-			t.Fatalf("GET DTO dropped the explicit values: %s", raw)
-		}
-		if back.Tools == nil || len(*back.Tools) != 0 {
-			t.Fatalf("PUT path turned tools: [] into %v", back.Tools)
-		}
-		if back.KeepRecentSteps == nil || *back.KeepRecentSteps != 1 {
-			t.Fatalf("PUT path turned keep_recent_steps: 1 into %v", back.KeepRecentSteps)
+		if !back.IsEnabled() {
+			t.Fatal("an unset switch must still mean on")
 		}
 	})
 
-	t.Run("a list and a count are kept", func(t *testing.T) {
-		tools := []string{"glob", "webfetch"}
-		steps := 5
-		_, back := roundTrip(t, config.ResultEviction{Tools: &tools, KeepRecentSteps: &steps})
-		if back.Tools == nil || !reflect.DeepEqual(*back.Tools, tools) {
-			t.Fatalf("tools lost: %v", back.Tools)
+	t.Run("an explicit false is kept", func(t *testing.T) {
+		off := false
+		raw, back := roundTrip(t, config.InTurn{Enabled: &off})
+		if !strings.Contains(raw, `"in_turn":{"enable":false}`) {
+			t.Fatalf("GET DTO dropped the explicit false: %s", raw)
 		}
-		if back.KeepRecentSteps == nil || *back.KeepRecentSteps != 5 {
-			t.Fatalf("keep_recent_steps lost: %v", back.KeepRecentSteps)
+		if back.Enabled == nil || *back.Enabled || back.IsEnabled() {
+			t.Fatalf("PUT path lost the explicit false: %+v", back)
 		}
 		// The copy must not alias the source.
-		(*back.Tools)[0] = "tampered"
-		if tools[0] != "glob" {
-			t.Fatalf("the DTO conversion shares the tools list with its source: %v", tools)
+		*back.Enabled = true
+		if off {
+			t.Fatal("the DTO conversion shares the switch with its source")
+		}
+	})
+
+	t.Run("an explicit true is kept", func(t *testing.T) {
+		on := true
+		_, back := roundTrip(t, config.InTurn{Enabled: &on})
+		if back.Enabled == nil || !*back.Enabled {
+			t.Fatalf("PUT path lost the explicit true: %+v", back)
 		}
 	})
 }
 
 // The same through the whole Settings save - GET document, PUT body, YAML on
-// disk, reload - which is where reasoning_levels once lost its nil / empty
-// distinction.
-func TestResultEvictionListingKeysSurviveASettingsSave(t *testing.T) {
+// disk, reload.
+func TestInTurnSwitchSurvivesASettingsSave(t *testing.T) {
 	const head = `providers:
   - name: valera
     type: openai
@@ -425,8 +428,7 @@ models:
 agent:
   model: "valera/m"
 compaction:
-  result_eviction:
-    keep_recent: 1
+  threshold_percent: 70
 `
 	save := func(t *testing.T, extra string) (*config.Config, string) {
 		t.Helper()
@@ -447,39 +449,28 @@ compaction:
 		return reloaded, string(raw)
 	}
 
-	t.Run("absent keys stay absent", func(t *testing.T) {
+	t.Run("an absent section stays absent", func(t *testing.T) {
 		cfg, raw := save(t, "")
-		re := cfg.Compaction.ResultEviction
-		if re.Tools != nil || re.KeepRecentSteps != nil {
-			t.Fatalf("a save invented the keys: tools=%v steps=%v", re.Tools, re.KeepRecentSteps)
+		in := cfg.Compaction.InTurn
+		if in.Enabled != nil {
+			t.Fatalf("a save invented the switch: %v", *in.Enabled)
 		}
-		if strings.Contains(raw, "keep_recent_steps") || strings.Contains(raw, "tools:") {
-			t.Fatalf("saved YAML must omit the unset keys:\n%s", raw)
+		if strings.Contains(raw, "in_turn") {
+			t.Fatalf("saved YAML must omit the unset section:\n%s", raw)
 		}
-		if got := re.EffectiveTools(); len(got) != 4 {
-			t.Fatalf("the default listing tools were lost: %v", got)
-		}
-	})
-
-	t.Run("an explicit empty list and a single step survive", func(t *testing.T) {
-		cfg, raw := save(t, "    tools: []\n    keep_recent_steps: 1\n")
-		re := cfg.Compaction.ResultEviction
-		if re.Tools == nil || len(*re.Tools) != 0 {
-			t.Fatalf("tools: [] was lost in the round trip: %v\n%s", re.Tools, raw)
-		}
-		if re.KeepRecentSteps == nil || *re.KeepRecentSteps != 1 {
-			t.Fatalf("keep_recent_steps: 1 was lost in the round trip: %v\n%s", re.KeepRecentSteps, raw)
-		}
-		if len(re.EffectiveTools()) != 0 {
-			t.Fatalf("an explicit empty list flipped back to the default: %v", re.EffectiveTools())
+		if !in.IsEnabled() {
+			t.Fatal("the default (on) was lost")
 		}
 	})
 
-	t.Run("a list survives", func(t *testing.T) {
-		cfg, _ := save(t, "    tools: [print_tree, webfetch]\n    keep_recent_steps: 5\n")
-		re := cfg.Compaction.ResultEviction
-		if !reflect.DeepEqual(re.EffectiveTools(), []string{"print_tree", "webfetch"}) || re.EffectiveKeepRecentSteps() != 5 {
-			t.Fatalf("the configured values were lost: tools=%v steps=%d", re.EffectiveTools(), re.EffectiveKeepRecentSteps())
+	t.Run("an explicit false survives", func(t *testing.T) {
+		cfg, raw := save(t, "  in_turn:\n    enable: false\n")
+		in := cfg.Compaction.InTurn
+		if in.Enabled == nil || in.IsEnabled() {
+			t.Fatalf("enable: false was lost: %+v\n%s", in, raw)
+		}
+		if !strings.Contains(raw, "in_turn:") || !strings.Contains(raw, "enable: false") {
+			t.Fatalf("saved YAML dropped the explicit switch:\n%s", raw)
 		}
 	})
 }

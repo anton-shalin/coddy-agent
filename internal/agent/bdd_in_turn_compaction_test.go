@@ -387,23 +387,35 @@ func (s *inTurnFeatureState) everyRequestCarriedThePrompt() error {
 	return nil
 }
 
-// everyRequestCarriedTheFollowUp checks the follow-up the user typed is in every
-// request from the first that read it on, once: as a message of its own while it
-// is recent, inside the summary row that folded it after.
-func (s *inTurnFeatureState) everyRequestCarriedTheFollowUp() error {
-	first := -1
-	for i, req := range s.provider.accepted {
-		if strings.Contains(transcriptText(req), s.followUp) {
-			first = i
-			break
+// everySummaryRowStartsWithThePromptNotTheFollowUp checks the follow-up the user
+// typed was read into the turn the way the product reads one - a user message
+// marked as a follow-up, through the session queue - and that no fold took it
+// for the message the turn started with: every summary row begins with the
+// prompt, verbatim, and the follow-up is never in front of a summary.
+func (s *inTurnFeatureState) everySummaryRowStartsWithThePromptNotTheFollowUp() error {
+	read := false
+	for _, m := range s.st.GetMessages() {
+		if m.Role == llm.RoleUser && !m.CompactionSummary && strings.Contains(m.Content, s.followUp) {
+			if !m.FollowUp {
+				return fmt.Errorf("the follow-up is in the transcript without the follow-up marker: %+v", m)
+			}
+			read = true
 		}
 	}
-	if first < 0 {
-		return fmt.Errorf("no request carried the follow-up %q", s.followUp)
+	if !read {
+		return fmt.Errorf("the follow-up %q never entered the transcript", s.followUp)
 	}
-	for i := first; i < len(s.provider.accepted); i++ {
-		if n := strings.Count(transcriptText(s.provider.accepted[i]), s.followUp); n != 1 {
-			return fmt.Errorf("request %d carries the follow-up %d times, want once", i+1, n)
+	rows := s.summaryRows()
+	if len(rows) == 0 {
+		return fmt.Errorf("the transcript holds no summary row")
+	}
+	for i, m := range rows {
+		prompt, _, ok := session.SplitInTurnSummary(m.Content)
+		if !ok || prompt != inTurnPrompt {
+			return fmt.Errorf("summary row %d does not begin with the prompt: %q", i+1, firstChars(m.Content, 120))
+		}
+		if strings.Contains(prompt, s.followUp) {
+			return fmt.Errorf("summary row %d carries the follow-up in front of its summary: %q", i+1, firstChars(m.Content, 200))
 		}
 	}
 	return nil
@@ -482,23 +494,26 @@ func (s *inTurnFeatureState) transcriptHoldsSummaryStartingWithPrompt() error {
 	return fmt.Errorf("no summary row begins with the prompt: %v", s.summaryRows())
 }
 
-// everySummaryRowNamesTheSupervisor checks that the rows a fold wrote start with
-// the prompt and say the goal supervisor wrote it, not the user.
-func (s *inTurnFeatureState) everySummaryRowNamesTheSupervisor() error {
+// everySummaryRowStartsWithTheSupervisorsInstruction checks that the rows a fold
+// wrote start with the instruction the goal supervisor opened the turn with,
+// verbatim, and that nothing in them calls it the user's request: the preamble
+// after it names no author.
+func (s *inTurnFeatureState) everySummaryRowStartsWithTheSupervisorsInstruction() error {
+	msgs := s.st.GetMessages()
+	if open, ok := session.OpeningPromptIndex(msgs); !ok || msgs[open].GoalTurn == nil || msgs[open].Content != inTurnPrompt {
+		return fmt.Errorf("the turn did not open with the supervisor's instruction marked as a goal turn")
+	}
 	rows := s.summaryRows()
 	if len(rows) == 0 {
 		return fmt.Errorf("the transcript holds no summary row")
 	}
 	for i, m := range rows {
-		prompt, _, source, ok := session.SplitInTurnRow(m.Content)
+		prompt, _, ok := session.SplitInTurnSummary(m.Content)
 		if !ok || prompt != inTurnPrompt {
-			return fmt.Errorf("summary row %d does not begin with the prompt: %q", i+1, firstChars(m.Content, 120))
+			return fmt.Errorf("summary row %d does not begin with the supervisor's instruction: %q", i+1, firstChars(m.Content, 120))
 		}
-		if source != session.TurnSourceSupervisor {
-			return fmt.Errorf("summary row %d says source %v wrote the prompt, want the supervisor: %q", i+1, source, firstChars(m.Content[len(prompt):], 200))
-		}
-		if strings.Contains(m.Content, "The text above is the user's request") {
-			return fmt.Errorf("summary row %d calls the supervisor's instruction the user's request", i+1)
+		if strings.Contains(m.Content, "the user's request") {
+			return fmt.Errorf("summary row %d calls the supervisor's instruction the user's request: %q", i+1, firstChars(m.Content[len(prompt):], 200))
 		}
 	}
 	return nil
@@ -523,12 +538,12 @@ func initializeInTurnScenario(sc *godog.ScenarioContext) {
 	sc.Step(`^the provider refuses any request larger than what it serves$`, s.providerRefusesAboveWhatItServes)
 	sc.Step(`^the prompt is a goal continuation the supervisor started$`, s.promptIsAGoalContinuation)
 	sc.Step(`^the user sends one prompt$`, s.userSendsOnePrompt)
-	sc.Step(`^every summary row says the supervisor wrote the prompt$`, s.everySummaryRowNamesTheSupervisor)
+	sc.Step(`^every summary row starts with the supervisor's instruction and does not call it the user's request$`, s.everySummaryRowStartsWithTheSupervisorsInstruction)
 	sc.Step(`^no request was refused$`, s.noRequestWasRefused)
 	sc.Step(`^the turn ended with the model's answer$`, s.turnEndedWithAnswer)
 	sc.Step(`^the turn was folded more than once$`, s.turnFoldedMoreThanOnce)
 	sc.Step(`^every request carried the prompt verbatim$`, s.everyRequestCarriedThePrompt)
-	sc.Step(`^every request from the first that read the follow-up carried it once$`, s.everyRequestCarriedTheFollowUp)
+	sc.Step(`^every summary row starts with the prompt, not with the follow-up$`, s.everySummaryRowStartsWithThePromptNotTheFollowUp)
 	sc.Step(`^every tool result in each request answers a call that request carries$`, s.everyToolResultAnswersACall)
 	sc.Step(`^the transcript still holds every original message$`, s.transcriptHoldsEveryOriginalMessage)
 	sc.Step(`^the provider refused one request as larger than its window$`, s.providerRefusedOneRequest)

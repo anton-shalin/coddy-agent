@@ -302,7 +302,6 @@ compaction:
     enable: true           # fold the earlier steps of the turn being answered at the threshold, and
                            # compact and ask again once when the provider refuses a request as too large;
                            # needs auto_enable: true
-    keep_recent_steps: 4   # at most this many latest steps of the turn stay verbatim (>= 1)
 
 # Optional long-term memory subagent (Go: config.MemoryConfig, internal/config/memory.go; logic in external/memory).
 # Linked with the memory build tag; enable at runtime with memory.enable. Every user turn then starts a memory
@@ -723,4 +722,4 @@ models:
 ### Локальные OpenAI-совместимые серверы (Ollama, llama.cpp, LM Studio)
 Используйте **`type: openai`** и задайте в **`api_base`** OpenAI-совместимый базовый URL, который уже включает **`/v1`**, например **`http://localhost:11434/v1`** для Ollama.
 
-<!-- docsgen:source sha256=d561bc28e354f1f1 -->
+<!-- docsgen:source sha256=8ff714a846f5ee74 -->

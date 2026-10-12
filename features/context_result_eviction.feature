@@ -33,11 +33,11 @@ Feature: Context overflow protection for read, grep and listing results
     And the persisted transcript still contains both grep results in full
 
   Scenario: Old directory listings collapse, the latest steps survive
-    Given a workspace with 3 folders of 40 files each
-    And listing results are evicted outside the last 2 steps
+    Given a workspace with 4 folders of 40 files each
+    And listing results are kept for the last 3 steps that hold one
     When the model lists each folder in its own step, with a glob and a tree each, then answers
     Then the next LLM request replaces the listings of the first step with placeholders
-    And the next LLM request keeps the listings of the last 2 steps verbatim
+    And the next LLM request keeps the listings of the last 3 steps verbatim
     And the next LLM request has one tool result per tool call
     And the persisted transcript still contains every listing in full
 

@@ -64,16 +64,13 @@ func buildGoalDigest(msgs []llm.Message, goal GoalState, implicit bool) string {
 				// Written by the worker's own model when the history was
 				// folded: its account of the work, not the operator's words.
 				// A row written inside a turn starts with the message the turn
-				// opened with (and the follow-ups sent during it) verbatim: the
-				// text of whoever wrote that message - the operator, the
-				// supervisor's own instruction or a background wake - labelled
-				// the way the message itself would be. Only what follows it is
-				// the worker's account. Each part is clipped on its own: a long
-				// request must not leave the summary out, nor the summary the
-				// request.
-				if prompt, summary, source, ok := SplitInTurnRow(m.Content); ok {
+				// opened with, verbatim: the text of whoever wrote that message,
+				// not the worker's. Only what follows it is the worker's account.
+				// Each part is clipped on its own: a long request must not leave
+				// the summary out, nor the summary the request.
+				if prompt, summary, ok := SplitInTurnSummary(m.Content); ok {
 					if text := strings.TrimSpace(UserMessageDisplayText(prompt)); text != "" {
-						steps = append(steps, source.digestLabel()+" "+clipRunes(text, goalDigestText))
+						steps = append(steps, "[the message this turn started with] "+clipRunes(text, goalDigestText))
 					}
 					steps = append(steps, "[summary of earlier steps of this request, written by the worker: claims, not evidence] "+clipRunes(strings.TrimSpace(summary), goalDigestText))
 					continue
@@ -159,18 +156,6 @@ func buildGoalDigest(msgs []llm.Message, goal GoalState, implicit bool) string {
 		b.WriteString("\n")
 	}
 	return b.String()
-}
-
-// digestLabel is the tag a step of the digest carries when it is the text of the
-// writer of a turn's opening message.
-func (t TurnSource) digestLabel() string {
-	switch t {
-	case TurnSourceSupervisor:
-		return "[supervisor]"
-	case TurnSourceBackground:
-		return "[background]"
-	}
-	return "[operator]"
 }
 
 // goalStartIndex is where the goal's turns begin in msgs.

@@ -1,7 +1,8 @@
 package config
 
 import (
-	"reflect"
+	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 )
@@ -162,120 +163,41 @@ func TestResultEvictionValidate(t *testing.T) {
 	}
 }
 
-func TestResultEvictionListingDefaults(t *testing.T) {
-	var r ResultEviction
-	want := []string{"glob", "print_tree", "websearch", "webfetch"}
-	if got := r.EffectiveTools(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("tools = %v, want %v", got, want)
-	}
-	if got := r.EffectiveKeepRecentSteps(); got != ResultEvictionDefaultKeepRecentSteps {
-		t.Fatalf("keep_recent_steps = %d, want %d", got, ResultEvictionDefaultKeepRecentSteps)
-	}
-	if ResultEvictionDefaultKeepRecentSteps != 3 {
-		t.Fatalf("the documented default is 3, the constant says %d", ResultEvictionDefaultKeepRecentSteps)
-	}
-}
-
-// EffectiveTools hands out a copy: a caller sorting or trimming the answer must
-// not rewrite the default every other session reads.
-func TestResultEvictionEffectiveToolsIsACopy(t *testing.T) {
-	var r ResultEviction
-	first := r.EffectiveTools()
-	first[0] = "tampered"
-	if got := r.EffectiveTools()[0]; got != "glob" {
-		t.Fatalf("mutating the returned default changed the next answer: %q", got)
-	}
-
-	set := []string{"glob"}
-	r = ResultEviction{Tools: &set}
-	got := r.EffectiveTools()
-	got[0] = "tampered"
-	if set[0] != "glob" {
-		t.Fatalf("mutating the returned list changed the configured one: %v", set)
-	}
-}
-
-func TestResultEvictionListingExplicitValues(t *testing.T) {
-	empty := []string{}
-	one := 1
-	r := ResultEviction{Tools: &empty, KeepRecentSteps: &one}
-	if got := r.EffectiveTools(); len(got) != 0 {
-		t.Fatalf("an explicit empty list must mean no listing tools, got %v", got)
-	}
-	if got := r.EffectiveKeepRecentSteps(); got != 1 {
-		t.Fatalf("keep_recent_steps = %d, want the explicit 1", got)
-	}
-
-	two := []string{"webfetch", "glob"}
-	r = ResultEviction{Tools: &two}
-	if got := r.EffectiveTools(); !reflect.DeepEqual(got, []string{"webfetch", "glob"}) {
-		t.Fatalf("tools = %v", got)
-	}
-}
-
-func TestResultEvictionListingValidate(t *testing.T) {
-	neg := -1
-	zero := 0
-	bad := []string{"glob", "run_command"}
-	twice := []string{"glob", "print_tree", "glob"}
-	mcp := []string{"mcp__files__list"}
-	ok := []string{"glob", "print_tree", "websearch", "webfetch"}
-	empty := []string{}
-
-	cases := []struct {
-		name    string
-		r       ResultEviction
-		wantErr []string
-	}{
-		{name: "defaults", r: ResultEviction{}},
-		{name: "every allowed name", r: ResultEviction{Tools: &ok}},
-		{name: "explicit empty list", r: ResultEviction{Tools: &empty}},
-		{name: "run_command is refused", r: ResultEviction{Tools: &bad},
-			wantErr: []string{"compaction.result_eviction.tools", `"run_command"`, "glob, print_tree, websearch, webfetch"}},
-		{name: "an MCP tool is refused", r: ResultEviction{Tools: &mcp},
-			wantErr: []string{"compaction.result_eviction.tools", "mcp__files__list"}},
-		{name: "a name twice is refused", r: ResultEviction{Tools: &twice},
-			wantErr: []string{"compaction.result_eviction.tools", "duplicate", `"glob"`}},
-		// A window of no steps would collapse the listing the model has just
-		// asked for in the very next request, so the floor is one step.
-		{name: "zero steps", r: ResultEviction{KeepRecentSteps: &zero},
-			wantErr: []string{"compaction.result_eviction.keep_recent_steps", ">= 1"}},
-		{name: "negative steps", r: ResultEviction{KeepRecentSteps: &neg},
-			wantErr: []string{"compaction.result_eviction.keep_recent_steps", ">= 1"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			r := tc.r
-			err := r.Validate()
-			if len(tc.wantErr) == 0 {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				return
-			}
-			if err == nil {
-				t.Fatal("expected an error")
-			}
-			for _, w := range tc.wantErr {
-				if !strings.Contains(err.Error(), w) {
-					t.Fatalf("error %q does not mention %q", err, w)
-				}
-			}
-		})
-	}
-
-	// The section's own Validate is reached through the compaction one, so a
-	// config with a bad name is refused at load.
-	c := Compaction{ResultEviction: ResultEviction{Tools: &bad}}
+// compaction.in_turn has one key, its switch: the fold of the turn being
+// answered and the recovery from a refused request are on unless the operator
+// turns them off, with or without ApplyDefaults.
+func TestInTurnDefaults(t *testing.T) {
+	var c Compaction
 	c.ApplyDefaults()
-	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "result_eviction.tools") {
-		t.Fatalf("Compaction.Validate must surface result_eviction.tools errors, got %v", err)
+	if !c.InTurn.IsEnabled() {
+		t.Fatal("in-turn compaction must be on by default")
+	}
+	if c.InTurn.Enabled != nil {
+		t.Fatalf("ApplyDefaults must leave the switch unset, got %v", *c.InTurn.Enabled)
+	}
+	if !(&InTurn{}).IsEnabled() {
+		t.Fatal("the zero value must mean the default (on)")
 	}
 }
 
-// An absent key and an explicit empty list are different answers: the first
-// evicts the default listing tools, the second evicts read and grep only.
-func TestResultEvictionYAMLToolsNilVersusEmpty(t *testing.T) {
+func TestInTurnExplicitValues(t *testing.T) {
+	off, on := false, true
+	if (&InTurn{Enabled: &off}).IsEnabled() {
+		t.Fatal("enable: false must switch the fold off")
+	}
+	if !(&InTurn{Enabled: &on}).IsEnabled() {
+		t.Fatal("enable: true must keep the fold on")
+	}
+	c := Compaction{InTurn: InTurn{Enabled: &off}}
+	c.ApplyDefaults()
+	if c.InTurn.IsEnabled() {
+		t.Fatal("explicit enable: false must survive defaults")
+	}
+}
+
+// An absent key stays nil (the default) and an explicit enable: false is read
+// back as written.
+func TestInTurnYAML(t *testing.T) {
 	load := func(extra string) (*Config, error) {
 		return parseValidateYAMLBytes(`
 providers:
@@ -287,53 +209,136 @@ models:
 agent:
   model: fake/m
 compaction:
-  result_eviction:
 `+extra, Paths{})
 	}
 
-	absent, err := load("    keep_recent: 1\n")
+	absent, err := load("  threshold_percent: 70\n")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if absent.Compaction.ResultEviction.Tools != nil {
-		t.Fatalf("an absent key must stay nil, got %v", *absent.Compaction.ResultEviction.Tools)
+	if absent.Compaction.InTurn.Enabled != nil {
+		t.Fatalf("an absent key must stay nil, got %v", *absent.Compaction.InTurn.Enabled)
 	}
-	if got := absent.Compaction.ResultEviction.EffectiveTools(); len(got) != 4 {
-		t.Fatalf("an absent key must mean the default list, got %v", got)
+	if !absent.Compaction.InTurn.IsEnabled() {
+		t.Fatal("an absent key must mean the default (on)")
 	}
 
-	empty, err := load("    tools: []\n")
+	set, err := load("  in_turn:\n    enable: false\n")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if empty.Compaction.ResultEviction.Tools == nil {
-		t.Fatal("an explicit empty list decoded as nil")
+	if set.Compaction.InTurn.Enabled == nil || set.Compaction.InTurn.IsEnabled() {
+		t.Fatalf("enable: false lost: %+v", set.Compaction.InTurn)
 	}
-	if got := empty.Compaction.ResultEviction.EffectiveTools(); len(got) != 0 {
-		t.Fatalf("an explicit empty list must mean none, got %v", got)
-	}
+}
 
-	set, err := load("    tools: [glob, webfetch]\n    keep_recent_steps: 1\n")
+// The agent stages compaction.in_turn.enable through config_set, which edits the
+// YAML tree: a switch turned off has to reach the file and read back off.
+func TestCommitUCICommandsInTurnSwitchReachesTheFile(t *testing.T) {
+	paths := testPathConfig(t, "compaction:\n  threshold_percent: 70\n")
+
+	if _, err := CommitUCICommands(paths, mustParseUCI(t, "set compaction.in_turn.enable=false")); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadWithPaths(paths)
 	if err != nil {
 		t.Fatal(err)
 	}
-	re := set.Compaction.ResultEviction
-	if !reflect.DeepEqual(re.EffectiveTools(), []string{"glob", "webfetch"}) {
-		t.Fatalf("tools = %v", re.EffectiveTools())
+	if cfg.Compaction.InTurn.Enabled == nil || cfg.Compaction.InTurn.IsEnabled() {
+		t.Fatalf("in_turn = %+v, want an explicit enable: false", cfg.Compaction.InTurn)
 	}
-	if re.KeepRecentSteps == nil || *re.KeepRecentSteps != 1 {
-		t.Fatalf("keep_recent_steps: 1 must stay an explicit 1, got %v", re.KeepRecentSteps)
+	raw, err := os.ReadFile(paths.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "in_turn:") || !strings.Contains(string(raw), "enable: false") {
+		t.Fatalf("the switch did not reach the file:\n%s", raw)
+	}
+}
+
+// A save of a config that never named the section does not materialize it, and
+// an explicit enable: false is kept.
+func TestMarshalConfigYAMLKeepsInTurnOnlyWhenSet(t *testing.T) {
+	cfg := loadForRewrite(t, sparseConfig)
+	cfg.Agent.MaxTurns = 42
+	saved := rewrite(t, cfg, sparseConfig)
+	if strings.Contains(saved, "in_turn") {
+		t.Errorf("saved config materializes in_turn the file never had:\n%s", saved)
 	}
 
-	// The loader refuses a window of no steps with the key named.
-	if _, err := load("    keep_recent_steps: 0\n"); err == nil || !strings.Contains(err.Error(), "result_eviction.keep_recent_steps") || !strings.Contains(err.Error(), ">= 1") {
-		t.Fatalf("a config with keep_recent_steps: 0 must be refused at load, got %v", err)
+	const withSwitch = sparseConfig + `compaction:
+  in_turn:
+    enable: false
+`
+	cfg = loadForRewrite(t, withSwitch)
+	cfg.Agent.MaxTurns = 42
+	saved = rewrite(t, cfg, withSwitch)
+	if !strings.Contains(saved, "enable: false") || !strings.Contains(saved, "in_turn:") {
+		t.Errorf("saved config dropped the explicit in_turn switch:\n%s", saved)
 	}
+}
 
-	if _, err := load("    tools: [run_command]\n"); err == nil || !strings.Contains(err.Error(), "result_eviction.tools") {
-		t.Fatalf("a config naming run_command must be refused at load, got %v", err)
+// descendant walks the properties of a JSON-schema-shaped document by name.
+func descendant(t *testing.T, node map[string]interface{}, path ...string) map[string]interface{} {
+	t.Helper()
+	for _, name := range path {
+		props, ok := node["properties"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("no properties before %q", name)
+		}
+		next, ok := props[name].(map[string]interface{})
+		if !ok {
+			t.Fatalf("no property %q", name)
+		}
+		node = next
 	}
-	if _, err := load("    tools: [glob, webfetch, glob]\n"); err == nil || !strings.Contains(err.Error(), "result_eviction.tools") || !strings.Contains(err.Error(), "duplicate") {
-		t.Fatalf("a config naming glob twice must be refused at load, got %v", err)
+	return node
+}
+
+// describedSchemas returns the two documents a person reads a key by: the
+// published config.schema.json and the Settings form's UISchemaMap.
+func describedSchemas(t *testing.T) map[string]map[string]interface{} {
+	t.Helper()
+	var schema map[string]interface{}
+	if err := json.Unmarshal(ConfigSchemaJSON(), &schema); err != nil {
+		t.Fatal(err)
+	}
+	return map[string]map[string]interface{}{"config.schema.json": schema, "UISchemaMap": UISchemaMap()}
+}
+
+// compaction.in_turn.enable does nothing while compaction.auto_enable is false:
+// the fold and the recovery from a refused request both need the automatic
+// trigger. Every description a person reads the key by says so (the web UI
+// dictionaries, the Russian descriptions and the bundled skill carry the same
+// sentence and are held by docs-check and by review).
+func TestInTurnDescriptionsSayTheyNeedTheAutomaticTrigger(t *testing.T) {
+	for name, root := range describedSchemas(t) {
+		section := descendant(t, root, "compaction", "in_turn")
+		enable := descendant(t, section, "enable")
+		for label, node := range map[string]map[string]interface{}{"compaction.in_turn": section, "compaction.in_turn.enable": enable} {
+			desc, _ := node["description"].(string)
+			if !strings.Contains(desc, "auto_enable") {
+				t.Errorf("%s: the description of %s does not say it needs compaction.auto_enable: %q", name, label, desc)
+			}
+		}
+	}
+}
+
+// result_eviction also collapses the listings of a fixed set of tools, so the
+// section no longer calls itself read/grep only and names each listing tool it
+// takes.
+func TestResultEvictionDescriptionsNameTheListingTools(t *testing.T) {
+	for name, root := range describedSchemas(t) {
+		section := descendant(t, root, "compaction", "result_eviction")
+		title, _ := section["title"].(string)
+		desc, _ := section["description"].(string)
+		if strings.Contains(strings.ToLower(title), "read/grep") {
+			t.Errorf("%s: the section still calls itself read/grep only: %q", name, title)
+		}
+		for _, tool := range []string{"glob", "print_tree", "websearch", "webfetch"} {
+			if !strings.Contains(desc, tool) {
+				t.Errorf("%s: the description of compaction.result_eviction does not name %s: %q", name, tool, desc)
+			}
+		}
 	}
 }

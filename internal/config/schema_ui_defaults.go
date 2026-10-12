@@ -81,11 +81,7 @@ func SchemaExampleConfigJSON() *ConfigJSON {
 			KeepRecentTurns:  intPtr(CompactionDefaultKeepRecentTurns),
 			Model:            "",
 			InTurn: InTurnJSON{
-				Enabled:         boolPtr(true),
-				KeepRecentSteps: intPtr(InTurnDefaultKeepRecentSteps),
-			},
-			ResultEviction: ResultEvictionJSON{
-				KeepRecentSteps: intPtr(ResultEvictionDefaultKeepRecentSteps),
+				Enabled: boolPtr(true),
 			},
 		},
 		Memory: MemoryJSON{
