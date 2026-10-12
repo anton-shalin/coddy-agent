@@ -64,7 +64,7 @@ The `background_*` tools are registered only while `tools.background` is enabled
 
 | Tool | Purpose | Arguments (short) | Permission | Modes |
 |---|---|---|---|---|
-| `question` | Ask the user one or more multiple-choice questions and wait for the answers | `questions[]` of `header`, `question`, `options[]` (`label`, `description`), `multiple`, `custom` | none (the turn waits for the user) | agent, plan, ask |
+| `question` | Ask the user one or more multiple-choice questions and wait for the answers; a question also takes an answer the user types unless it sets `custom` to `false`, so the model offers no "Other" option of its own | `questions[]` of `header`, `question`, `options[]` (`label`, `description`), `multiple`, `custom` (default `true`) | none (the turn waits for the user) | agent, plan, ask |
 | `load_skill` | Load the full instructions of a catalogued skill by name; registered only while `skills.auto_discovery` is on ([Skills](../features/skills.md)) | `name` | none | agent, plan, ask |
 | `coddy_docs_search` | Search Coddy's own documentation, built into the binary, with BM25 over the sections, in English or Russian ([Built-in documentation](../features/built-in-docs.md#the-agents-tools)) | `query`, `limit`, `lang` | none | agent, plan, ask |
 | `coddy_docs_read` | Read a page or a section of that documentation, or its contents without a page, in the turn's language unless `lang` names one; long pages come in parts | `page`, `offset`, `lang` | none | agent, plan, ask |

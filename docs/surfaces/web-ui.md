@@ -1038,6 +1038,21 @@ Automated checks:
 - **external/ui/src/ui/chat/PermissionPromptSection.test.tsx**
 - **external/ui/src/ui/messages/MessageList.test.tsx**
 
+## Question card
+
+![A question card: two questions, the options the model offered and a field for your own answer under each](../assets/web-ui/question-card-own-answer-dark-1280.png)
+
+*A question ends with Other…, a field for an answer of your own, unless the model turned it off*
+
+When the agent asks you something with the `question` tool, the card under its row lists each question's options behind their letters and ends the question with **Other…**, a field for an answer of your own, in single and multiple choice alike. The field follows the question's `custom` flag, which is on by default, since the options a model offers often miss what you mean. The model turns it off with `custom: false` only when the answer must be one of its options, a yes-or-no confirmation for example, and then the question lists its options alone. In a multiple-choice question the text you type joins the options you ticked. **Continue** or Return sends the answers, **Skip** or Escape skips the questions, and the tool row above the card keeps the whole offer with the letters you took marked.
+
+A question without the flag offers the field too, so a server of an older version that leaves the flag out gets the same card. The console offers the same answer as **Custom answer...** ([Console](console.md)).
+
+Automated checks:
+
+- **external/ui/src/ui/chat/QuestionPromptSection.test.tsx**
+- **external/ui/src/ui/messages/ToolCallMessage.test.tsx**
+- **features/web_ui_question_own_answer.feature**
 
 ## Message editing and history rewind
 
