@@ -1,8 +1,8 @@
 # Interactive console TUI (`coddy` / `coddy cli`)
 
-https://github.com/user-attachments/assets/0fc63d52-94ca-4927-9c88-29dec02a8767
+https://github.com/user-attachments/assets/446b3966-1d45-4e5d-99cf-b5b02db3e860
 
-*A three-minute recording of a console session on 1.2.31: the header with the project's `AGENTS.md` and the skills, the footer with the account usage, the model picker, file work with permission prompts, a `/commit` skill, the built-in documentation on F1 and `coddy -c`. The file is in the repository as [console.mp4](../assets/video/console.mp4).*
+*A two-minute recording of a console session on 1.3.0: the header with the project's `AGENTS.md` and the skills, the footer with the account usage, the model picker, a picture read by the model, a git worktree for the feature, a `/goal` that a supervisor checks and the goal menu, a follow-up queued as a steer while the turn runs, a `/commit` skill, the built-in documentation on F1 and `coddy -c`. The file is in the repository as [console.mp4](../assets/video/console.mp4).*
 
 The console surface is a terminal UI over the same machinery every other
 surface uses: `session.Manager`, the agent runner, and ACP session updates.

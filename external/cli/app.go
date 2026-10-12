@@ -93,9 +93,12 @@ type App struct {
 	queuePreference       session.QueueMode
 	pendingQueueText      string
 	pendingQueueAlternate bool
-	editorWrap            *tui.Container
-	editor                *tui.Editor
-	foot                  *footer
+	// queueChoiceLine is the open question about the queue mode, removed from
+	// the transcript once the operator answers or dismisses it.
+	queueChoiceLine *statusLine
+	editorWrap      *tui.Container
+	editor          *tui.Editor
+	foot            *footer
 
 	spinner     *tui.Loader
 	stepStatus  liveStatus
@@ -734,6 +737,7 @@ func (a *App) handleGlobalKey(data []byte) bool {
 			}
 			text, alternate := a.pendingQueueText, a.pendingQueueAlternate
 			a.pendingQueueText = ""
+			a.dismissQueueChoice()
 			a.queuePreference = mode
 			if alternate {
 				mode = oppositeQueueMode(mode)
@@ -743,6 +747,7 @@ func (a *App) handleGlobalKey(data []byte) bool {
 		case "escape":
 			a.editor.SetText(a.pendingQueueText)
 			a.pendingQueueText = ""
+			a.dismissQueueChoice()
 			return true
 		}
 	}
@@ -1404,6 +1409,7 @@ func (a *App) resetTranscript() {
 	a.remoteTurnActive, a.remoteActivityRevision = false, 0
 	a.queue.Reset()
 	a.chat.Clear()
+	a.queueChoiceLine = nil
 	a.mcpReported = nil
 	a.plan.SetEntries(nil)
 	a.toolBoxes = map[string]*toolBox{}

@@ -370,9 +370,9 @@ The Subagents tab is shown under [Scopes and project trust](#scopes-and-project-
 
 *The Tasks panel with a subagent run in progress*
 
-![The card of a finished run opened in place: Show transcript, the log and the report](../assets/subagents/tasks-detail-agent-finished-dark.png)
+![The card of a finished run opened in place: the log, the report and Show transcript](../assets/subagents/tasks-detail-agent-finished-dark.png)
 
-*The card of a finished run opened in place: Show transcript, the progress log and the report*
+*The card of a finished run opened in place: the progress log and the report, with Show transcript under them*
 
 ![The child session opened read-only from the task row](../assets/subagents/child-transcript-readonly-dark.png)
 
