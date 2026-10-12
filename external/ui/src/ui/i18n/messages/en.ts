@@ -274,6 +274,7 @@ export const messagesEn: Record<string, string> = {
   "settings.group.hooks.main": "Hook settings",
   "settings.group.hooks.mainDesc":
     "How hooks run: whether files that came with the checkout may run, how long one hook process may take when its definition gives no timeout, how many times a Stop hook may send the agent back to work, and how much text one hook may hand over.",
+  "settings.group.compaction.auto": "Automatic compaction",
   "settings.group.compaction.summary": "Summarization",
   "settings.group.supervisor.checks": "Goal checks",
   "settings.group.supervisor.watchdog": "Watchdog",
@@ -690,10 +691,10 @@ export const messagesEn: Record<string, string> = {
   "settings.schema.compaction.enable.label": "Enabled",
   "settings.schema.compaction.enable.desc":
     "Master switch for compaction (manual command and automatic trigger). Defaults to true.",
-  "settings.schema.compaction.auto_enable.label": "Automatic compaction",
+  "settings.schema.compaction.auto_enable.label": "Enabled",
   "settings.schema.compaction.auto_enable.desc":
-    "Enable the threshold trigger while keeping manual compaction available when off. Defaults to true.",
-  "settings.schema.compaction.threshold_percent.label": "Auto threshold (%)",
+    "Compact on its own: fold older turns at the threshold, or the earlier steps of a long turn when there is no earlier turn, and compact and ask again once when the provider refuses a request as larger than its context window. Off keeps manual compaction available. Defaults to true.",
+  "settings.schema.compaction.threshold_percent.label": "Threshold (%)",
   "settings.schema.compaction.threshold_percent.desc":
     "Auto-compact when the estimated context reaches this percent of the model's context window (1..100, default 80): its max_context_tokens, else the window its provider reports, else 128000.",
   "settings.schema.compaction.keep_recent_turns.label": "Keep recent turns",
@@ -702,21 +703,28 @@ export const messagesEn: Record<string, string> = {
   "settings.schema.compaction.model.label": "Summarizer model",
   "settings.schema.compaction.model.desc":
     "Optional models[].model for the summarization call; empty uses the session model.",
-  "settings.schema.compaction.result_eviction.label":
-    "Read/grep result eviction",
+  "settings.schema.compaction.result_eviction.label": "Tool result eviction",
   "settings.schema.compaction.result_eviction.desc":
-    "Collapse superseded read/grep results to placeholders when building the LLM request; the persisted transcript is untouched. Only marked (keep_result / keep:true) or most-recent results survive.",
+    "Collapse superseded tool results (read pages, grep dumps, and the listings of glob, print_tree, websearch and webfetch) to placeholders when building the LLM request; the persisted transcript is untouched. Read and grep results survive when marked (keep_result / keep:true) or among the most recent; listings survive within the latest three steps.",
   "settings.schema.compaction.result_eviction.enable.label": "Enabled",
   "settings.schema.compaction.result_eviction.enable.desc":
-    "Master switch for read/grep result eviction. Defaults to true.",
+    "Master switch for tool result eviction. Defaults to true.",
   "settings.schema.compaction.result_eviction.keep_recent.label":
     "Keep recent results",
   "settings.schema.compaction.result_eviction.keep_recent.desc":
-    "How many most recent evictable results stay intact as a working window (default 2 — enough to hold a read and a grep at once; 0 keeps none).",
+    "How many most recent read and grep results stay intact as a working window (default 2 - enough to hold a read and a grep at once; 0 keeps none).",
   "settings.schema.compaction.result_eviction.min_result_bytes.label":
     "Min result bytes",
   "settings.schema.compaction.result_eviction.min_result_bytes.desc":
     "Results at or below this size are never evicted (default 2000; 0 makes every result a candidate).",
+  "settings.schema.compaction.fallback_models.label":
+    "Fallback summarizer models",
+  "settings.schema.compaction.fallback_models.desc":
+    "Summarizer models tried in order when the one before them fails. The session's own model is the last resort whether or not it is listed here.",
+  "settings.schema.compaction.result_eviction.start_percent.label":
+    "Start at (%)",
+  "settings.schema.compaction.result_eviction.start_percent.desc":
+    "Evict only once the estimated context reaches this percent of the model's context window (default 50; 0 evicts from the first result). Below it the history is sent untouched so the provider's prompt cache holds. Read and grep results of a model without max_context_tokens are evicted from the first result.",
 
   "settings.schema.scheduler.label": "Scheduler",
   "settings.schema.scheduler.enable.label": "Enabled",

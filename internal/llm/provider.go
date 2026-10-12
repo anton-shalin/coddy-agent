@@ -96,6 +96,11 @@ type Message struct {
 	// or failed turn. Surfaces show a one-line row instead of the text, which
 	// the model reads like any other user message.
 	GoalTurn *GoalTurn `json:"goal_turn,omitempty"`
+	// FollowUp marks a user-role message the user queued while a turn ran: it
+	// belongs to that turn and does not open one of its own, so a compaction
+	// never takes it for the prompt being answered (session.OpeningPromptIndex).
+	// Persisted with the transcript, so the distinction survives a restart.
+	FollowUp bool `json:"follow_up,omitempty"`
 }
 
 type Artifact struct {

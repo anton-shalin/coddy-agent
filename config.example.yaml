@@ -194,17 +194,22 @@ sessions:
 # model context window. Manual /compact command plus automatic trigger.
 # compaction:
 #   enable: true             # master switch (manual command and automation)
-#   auto_enable: true        # turn off the threshold trigger but keep manual compaction
+#   auto_enable: true        # automatic compaction: the threshold trigger, the fold of a long turn's
+#                            # earlier steps behind its prompt, and one compaction and retry after a
+#                            # request the provider refused as too large; false keeps manual /compact
 #   threshold_percent: 80    # auto-compact at this percent of the model's context window (1..100)
 #   keep_recent_turns: 2     # last N user turns stay verbatim; 0 summarizes everything
 #   model: ""                # optional models[].model for the summarizer; empty = session model
 #   fallback_models: []      # tried in order when the summarizer above them fails; the session
 #                            # model is the last resort whether or not it is listed
-#   # Collapse superseded read/grep results to placeholders in the LLM request
-#   # (the persisted transcript stays complete). Only marked results survive.
+#   # Collapse superseded tool results to placeholders in the LLM request (the
+#   # persisted transcript stays complete). read/grep results survive while marked
+#   # or recent; glob, print_tree, websearch and webfetch results survive in the
+#   # latest three steps that hold one and, for glob and print_tree, until a write
+#   # lands under the folder they listed.
 #   result_eviction:
 #     enable: true           # master switch
-#     keep_recent: 2         # most recent evictable results kept as a working window; 0 keeps none
+#     keep_recent: 2         # most recent evictable read/grep results kept as a working window; 0 keeps none
 #     min_result_bytes: 2000 # results this size or smaller are never evicted
 #     start_percent: 50      # wait until the context is this full before evicting; 0 = from the
 #                            # first result. A placeholder written into the middle of the history

@@ -527,7 +527,9 @@ The block belongs to the running console only. Reopening the session with
 
 Modals replace the editor while open: permission requests (the option list
 comes from the agent's `permission.Options`), the question tool (single or
-multi-select via space, custom free-text answers), model/reasoning/permission/theme/session
+multi-select via space, and a free-text **Custom answer...** unless the question
+sets `custom` to `false`; the typed text joins the options ticked beside it),
+model/reasoning/permission/theme/session
 selectors (`→ ` cursor, type-to-filter, `(i/n)` scroll indicator).
 
 A background subagent keeps working after the turn that spawned it has ended,
