@@ -26,9 +26,7 @@ func (m *Manager) RunPlan(ctx context.Context, sessionID, slug string, sender ac
 	if err := readOnlyRefusal(state, sessionID); err != nil {
 		return nil, err
 	}
-	// Before the admission the session's own mode is all there is to read:
-	// the turn values belong to whatever turn holds the session now.
-	if err := refuseAskModePlanRun(state.GetMode(), slug); err != nil {
+	if err := refuseAskModePlanRun(state, slug); err != nil {
 		return nil, err
 	}
 	// A plan run is a turn: the direct route (HTTP plans) is admitted like a
@@ -45,11 +43,11 @@ func (m *Manager) RunPlan(ctx context.Context, sessionID, slug string, sender ac
 // refuseAskModePlanRun fails closed for a read-only ask session: a plan run
 // switches to agent with the full tool set, so the prompt shortcuts and the
 // HTTP route refuse earlier with friendlier codes, and no caller can run a
-// plan out of an ask session by mistake. mode is the session's before a turn
-// is admitted and the admitted turn's after: a turn held in ask by
-// /ask --once is read-only too.
-func refuseAskModePlanRun(mode, slug string) error {
-	if mode == string(ModeAsk) {
+// plan out of an ask session by mistake. It reads the session's own mode, not
+// a turn's: an /ask --once or --count=N detour in an agent session ends with
+// the plan run, as it would with a session-wide /agent (runPlanAdmitted).
+func refuseAskModePlanRun(state *State, slug string) error {
+	if state.GetMode() == string(ModeAsk) {
 		return fmt.Errorf("plan %q cannot be run in ask mode: switch to agent mode first", slug)
 	}
 	return nil
@@ -61,7 +59,7 @@ func (m *Manager) runPlanAdmitted(ctx context.Context, sessionID, slug string, s
 	if sender == nil {
 		sender = m.server
 	}
-	if err := refuseAskModePlanRun(state.EffectiveMode(), slug); err != nil {
+	if err := refuseAskModePlanRun(state, slug); err != nil {
 		return nil, err
 	}
 	sd := strings.TrimSpace(state.GetPersistedSessionDir())
@@ -83,10 +81,10 @@ func (m *Manager) runPlanAdmitted(ctx context.Context, sessionID, slug string, s
 	}
 	state.SetPendingPlanContext(plans.RunContextText(doc))
 	// Running a plan switches the session to agent mode the way /agent does:
-	// it is the operator's last word on the mode, so a plan detour armed with
-	// --once or --count, which this very turn may already hold, ends here.
-	// Otherwise the turn would carry the plan out in plan mode, where every
-	// write is refused.
+	// it is the operator's last word on the mode, so a detour armed with
+	// --once or --count (/plan or /ask), which this very turn may already
+	// hold, ends here. Otherwise the turn would carry the plan out in the
+	// detour's mode: without the plan text and with every write refused.
 	modeOverridden := false
 	for _, o := range state.TurnOverrides() {
 		if o.Setting == SettingMode {

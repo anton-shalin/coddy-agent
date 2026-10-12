@@ -60,7 +60,9 @@ Working directory: {{.CWD}}
 Системное сообщение рендерится **один раз за ход** функцией **`buildSystemPromptParts`**
 (**`internal/agent/system_prompt.go`**), и каждый шаг цикла ReAct затем отправляет это же
 сообщение байт в байт. Между шагами **`messages[0]`** никто не переписывает, кроме шаблона из
-**`prompts.dir`**, который сам печатает часы или чек-лист (см. конец следующего раздела).
+**`prompts.dir`**, который сам печатает часы или чек-лист (см. конец следующего раздела). Ход,
+остановленный на запросе разрешения, рендерит его заново, когда ответ продолжает ход
+(**`ResumeAfterPermission`**).
 
 Причина в кэше промптов у провайдера. Провайдер кэширует запрос по **префиксу** (сначала определения
 инструментов, затем сообщения с начала), и первый байт, отличающийся от предыдущего запроса,
@@ -206,7 +208,7 @@ export CODDY_LOG_LEVEL=debug   # or logger.levels: {agent: debug}
 messages: [
   { role: "system",    content: <system_prompt> },
   { role: "user",      content: <user_prompt> },
-  { role: "assistant", content: "", tool_calls: [{ id: "call_1", name: "read_file", args: {...} }] },
+  { role: "assistant", content: "", tool_calls: [{ id: "call_1", name: "read", args: {...} }] },
   { role: "tool",      tool_call_id: "call_1", content: <file_contents> },
   { role: "assistant", content: "", tool_calls: [{ id: "call_2", name: "write_file", args: {...} }] },
   { role: "tool",      tool_call_id: "call_2", content: "OK" },
@@ -242,7 +244,7 @@ messages: [
 5. REFRESH_TURN_CONTEXT
    - messages[0] is not rewritten: the system message stays as the turn rendered it, and what moved since (wall clock, todo checklist, memory report, running background tasks) is rebuilt by `buildTurnContext` and appended after the history at the send boundary
    - A template under `prompts.dir` that prints `{{.UTCNow}}` or `{{.TodoList}}` is the exception: it is re-rendered before every call, and its block carries no clock or checklist
-   - An automatic compaction or a workspace switch re-renders the system message for the new history or workspace; no other step of the turn does
+   - An automatic compaction or a workspace switch re-renders the system message for the new history or workspace, and a turn resumed after a permission prompt renders it again on entry; no other step of the turn does
    - Next loop iteration repeats from step 2
 
 6. CHECK_COMPLETION
@@ -339,9 +341,9 @@ messages: [
 
 Типичные встроенные инструменты (без инструментов из пространств имён MCP):
 
-- `read_file`, `write_file`, `write_text_file`, `list_dir`, `search_files`;
+- `read`, `keep_result`, `write`, `edit`, `apply_patch`, `glob`, `grep`, `print_tree`;
 - `websearch`, `webfetch`, `http_request`;
-- `run_command`, `apply_diff`;
+- `run_command` и фоновые инструменты (`background_list`, `background_output`, `background_wait`, `background_stop`, `background_reap`);
 - изменения файловой системы - **`mkdir`**, **`rm`**, **`rmdir`**, **`touch`**, **`mv`** (часть из них может требовать разрешённых путей);
 - чек-лист сессии - **`coddy_todo_plan_read`**, **`coddy_todo_plan_replace`**, **`coddy_todo_plan_archive`**, **`coddy_todo_item_add`**, **`coddy_todo_item_remove`**, **`coddy_todo_item_update`**, **`coddy_todo_item_move`**;
 - все инструменты MCP-серверов (имена вида **`serverName__toolName`**).
@@ -352,9 +354,12 @@ messages: [
 
 Типичные встроенные инструменты, доступные LLM (разрешённый список реестра):
 
-- `read_file`, `list_dir`, `search_files`;
+- `read`, `keep_result`, `glob`, `grep`, `print_tree`;
 - `websearch`, `webfetch`;
-- `run_command`.
+- `run_command` с `background_list`, `background_output`, `background_wait`, `background_stop`;
+- `plan_write`, `plan_list`, `plan_read`.
+
+Полный список задаёт **`internal/agent.ToolSetForMode("plan")`** ([Режимы работы](../features/modes.md#plan)).
 
 Плюс инструменты MCP (**`serverName__toolName`**). Разрешённый список проверяется и при выполнении, поэтому вызов, повторённый из истории, который называет инструмент вне списка, не выполняется, а отклоняется с уведомлением о режиме "План". Когда пора переходить к реализации, промпты велят переключить клиент в режим **`agent`**.
 
@@ -364,86 +369,7 @@ messages: [
 
 ## Спецификация встроенных инструментов
 
-### `read_file`
-```json
-{
-  "name": "read_file",
-  "description": "Read the contents of a file",
-  "parameters": {
-    "path": { "type": "string", "description": "Absolute or relative (to cwd) path" },
-    "start_line": { "type": "integer", "description": "First line to read (1-based, optional)" },
-    "end_line": { "type": "integer", "description": "Last line to read (1-based, optional)" }
-  },
-  "required": ["path"]
-}
-```
-
-### `write_file`
-```json
-{
-  "name": "write_file",
-  "description": "Write or create a file with the given content",
-  "parameters": {
-    "path": { "type": "string", "description": "Absolute or relative (to cwd) path" },
-    "content": { "type": "string", "description": "Full file content to write" }
-  },
-  "required": ["path", "content"]
-}
-```
-
-### `list_dir`
-```json
-{
-  "name": "list_dir",
-  "description": "List files and directories at the given path",
-  "parameters": {
-    "path": { "type": "string", "description": "Directory path (default: cwd)" },
-    "recursive": { "type": "boolean", "description": "Include subdirectories" }
-  }
-}
-```
-
-### `grep`
-```json
-{
-  "name": "grep",
-  "description": "Search file contents recursively (system ripgrep with a built-in fallback)",
-  "parameters": {
-    "pattern": { "type": "string", "description": "Regex or literal search pattern" },
-    "path": { "type": "string", "description": "Directory to search in (default: cwd)" },
-    "glob": { "type": "string", "description": "File glob filter (e.g. '**/*.go')" },
-    "case_sensitive": { "type": "boolean", "default": false },
-    "max_results": { "type": "integer", "default": 100 }
-  },
-  "required": ["pattern"]
-}
-```
-
-### `run_command`
-```json
-{
-  "name": "run_command",
-  "description": "Execute a shell command in the working directory",
-  "parameters": {
-    "command": { "type": "string", "description": "Shell command to execute" },
-    "timeout_seconds": { "type": "integer", "default": 30 }
-  },
-  "required": ["command"]
-}
-```
-
-### `apply_diff`
-```json
-{
-  "name": "apply_diff",
-  "description": "Apply a unified diff to a file",
-  "parameters": {
-    "path": { "type": "string", "description": "File to patch" },
-    "diff": { "type": "string", "description": "Unified diff content" }
-  },
-  "required": ["path", "diff"]
-}
-```
+Встроенные инструменты, их аргументы, разрешение, которое нужно каждому, и режимы, в которых он доступен, перечислены на странице [Инструменты](../reference/tools.md). Модель получает схему **`InputSchema`** из конструктора каждого инструмента в **`internal/tools`** и в необязательных пакетах, а **`internal/tools.NewRegistryFor`** собирает из них реестр.
 
 ## Формат обновления плана
 
@@ -478,4 +404,4 @@ messages: [
 - Слишком длинный контекст - старые сообщения сжимаются в сводку, работа продолжается со сводкой;
 - Отмена - все операции прерываются, возвращается причина остановки `cancelled`.
 
-<!-- docsgen:source sha256=b2e799ef9c5b41af -->
+<!-- docsgen:source sha256=41e02da58e5ce18c -->

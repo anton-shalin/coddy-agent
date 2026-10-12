@@ -318,10 +318,18 @@ func modeOverrides(st *session.State) []session.TurnOverride {
 // the run in plan mode nor outlives it, and a permission answered later
 // resumes the run in agent mode too. Every surface is told the detour ended.
 func TestRunPlanEndsAnArmedModeDetour(t *testing.T) {
+	// --once is consumed whole by the plan run's own turn, --count=3 leaves
+	// turns armed after it: both have to end.
+	for _, command := range []string{"/plan --once", "/plan --count=3"} {
+		t.Run(command, func(t *testing.T) { testRunPlanEndsAnArmedModeDetour(t, command) })
+	}
+}
+
+func testRunPlanEndsAnArmedModeDetour(t *testing.T, command string) {
 	sender := &captureSender{}
 	mgr, state, modes := newRunPlanSession(t, sender)
 	id := state.GetID()
-	armMode(t, mgr, id, "/plan --count=3")
+	armMode(t, mgr, id, command)
 
 	if _, err := mgr.HandleSessionPrompt(context.Background(), acp.SessionPromptParams{
 		SessionID: id,
@@ -386,31 +394,46 @@ func TestRunPlanDirectRouteEndsAnArmedModeDetour(t *testing.T) {
 	}
 }
 
-// A turn held in ask mode by /ask --once is read-only like an ask session: the
-// run-plan metadata is refused and a plan mention stays reading material.
-func TestAskOnceTurnNeverRunsPlans(t *testing.T) {
+// Running a plan is an explicit switch to agent mode, the operator's later
+// word on the mode: in an agent session it ends an /ask detour as it ends a
+// /plan one, on the prompt route that has already taken the detour into its
+// turn and on the direct route that has not. Only an ask session refuses it.
+func TestRunPlanEndsAnArmedAskDetour(t *testing.T) {
+	for _, route := range []string{"prompt", "direct"} {
+		t.Run(route, func(t *testing.T) {
+			mgr, state, modes := newRunPlanSession(t, noopSender{})
+			id := state.GetID()
+			armMode(t, mgr, id, "/ask --count=2")
+			var err error
+			if route == "prompt" {
+				_, err = mgr.HandleSessionPrompt(context.Background(), acp.SessionPromptParams{
+					SessionID: id,
+					Meta:      map[string]interface{}{plans.MetaRunPlanSlug: "run-me"},
+					Prompt:    []acp.ContentBlock{{Type: acp.ContentTypeText, Text: "Implement the plan."}},
+				})
+			} else {
+				_, err = mgr.RunPlan(context.Background(), id, "run-me", nil)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(*modes) != 1 || (*modes)[0] != string(session.ModeAgent) {
+				t.Fatalf("the plan run ran in %v, want one agent-mode turn", *modes)
+			}
+			if got := modeOverrides(state); len(got) != 0 {
+				t.Fatalf("the ask detour outlived the plan run: %+v", got)
+			}
+		})
+	}
+}
+
+// A plan that an /ask --once turn mentions is reading material for that
+// turn, as in an ask session: the mention does not start a plan run.
+func TestAskOnceTurnReadsAMentionedPlan(t *testing.T) {
 	mgr, state, modes := newRunPlanSession(t, noopSender{})
-	id := state.GetID()
-
-	armMode(t, mgr, id, "/ask --once")
-	_, err := mgr.HandleSessionPrompt(context.Background(), acp.SessionPromptParams{
-		SessionID: id,
-		Meta:      map[string]interface{}{plans.MetaRunPlanSlug: "run-me"},
-		Prompt:    []acp.ContentBlock{{Type: acp.ContentTypeText, Text: "Implement the plan."}},
-	})
-	if err == nil || !strings.Contains(err.Error(), "ask mode") {
-		t.Fatalf("runPlanSlug in an /ask --once turn: err = %v, want the ask refusal", err)
-	}
-	if len(*modes) != 0 {
-		t.Fatalf("a turn ran despite the refusal: %v", *modes)
-	}
-	if got := state.GetMode(); got != string(session.ModeAgent) {
-		t.Fatalf("the session mode moved to %q", got)
-	}
-
-	armMode(t, mgr, id, "/ask --once")
+	armMode(t, mgr, state.GetID(), "/ask --once")
 	if _, err := mgr.HandleSessionPrompt(context.Background(), acp.SessionPromptParams{
-		SessionID: id,
+		SessionID: state.GetID(),
 		Prompt:    []acp.ContentBlock{{Type: acp.ContentTypeText, Text: "Please review @plans/run-me.plan.md and explain it."}},
 	}); err != nil {
 		t.Fatal(err)
@@ -420,6 +443,9 @@ func TestAskOnceTurnNeverRunsPlans(t *testing.T) {
 	}
 	if state.PendingPlanContext() != "" {
 		t.Fatal("the plan mention started a plan run in an ask turn")
+	}
+	if got := state.GetMode(); got != string(session.ModeAgent) {
+		t.Fatalf("the session mode moved to %q", got)
 	}
 }
 

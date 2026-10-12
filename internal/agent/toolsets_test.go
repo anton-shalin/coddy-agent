@@ -13,6 +13,7 @@ import (
 	"github.com/EvilFreelancer/coddy-agent/internal/llm"
 	"github.com/EvilFreelancer/coddy-agent/internal/mcp"
 	"github.com/EvilFreelancer/coddy-agent/internal/session"
+	"github.com/EvilFreelancer/coddy-agent/internal/subagents"
 	"github.com/EvilFreelancer/coddy-agent/internal/tools"
 )
 
@@ -316,5 +317,34 @@ func TestModeToolNamesKeepsMCPToolsWhereTheModeOffersThem(t *testing.T) {
 	}
 	if empty := modeToolNames("ask", []string{"write"}); empty == nil || len(empty) != 0 {
 		t.Errorf("a restricted mode that admits none of the names must narrow to an empty set, not to nil (unrestricted): %#v", empty)
+	}
+}
+
+// A scheduled run dials the MCP servers when its mode offers their tools and
+// its definition can admit one of them, an exact tool name included: the
+// server's tool names are only known once it is dialed.
+func TestScheduledRunDialsMCPForWhatTheDefinitionCanAdmit(t *testing.T) {
+	def := func(tools ...string) *subagents.Definition { return &subagents.Definition{Name: "job", Tools: tools} }
+	servers := []string{"srv"}
+	for _, tc := range []struct {
+		name string
+		mode string
+		def  *subagents.Definition
+		want bool
+	}{
+		{"agent, no definition", "agent", nil, true},
+		{"plan, no definition", "plan", nil, true},
+		{"ask, no definition", "ask", nil, false},
+		{"plan, an exact MCP tool", "plan", def("read", "srv__lookup"), true},
+		{"agent, the server's pattern", "agent", def("srv__*"), true},
+		{"agent, built-ins only", "agent", def("read", "grep"), false},
+		{"ask, an exact MCP tool", "ask", def("srv__lookup"), false},
+	} {
+		if got := scheduledRunDialsMCP(tc.mode, tc.def, servers); got != tc.want {
+			t.Errorf("%s: dials MCP = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	if scheduledRunDialsMCP("agent", def("srv__lookup"), nil) {
+		t.Error("a run with no configured server has nothing to dial")
 	}
 }

@@ -60,7 +60,9 @@ The environment block is appended outside the configurable template so OS and sh
 The system message is rendered **once per turn**, by **`buildSystemPromptParts`**
 (**`internal/agent/system_prompt.go`**), and every step of the ReAct loop then sends that same
 message back byte for byte. Nothing rewrites **`messages[0]`** between the steps, except a template under
-**`prompts.dir`** that prints the clock or the checklist itself (see the end of the next section).
+**`prompts.dir`** that prints the clock or the checklist itself (see the end of the next section). A
+turn that stopped on a permission prompt renders it again when the answer resumes the turn
+(**`ResumeAfterPermission`**).
 
 The reason is the provider's prompt cache. A provider caches a request by its **prefix** - the tool
 definitions, then the messages from the start - and the first byte that differs from the previous
@@ -205,7 +207,7 @@ This approach is more reliable than text parsing and supported by all major prov
 messages: [
   { role: "system",    content: <system_prompt> },
   { role: "user",      content: <user_prompt> },
-  { role: "assistant", content: "", tool_calls: [{ id: "call_1", name: "read_file", args: {...} }] },
+  { role: "assistant", content: "", tool_calls: [{ id: "call_1", name: "read", args: {...} }] },
   { role: "tool",      tool_call_id: "call_1", content: <file_contents> },
   { role: "assistant", content: "", tool_calls: [{ id: "call_2", name: "write_file", args: {...} }] },
   { role: "tool",      tool_call_id: "call_2", content: "OK" },
@@ -241,7 +243,7 @@ messages: [
 5. REFRESH_TURN_CONTEXT
    - messages[0] is not rewritten: the system message stays as the turn rendered it, and what moved since (wall clock, todo checklist, memory report, running background tasks) is rebuilt by `buildTurnContext` and appended after the history at the send boundary
    - A template under `prompts.dir` that prints `{{.UTCNow}}` or `{{.TodoList}}` is the exception: it is re-rendered before every call, and its block carries no clock or checklist
-   - An automatic compaction or a workspace switch re-renders the system message for the new history or workspace; no other step of the turn does
+   - An automatic compaction or a workspace switch re-renders the system message for the new history or workspace, and a turn resumed after a permission prompt renders it again on entry; no other step of the turn does
    - Next loop iteration repeats from step 2
 
 6. CHECK_COMPLETION
@@ -338,9 +340,9 @@ Embedded **`agent.md`** describes agent behavior (quality, shells, todos, git wo
 
 Representative builtins (excluding MCP-namespaced tools):
 
-- `read_file`, `write_file`, `write_text_file`, `list_dir`, `search_files`
+- `read`, `keep_result`, `write`, `edit`, `apply_patch`, `glob`, `grep`, `print_tree`
 - `websearch`, `webfetch`, `http_request`
-- `run_command`, `apply_diff`
+- `run_command` and the background tools (`background_list`, `background_output`, `background_wait`, `background_stop`, `background_reap`)
 - Filesystem mutations: **`mkdir`**, **`rm`**, **`rmdir`**, **`touch`**, **`mv`** (subset may require permission paths)
 - Session checklist: **`coddy_todo_plan_read`**, **`coddy_todo_plan_replace`**, **`coddy_todo_plan_archive`**, **`coddy_todo_item_add`**, **`coddy_todo_item_remove`**, **`coddy_todo_item_update`**, **`coddy_todo_item_move`**
 - All MCP server tools (names **`serverName__toolName`**)
@@ -351,9 +353,12 @@ Embedded **`plan.md`** keeps the default **registry** surface read-oriented (no 
 
 Representative builtins exposed to the LLM (registry allowlist):
 
-- `read_file`, `list_dir`, `search_files`
+- `read`, `keep_result`, `glob`, `grep`, `print_tree`
 - `websearch`, `webfetch`
-- `run_command`
+- `run_command` with `background_list`, `background_output`, `background_wait`, `background_stop`
+- `plan_write`, `plan_list`, `plan_read`
+
+The whole list is **`internal/agent.ToolSetForMode("plan")`** ([Operating modes](../features/modes.md#plan)).
 
 Plus MCP tools (**`serverName__toolName`**). The allowlist is also enforced at execution time, so a call replayed from history that names a tool outside it is refused with a plan-mode notice instead of being executed. When ready to ship implementation work, prompts instruct switching the client to **`agent`** mode.
 
@@ -363,86 +368,7 @@ Embedded **`ask.md`** describes a read-only assistant: it answers from the repos
 
 ## Built-in Tools Specification
 
-### `read_file`
-```json
-{
-  "name": "read_file",
-  "description": "Read the contents of a file",
-  "parameters": {
-    "path": { "type": "string", "description": "Absolute or relative (to cwd) path" },
-    "start_line": { "type": "integer", "description": "First line to read (1-based, optional)" },
-    "end_line": { "type": "integer", "description": "Last line to read (1-based, optional)" }
-  },
-  "required": ["path"]
-}
-```
-
-### `write_file`
-```json
-{
-  "name": "write_file",
-  "description": "Write or create a file with the given content",
-  "parameters": {
-    "path": { "type": "string", "description": "Absolute or relative (to cwd) path" },
-    "content": { "type": "string", "description": "Full file content to write" }
-  },
-  "required": ["path", "content"]
-}
-```
-
-### `list_dir`
-```json
-{
-  "name": "list_dir",
-  "description": "List files and directories at the given path",
-  "parameters": {
-    "path": { "type": "string", "description": "Directory path (default: cwd)" },
-    "recursive": { "type": "boolean", "description": "Include subdirectories" }
-  }
-}
-```
-
-### `grep`
-```json
-{
-  "name": "grep",
-  "description": "Search file contents recursively (system ripgrep with a built-in fallback)",
-  "parameters": {
-    "pattern": { "type": "string", "description": "Regex or literal search pattern" },
-    "path": { "type": "string", "description": "Directory to search in (default: cwd)" },
-    "glob": { "type": "string", "description": "File glob filter (e.g. '**/*.go')" },
-    "case_sensitive": { "type": "boolean", "default": false },
-    "max_results": { "type": "integer", "default": 100 }
-  },
-  "required": ["pattern"]
-}
-```
-
-### `run_command`
-```json
-{
-  "name": "run_command",
-  "description": "Execute a shell command in the working directory",
-  "parameters": {
-    "command": { "type": "string", "description": "Shell command to execute" },
-    "timeout_seconds": { "type": "integer", "default": 30 }
-  },
-  "required": ["command"]
-}
-```
-
-### `apply_diff`
-```json
-{
-  "name": "apply_diff",
-  "description": "Apply a unified diff to a file",
-  "parameters": {
-    "path": { "type": "string", "description": "File to patch" },
-    "diff": { "type": "string", "description": "Unified diff content" }
-  },
-  "required": ["path", "diff"]
-}
-```
+The built-in tools, their arguments, the permission each one needs and the modes that offer it are listed in [Tools](../reference/tools.md). The schema the model is given is the **`InputSchema`** of each tool's constructor under **`internal/tools`** and the optional packages; **`internal/tools.NewRegistryFor`** builds the registry from them.
 
 ## Plan Update Format
 
