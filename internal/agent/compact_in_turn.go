@@ -66,8 +66,9 @@ type inTurnSplitRequest struct {
 	// keepSteps is the most steps kept (inTurnKeepRecentSteps).
 	keepSteps int
 	// recovery marks a request the provider refused: the floor is no step kept
-	// instead of one, and a regular split is preferred while the turn in
-	// progress fits.
+	// instead of one (the steps of an answer the model is asked to go on from
+	// stay all the same, continuedAnswerSteps), and a regular split is preferred
+	// while the turn in progress fits.
 	recovery bool
 	// budget is how many tokens the kept steps may take: the target less the
 	// request's overhead and the prompt at the start of the summary row. It may
@@ -94,8 +95,9 @@ type inTurnSplit struct {
 
 // chooseInTurnSplit picks the boundary of an in-turn fold. The candidates are
 // the step boundaries from the cap down to the floor - one kept step for the
-// automatic trigger, none for a recovery; the first (the most steps) whose kept
-// tail fits the budget wins, and when none fits the floor does.
+// automatic trigger, none for a recovery unless the turn ends on an answer the
+// model is asked to go on from (continuedAnswerSteps); the first (the most
+// steps) whose kept tail fits the budget wins, and when none fits the floor does.
 //
 // A recovery looks at the regular split first: when earlier turns can be folded
 // and the turn in progress, from its prompt on, fits what is left, folding them
@@ -128,7 +130,7 @@ func chooseInTurnSplit(r inTurnSplitRequest) (inTurnSplit, error) {
 
 	floor := 1
 	if r.recovery {
-		floor = 0
+		floor = continuedAnswerSteps(r.msgs)
 	}
 	var last inTurnSplit
 	found := false
@@ -303,4 +305,35 @@ func (a *Agent) inTurnRequestTokens(scale float64) int {
 	window := session.MessagesForLLM(a.state.GetMessages())
 	n := a.requestOverhead() + conversationTokens(a.prunedForLLM(window), a.modelReadsImages())
 	return int(float64(n) * scale)
+}
+
+// continuedAnswerSteps is how many steps at the end of a turn belong to an answer
+// the output limit cut off that the model is asked to go on from: every part of
+// it (session.ContinuedAnswer) and the empty steps between and after them
+// (session.FollowsTruncated). A fold keeps them verbatim, the way a page of the
+// history never splits them: the model goes on from the last word of the text,
+// and the answer a turn hands over joins the parts, which a summary row between
+// them would cut. When the turn holds nothing else, nothing can be folded and
+// the refusal stands. 0 when the turn does not end on such a text.
+func continuedAnswerSteps(msgs []llm.Message) int {
+	n, end := 0, len(msgs)
+	for end > 0 && session.FollowsTruncated(msgs[:end]) {
+		for {
+			end--
+			if !isPlanDocumentRow(msgs[end]) {
+				n++
+			}
+			if msgs[end].Truncated {
+				break
+			}
+		}
+	}
+	return n
+}
+
+// isPlanDocumentRow is the plan document snapshot an assistant-role row with no
+// text, no call and no reasoning carries: the UI shows it, and it is no step of
+// the turn (session.TurnStepSplitIndex).
+func isPlanDocumentRow(m llm.Message) bool {
+	return m.PlanDocument != nil && strings.TrimSpace(m.Content) == "" && len(m.ToolCalls) == 0 && strings.TrimSpace(m.Reasoning) == ""
 }

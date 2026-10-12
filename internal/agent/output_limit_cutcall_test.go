@@ -311,6 +311,9 @@ func TestOutputLimitCutStepsWhoseCallsRan(t *testing.T) {
 		// answer when the second ran something: its message is paid from a
 		// fresh allowance, not from what the first step left.
 		{"progress takes a fresh allowance", llmRetryMax(1), []outputLimitStep{cutWriteStep("", cutWrite("call_w")), cut(5), answered}, 3, acp.StopReasonEndTurn, "", []int{5}},
+		// The message after a cut call takes its slot of that fresh allowance:
+		// with one retry allowed, nothing is left for the step after it.
+		{"the message takes a slot of the fresh allowance", llmRetryMax(1), []outputLimitStep{cut(5), cutOff, answered}, 2, acp.StopReasonMaxTokens, plainOutputLimitNotice, []int{5}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := &outputLimitProvider{steps: tc.steps}

@@ -1567,6 +1567,12 @@ func (a *Agent) runReActLoop(
 		// carries arguments a provider may refuse to parse, and no tool call is
 		// left without its result. The calls before it were written whole and go
 		// on as usual; the step is answered after them (output_limit.go).
+		// The count of output-limit recoveries is of consecutive cut-off steps:
+		// a step the limit did not stop starts it afresh, whatever path answers
+		// it (maxOutputLimitRecoveries).
+		if response.StopReason != "max_tokens" {
+			outputLimitRecoveries = 0
+		}
 		var cutCall *llm.ToolCall
 		if tc, ok := cutOffToolCall(response); ok {
 			cutCall = &tc
@@ -1833,14 +1839,16 @@ func (a *Agent) runReActLoop(
 		// rebuild from the transcript puts back.
 		if cutCall != nil {
 			// The calls before the cut one ran: that is progress, so the message
-			// is paid from a fresh allowance, as a step after any other progress is.
-			retryAllowance = llm.NewRetryAllowance(a.cfg.Agent.EffectiveLLMRetryMax())
+			// is paid from a fresh allowance, as a step after any other progress
+			// is, and the request it asks for goes on with what is left of it.
+			fresh := llm.NewRetryAllowance(a.cfg.Agent.EffectiveLLMRetryMax())
+			retryAllowance = fresh
 			if mayAskAfterOutputLimit(turn) {
 				nudge := cutOffToolCallNudge(cutCall.Name)
 				messages = append(messages, llm.Message{Role: llm.RoleUser, Content: nudge})
 				recoveries := outputLimitRecoveries + 1
 				resetRetries("output_limit_nudge")
-				outputLimitRecoveries, standing = recoveries, []string{nudge}
+				outputLimitRecoveries, standing, retryAllowance = recoveries, []string{nudge}, fresh
 				a.log.Warn("model hit its output limit inside a tool call; asking it again in words",
 					"recovery", nextCallReason, "attempt", recoveries, "output_tokens", response.OutputTokens,
 					"tool", cutCall.Name, "calls_run", len(response.ToolCalls))

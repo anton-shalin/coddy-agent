@@ -391,6 +391,33 @@ func TestPromptCacheOutputLimitNudgeIsLocalAndAppendOnly(t *testing.T) {
 	}
 }
 
+// TestOutputLimitCountIsOfConsecutiveCutSteps: maxOutputLimitRecoveries bounds
+// the cut-off steps in a row. A step the limit did not stop ends the run and
+// starts the count over even when it is answered by another recovery, as an
+// empty answer is: the cut steps after it are asked again as the first ones
+// were, and only the retry allowance bounds them all together.
+func TestOutputLimitCountIsOfConsecutiveCutSteps(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		steps []outputLimitStep
+	}{
+		{"steps that only thought", []outputLimitStep{cutOff, unsignedEmptyStep, cutOff, cutOff, answered}},
+		{"texts cut off", []outputLimitStep{partialStep, unsignedEmptyStep, partialStep, partialStep, answered}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &outputLimitProvider{steps: tc.steps}
+			ag, st := outputLimitAgent(t, p, llmRetryMax(10))
+			stop, err := runOutputLimitTurn(ag)
+			if err != nil || stop != string(acp.StopReasonEndTurn) || p.calls != len(tc.steps) {
+				t.Fatalf("stop = %q, err = %v after %d calls; want end_turn after %d", stop, err, p.calls, len(tc.steps))
+			}
+			if notice := st.TakeTurnStopNotice(); notice != "" {
+				t.Fatalf("a recovered turn left a notice: %q", notice)
+			}
+		})
+	}
+}
+
 // TestOutputLimitRecoveryIsBounded holds the bound the three kinds of cut share
 // (maxOutputLimitRecoveries): whatever the output limit cut off - a step that
 // only thought, a text, a tool call - the model is asked again at most that many

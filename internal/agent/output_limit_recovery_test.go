@@ -544,6 +544,95 @@ func TestOutputLimitRecoveryRefusedForItsSize(t *testing.T) {
 	}
 }
 
+// variedProse is n words of text that never repeats a phrase, so the loop guard
+// does not take a long answer for a model stuck in a loop.
+func variedProse(n int) string {
+	words := []string{"module", "reads", "input", "parser", "returns", "every", "token", "buffer", "writes", "header", "checks", "length", "error", "value", "line", "skips", "comment", "field", "table", "stream"}
+	var b strings.Builder
+	x := uint32(2463534242)
+	for i := 0; i < n; i++ {
+		x ^= x << 13
+		x ^= x >> 17
+		x ^= x << 5
+		b.WriteString(words[x%uint32(len(words))])
+		b.WriteByte(' ')
+	}
+	return b.String()
+}
+
+// TestOverflowRecoveryKeepsTheAnswerTheModelGoesOn: a request refused for its
+// size while the model is asked to go on from a text the output limit cut off
+// is folded around that text, never through it. Every part of the answer and
+// the empty steps after it stay verbatim at the end of the history, so the model
+// sees the word it goes on from and the answer the turn hands over is whole;
+// the steps before it are folded. When the turn holds nothing but that answer,
+// there is nothing to fold, and the refusal ends the turn on the overflow
+// message instead of a request that asks the model to go on from a summary.
+func TestOverflowRecoveryKeepsTheAnswerTheModelGoesOn(t *testing.T) {
+	readStep := outputLimitStep{calls: []llm.ToolCall{notesRead("call_r", 2)}, stop: "tool_use"}
+	// bigPart does not fit the share of the window a fold aims the request at,
+	// so the fold keeps the fewest steps it may.
+	bigPart := outputLimitStep{text: variedProse(9000), stop: "max_tokens"}
+	refused := outputLimitStep{err: errors.New(mlxContextLimitRefusal)}
+	rest := outputLimitStep{text: " and the rest.", stop: "end_turn"}
+	for _, tc := range []struct {
+		name  string
+		steps []outputLimitStep
+		// parts are the texts of the answer, in order, that the request after
+		// the compaction must carry; nil when the turn ends on the refusal.
+		parts []string
+		nudge string
+	}{
+		{"a text too large to keep with the steps before it", []outputLimitStep{readStep, bigPart, refused, rest}, []string{bigPart.text}, outputLimitContinueNudge},
+		{"a text, then a step that only thought", []outputLimitStep{readStep, bigPart, cutOff, refused, rest}, []string{bigPart.text}, outputLimitNudge},
+		{"an answer cut off twice", []outputLimitStep{readStep, bigPart, partialStep, refused, rest}, []string{bigPart.text, partialText}, outputLimitContinueNudge},
+		{"a turn that is the text alone", []outputLimitStep{partialStep, refused, rest}, nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &outputLimitProvider{steps: tc.steps}
+			ag, st, _ := cutCallAgent(t, p, withWindow(49152))
+			stop, err := runOutputLimitTurn(ag)
+
+			if tc.parts == nil {
+				if err == nil || stop != string(acp.StopReasonRefused) || !llm.IsContextOverflow(err) || p.calls != len(tc.steps)-1 {
+					t.Fatalf("stop = %q, err = %v after %d calls; want the turn refused on the overflow message after %d", stop, err, p.calls, len(tc.steps)-1)
+				}
+				for _, m := range st.GetMessages() {
+					if m.CompactionSummary {
+						t.Fatal("the text the model was to go on from was folded into a summary")
+					}
+				}
+				return
+			}
+			if err != nil || stop != string(acp.StopReasonEndTurn) || p.calls != len(tc.steps) {
+				t.Fatalf("stop = %q, err = %v after %d calls; want end_turn after %d", stop, err, p.calls, len(tc.steps))
+			}
+			after := p.seen[len(p.seen)-1]
+			if !compacted(after) {
+				t.Fatal("the request after the refusal was not compacted")
+			}
+			if ids := callIDs(after); len(ids) != 0 {
+				t.Fatalf("the steps before the answer were not folded: the request still carries calls %v", ids)
+			}
+			var texts []string
+			for _, m := range after {
+				if m.Role == llm.RoleAssistant && m.Content != "" {
+					texts = append(texts, m.Content)
+				}
+			}
+			if want := strings.Join(tc.parts, ""); strings.Join(texts, "") != want || len(texts) != 1 {
+				t.Fatalf("the request after the compaction carries the assistant texts %q, want the whole answer as one message", texts)
+			}
+			if got := countNudges(after, tc.nudge); got != 1 {
+				t.Fatalf("the request after the compaction carries %q %d times, want once", tc.nudge, got)
+			}
+			if got, want := lastAssistantPlainText(st.GetMessages()), strings.Join(tc.parts, "")+rest.text; got != want {
+				t.Fatalf("the answer the turn hands over is %d characters, want the whole answer of %d", len(got), len(want))
+			}
+		})
+	}
+}
+
 // foldRefusingProvider answers the summarizer's first calls with err, as a
 // backend whose window is smaller than the one it was configured with does, and
 // every later call, and the loop's own, as outputLimitProvider does.
