@@ -112,11 +112,12 @@ type ResultEviction struct {
 	// MinResultBytes is the size at or below which a result is never evicted.
 	// A nil pointer means the default (2000); 0 makes every result a candidate.
 	MinResultBytes *int `yaml:"min_result_bytes"`
-	// StartPercent is the share of the effective model's max_context_tokens the
-	// estimated context must reach before eviction starts (default 50, valid
-	// 0..100). 0 evicts from the first result, which is what the projection did
-	// before prompt caching was accounted for. A model without
-	// max_context_tokens cannot be measured and evicts from the start.
+	// StartPercent is the share of the model's context window the estimated
+	// context must reach before eviction starts (default 50, valid 0..100). 0
+	// evicts from the first result, which is what the projection did before
+	// prompt caching was accounted for. Read and grep results of a model without
+	// max_context_tokens are evicted from the start; listing results measure
+	// against the window its provider reports, else the default.
 	StartPercent *int `yaml:"start_percent"`
 }
 

@@ -247,6 +247,11 @@ var (
 		`"n_ctx":\s*(\d+)`,
 		`tokens > (\d+) maximum`,
 		`over the limit of (\d+)`,
+		`maximum prompt length is (\d+)`,
+		`maximum number of tokens allowed \((\d+)\)`,
+		`context length of only (\d+)`,
+		`exceeded model token limit: (\d+)`,
+		`exceeds the limit of (\d+)`,
 	)
 	// The size of the request, likewise.
 	overflowPromptPatterns = mustCompileAll(
@@ -257,6 +262,8 @@ var (
 		`prompt is too long: (\d+) tokens`,
 		`"n_prompt_tokens":\s*(\d+)`,
 		`(\d+) input tokens over the limit`,
+		`request contains (\d+) tokens`,
+		`input token count \((\d+)\)`,
 	)
 	// Anthropic's refusal of an input that fits with no room left for the
 	// completion: "N + M > L", the input, the max_tokens it asked, the window.

@@ -117,6 +117,13 @@ func (a *Agent) listingEvictionDue(msgs []llm.Message) bool {
 	if window <= 0 {
 		return true
 	}
+	// The send boundary prunes the request with its system message in front,
+	// and the overhead below already counts the system prompt: measured as it
+	// comes, the gate would open one system prompt early and rewrite requests
+	// that are still below start_percent.
+	if len(msgs) > 0 && msgs[0].Role == llm.RoleSystem {
+		msgs = msgs[1:]
+	}
 	total := a.requestOverhead() + conversationTokens(msgs, a.modelReadsImages())
 	return total*100 >= start*window
 }

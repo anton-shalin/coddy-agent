@@ -1383,3 +1383,44 @@ func TestPrunedForLLMGatesListingsByTheResolvedWindow(t *testing.T) {
 		}
 	})
 }
+
+// The send boundary prunes the request as it goes out, its system message in
+// front (buildMessages), and the overhead the gate adds already counts the system
+// prompt. A request with a large system prompt that is below start_percent must
+// keep its listings, measured on the history or on the request alike.
+func TestListingGateCountsTheSystemPromptOnce(t *testing.T) {
+	half, one, on := 50, 1, true
+	comp := config.Compaction{ResultEviction: config.ResultEviction{Enabled: &on, StartPercent: &half, MinResultBytes: &one}}
+	f := newRecoveryFixture(t, &recoveryProvider{}, comp) // window 49152, gate 24576
+	f.st.AddMessage(llm.Message{Role: llm.RoleUser, Content: "list the tree"})
+	for i := 0; i < 6; i++ {
+		id := fmt.Sprintf("g%d", i)
+		f.st.AddMessage(llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: id, Name: "glob", InputJSON: fmt.Sprintf(`{"pattern":"pkg%d/**/*.go"}`, i)}}})
+		var b strings.Builder
+		for k := 0; k < 160; k++ {
+			fmt.Fprintf(&b, "pkg%d/sub/file_%03d.go\n", i, k)
+		}
+		f.st.AddMessage(llm.Message{Role: llm.RoleTool, ToolCallID: id, Content: b.String()})
+	}
+	sysText := strings.Repeat("You are a coding agent working in a repo. ", 700)
+	hist := session.MessagesForLLM(f.st.GetMessages())
+	conv, sysTok := conversationTokens(hist, false), session.EstimateContextTokens(sysText)
+	f.st.SetLastContextBreakdown(&session.ContextBreakdown{SystemPrompt: sysTok, Conversation: conv, EstimatedTotal: sysTok + conv})
+	window, _ := f.ag.contextWindow()
+	if (sysTok+conv)*100 >= half*window || (2*sysTok+conv)*100 < half*window {
+		t.Fatalf("fixture: system %d + conversation %d must sit under the gate of %d%% of %d, and over it with the system prompt counted twice", sysTok, conv, half, window)
+	}
+	if f.ag.listingEvictionDue(hist) {
+		t.Fatal("the history alone is over the gate")
+	}
+	req := f.ag.buildMessages(sysText)
+	if f.ag.listingEvictionDue(req) {
+		t.Fatal("the request with its system message in front opens the gate: the system prompt is counted twice")
+	}
+	out := f.ag.prunedForLLM(req)
+	for i := range req {
+		if out[i].Content != req[i].Content {
+			t.Fatalf("message %d was rewritten below start_percent: %q", i, firstChars(out[i].Content, 80))
+		}
+	}
+}

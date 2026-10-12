@@ -243,6 +243,10 @@ func TestOverflowDetailOf(t *testing.T) {
 		{"anthropic prompt and max_tokens", errors.New("400: input length and `max_tokens` exceed context limit: 188240 + 21333 > 200000, decrease input length"), OverflowDetail{Prompt: 209573, Limit: 200000}},
 		{"gateway", errors.New("400: Request too long: 121692 input tokens over the limit of 46112"), OverflowDetail{Prompt: 121692, Limit: 46112}},
 		{"llama.cpp", errors.New(`400: {"code":400,"message":"the request exceeds the available context size, try increasing it","type":"exceed_context_size_error","n_prompt_tokens":5000,"n_ctx":4096}`), OverflowDetail{Prompt: 5000, Limit: 4096}},
+		{"xai", errors.New("400: This model's maximum prompt length is 131072 but the request contains 140000 tokens."), OverflowDetail{Prompt: 140000, Limit: 131072}},
+		{"gemini", errors.New("400: The input token count (1200000) exceeds the maximum number of tokens allowed (1048576)."), OverflowDetail{Prompt: 1200000, Limit: 1048576}},
+		{"lm studio", errors.New("400: Trying to keep the first 9000 tokens when context the overflows. However, the model is loaded with context length of only 4096 tokens, which is not enough. Try to load the model with a larger context length, or provide a shorter input"), OverflowDetail{Limit: 4096}},
+		{"moonshot", errors.New("400: Invalid request: Your request exceeded model token limit: 131072"), OverflowDetail{Limit: 131072}},
 		{"a limit and no prompt", errors.New("400: This model's maximum context length is 8192 tokens. Reduce the input."), OverflowDetail{Limit: 8192}},
 		{"no numbers", errors.New("400: the request exceeds the available context size"), OverflowDetail{}},
 		{"not an overflow, though numbers match", errors.New("400: invalid value, prompt=51402, limit=49152"), OverflowDetail{}},
@@ -253,6 +257,16 @@ func TestOverflowDetailOf(t *testing.T) {
 				t.Fatalf("OverflowDetailOf = %+v, want %+v", got, tc.want)
 			}
 		})
+	}
+}
+
+// Cohere words its refusal "too many tokens", which counts only next to a
+// status, so its figure is read off an answer the client got.
+func TestOverflowDetailOfACohereRefusal(t *testing.T) {
+	for path, err := range refusals(t, 400, `{"message":"too many tokens: total number of tokens in the prompt exceeds the limit of 4081. Try using a shorter prompt or enable prompt truncating."}`, openAIClient) {
+		if got := OverflowDetailOf(err); got != (OverflowDetail{Limit: 4081}) {
+			t.Errorf("%s: OverflowDetailOf = %+v, want the limit 4081", path, got)
+		}
 	}
 }
 
