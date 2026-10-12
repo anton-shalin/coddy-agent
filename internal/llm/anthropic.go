@@ -123,20 +123,8 @@ func (p *anthropicProvider) Stream(ctx context.Context, messages []Message, tool
 		id    string
 		name  string
 		input string
-		// closed is set by the block's content_block_stop. Anthropic sends one
-		// for every block, the one the output limit cut included, so a block
-		// without it is one the stream ended inside.
-		closed bool
 	}
 	toolUseMap := make(map[int64]*toolUseAccum)
-	// sawBlockStop says the stream closed at least one block, of any kind: only
-	// a server that closes blocks says anything by leaving one open. An
-	// Anthropic-compatible server that sends no content_block_stop at all
-	// leaves every block open, and none of its calls is reported unfinished.
-	// Nor is a call of an answer that stopped for any reason but the output
-	// limit: stop_reason tool_use says the model finished its calls, whatever a
-	// gateway did with the stop event of the last block.
-	sawBlockStop := false
 
 	// finalizeAnthropicToolUses returns every tool_use block started so far, in
 	// the order the model wrote them.
@@ -149,7 +137,7 @@ func (p *anthropicProvider) Stream(ctx context.Context, messages []Message, tool
 		var out []ToolCall
 		for _, i := range indexes {
 			acc := toolUseMap[i]
-			out = append(out, ToolCall{ID: acc.id, Name: acc.name, InputJSON: acc.input, Incomplete: stopReason == "max_tokens" && sawBlockStop && !acc.closed})
+			out = append(out, ToolCall{ID: acc.id, Name: acc.name, InputJSON: acc.input})
 		}
 		return out
 	}
@@ -190,12 +178,6 @@ func (p *anthropicProvider) Stream(ctx context.Context, messages []Message, tool
 					name: cb.Name,
 				}
 				emit(StreamChunk{ToolCallNamed: &ToolCall{ID: cb.ID, Name: cb.Name}})
-			}
-
-		case anthropic.ContentBlockStopEvent:
-			sawBlockStop = true
-			if acc, ok := toolUseMap[e.Index]; ok {
-				acc.closed = true
 			}
 
 		case anthropic.MessageDeltaEvent:

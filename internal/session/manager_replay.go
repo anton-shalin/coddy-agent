@@ -2,34 +2,11 @@ package session
 
 import (
 	"strings"
-	"unicode"
 
 	"github.com/EvilFreelancer/coddy-agent/internal/acp"
 	"github.com/EvilFreelancer/coddy-agent/internal/llm"
 	"github.com/EvilFreelancer/coddy-agent/internal/mention"
 )
-
-// ReplayedAssistantText is the text a replay sends for an assistant message, the
-// manager's own and a --remote console's alike: the message trimmed, except at
-// the join of a truncated message and the message that goes on from it, where a
-// client draws the chunks one after the other and the whitespace there is part
-// of the text. before is what the transcript holds ahead of msg.
-func ReplayedAssistantText(before []llm.Message, msg llm.Message) string {
-	if strings.TrimSpace(msg.Content) == "" {
-		return ""
-	}
-	if !msg.Truncated && !FollowsTruncated(before) {
-		return strings.TrimSpace(msg.Content)
-	}
-	text := msg.Content
-	if !FollowsTruncated(before) {
-		text = strings.TrimLeftFunc(text, unicode.IsSpace)
-	}
-	if !msg.Truncated {
-		text = strings.TrimRightFunc(text, unicode.IsSpace)
-	}
-	return text
-}
 
 func (m *Manager) replayConversation(sessionID string, msgs []llm.Message, sessionDir string) error {
 	if m.server == nil {
@@ -73,7 +50,7 @@ func (m *Manager) replayConversation(sessionID string, msgs []llm.Message, sessi
 			}
 
 		case llm.RoleAssistant:
-			if txt := ReplayedAssistantText(msgs[:i], msg); txt != "" {
+			if txt := strings.TrimSpace(msg.Content); txt != "" {
 				_ = m.server.SendSessionUpdate(sessionID, acp.MessageChunkUpdate{
 					SessionUpdate: "agent_message_chunk",
 					Content:       acp.ContentBlock{Type: acp.ContentTypeText, Text: txt},

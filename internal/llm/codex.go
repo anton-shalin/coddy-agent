@@ -229,13 +229,10 @@ func (p *codexProvider) Stream(ctx context.Context, messages []Message, tools []
 		case "response.output_item.done":
 			switch ev.Item.Type {
 			case "function_call":
-				// An item the output limit cut off is closed all the same, with
-				// the arguments written so far, and says so in its status.
 				tc := ToolCall{
-					ID:         ev.Item.CallID,
-					Name:       ev.Item.Name,
-					InputJSON:  ev.Item.Arguments,
-					Incomplete: ev.Item.Status == "incomplete",
+					ID:        ev.Item.CallID,
+					Name:      ev.Item.Name,
+					InputJSON: ev.Item.Arguments,
 				}
 				toolCalls = append(toolCalls, tc)
 				emit(StreamChunk{ToolCall: &tc})

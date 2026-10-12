@@ -31,7 +31,12 @@ func sharedBy(id string, a llm.Artifact) llm.Message {
 	return llm.Message{Role: llm.RoleTool, ToolCallID: id, Artifacts: []llm.Artifact{a}}
 }
 
-func TestTruncatedMessageCarriesTheMarkersInFrontOfItsText(t *testing.T) {
+// TestTruncatedMessageLeavesTheMarkersToTheMessageThatCompletesIt: a truncated
+// text and its continuation are one text, joined with nothing between, so the
+// truncated part takes no placement markers - they would stand inside the text -
+// and the message that completes the answer closes with them as any message
+// does. The whitespace at the join is kept on both sides.
+func TestTruncatedMessageLeavesTheMarkersToTheMessageThatCompletesIt(t *testing.T) {
 	for _, tc := range []struct {
 		name, head, rest, joined string
 	}{
@@ -49,20 +54,15 @@ func TestTruncatedMessageCarriesTheMarkersInFrontOfItsText(t *testing.T) {
 			msgs := st.GetMessages()
 
 			head, rest := msgs[2], msgs[3]
+			if head.Content != tc.head || len(head.Artifacts) != 0 {
+				t.Fatalf("the cut text is stored as %+v, want its text alone with its trailing whitespace kept: %q", head, tc.head)
+			}
 			markers := ArtifactMarkers([]llm.Artifact{markerA, markerB})
-			if want := markers + "\n\n" + tc.head; head.Content != want {
-				t.Fatalf("the cut text is stored as %q, want the markers in front of it and its trailing whitespace kept: %q", head.Content, want)
+			if want := tc.rest + "\n\n" + markers; rest.Content != want {
+				t.Fatalf("the continuation is stored as %q, want it closed with the markers: %q", rest.Content, want)
 			}
-			if len(head.Artifacts) != 2 || head.Artifacts[0].ID != markerA.ID || head.Artifacts[1].ID != markerB.ID {
-				t.Fatalf("the cut text carries artifacts %+v, want both files", head.Artifacts)
-			}
-			// What a reader of the text sees: no markers, the whitespace of the join kept.
-			if got := StripAssistantContent(head.Content, false, true); got != tc.head {
-				t.Fatalf("StripAssistantContent = %q, want the text with its trailing whitespace and without the markers: %q", got, tc.head)
-			}
-			// The files are placed already: the continuation places nothing.
-			if rest.Content != tc.rest || len(rest.Artifacts) != 0 {
-				t.Fatalf("the continuation is stored as %+v, want its text alone", rest)
+			if len(rest.Artifacts) != 2 || rest.Artifacts[0].ID != markerA.ID || rest.Artifacts[1].ID != markerB.ID {
+				t.Fatalf("the continuation carries artifacts %+v, want both files", rest.Artifacts)
 			}
 			if got := StripAssistantContent(head.Content, false, true) + StripAssistantContent(rest.Content, true, false); got != tc.joined {
 				t.Fatalf("joined text = %q, want %q", got, tc.joined)
@@ -198,37 +198,6 @@ func TestStripAssistantContent(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := StripAssistantContent(tc.in, tc.keepStart, tc.keepEnd); got != tc.want {
 				t.Fatalf("StripAssistantContent(%q, %v, %v) = %q, want %q", tc.in, tc.keepStart, tc.keepEnd, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestReplayedAssistantText: a client that loads a session draws the chunks one
-// after the other, so the whitespace at the join of a truncated message and the
-// message that goes on from it is sent as stored, and every other assistant
-// message is sent trimmed - an answer a provider failure cut off included, which
-// is not marked truncated: the step run again may start it over.
-func TestReplayedAssistantText(t *testing.T) {
-	cut := llm.Message{Role: llm.RoleAssistant, Content: "a ", Truncated: true}
-	user := llm.Message{Role: llm.RoleUser, Content: "go"}
-	for _, tc := range []struct {
-		name   string
-		before []llm.Message
-		msg    llm.Message
-		want   string
-	}{
-		{"a message that goes on from nothing", []llm.Message{user}, llm.Message{Content: "  hello \n"}, "hello"},
-		{"an answer a provider failure cut off", []llm.Message{user}, llm.Message{Content: "The module starts with \n"}, "The module starts with"},
-		{"a message that goes on from a truncated one", []llm.Message{user, cut}, llm.Message{Content: " b \n"}, " b"},
-		{"a truncated message that goes on from nothing", []llm.Message{user}, llm.Message{Content: "  c ", Truncated: true}, "c "},
-		{"a truncated message that goes on from a truncated one", []llm.Message{user, cut}, llm.Message{Content: " d ", Truncated: true}, " d "},
-		{"a message after a user message that followed a truncated one", []llm.Message{cut, user}, llm.Message{Content: "  e"}, "e"},
-		{"whitespace only", []llm.Message{user, cut}, llm.Message{Content: " \n"}, ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			tc.msg.Role = llm.RoleAssistant
-			if got := ReplayedAssistantText(tc.before, tc.msg); got != tc.want {
-				t.Fatalf("ReplayedAssistantText = %q, want %q", got, tc.want)
 			}
 		})
 	}

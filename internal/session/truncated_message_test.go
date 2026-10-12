@@ -1,12 +1,9 @@
 package session_test
 
 import (
-	"context"
-	"log/slog"
 	"strings"
 	"testing"
 
-	"github.com/EvilFreelancer/coddy-agent/internal/acp"
 	"github.com/EvilFreelancer/coddy-agent/internal/llm"
 	"github.com/EvilFreelancer/coddy-agent/internal/session"
 )
@@ -77,77 +74,6 @@ func TestAddMessageStoresTheJoinOfATruncatedMessageAsStreamed(t *testing.T) {
 			got := assistantContents(st)
 			if strings.Join(got, "|") != strings.Join(tc.want, "|") {
 				t.Fatalf("stored %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-// TestSessionLoadReplaysATruncatedMessageAndItsContinuationAsStreamed: a client
-// that loads the session draws the chunks one after the other, so the replay
-// sends the two as they were stored, without trimming the join.
-func TestSessionLoadReplaysATruncatedMessageAndItsContinuationAsStreamed(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		said []llm.Message
-		want string
-	}{
-		{
-			name: "a text the output limit cut off",
-			said: []llm.Message{
-				{Role: llm.RoleAssistant, Content: "The module and then ", Truncated: true},
-				{Role: llm.RoleAssistant, Content: " the second half."},
-			},
-			want: "The module and then | the second half.",
-		},
-		{
-			// Not marked truncated: the step run again may have started over, so
-			// the two are drawn as the two messages they are, each trimmed.
-			name: "an answer a provider failure cut off",
-			said: []llm.Message{
-				{Role: llm.RoleAssistant, Content: "The module starts with "},
-				{Role: llm.RoleAssistant, Content: " an import block."},
-			},
-			want: "The module starts with|an import block.",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
-			cfg := testConfig()
-			store := &session.FileStore{Root: t.TempDir()}
-			root := t.TempDir()
-			runner := func(_ context.Context, st *session.State, _ []acp.ContentBlock, _ acp.UpdateSender) (string, error) {
-				st.AddMessage(llm.Message{Role: llm.RoleUser, Content: "write it"})
-				for _, m := range tc.said {
-					st.AddMessage(m)
-				}
-				return string(acp.StopReasonEndTurn), nil
-			}
-			m1 := session.NewManager(cfg, noopSender{}, runner, slog.Default(), root, store)
-			res, err := m1.HandleSessionNew(ctx, acp.SessionNewParams{CWD: root})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := m1.HandleSessionPrompt(ctx, acp.SessionPromptParams{
-				SessionID: res.SessionID,
-				Prompt:    []acp.ContentBlock{{Type: acp.ContentTypeText, Text: "write it"}},
-			}); err != nil {
-				t.Fatal(err)
-			}
-			snd := &captureSender{}
-			m2 := session.NewManager(cfg, snd, noopRunner, slog.Default(), root, store)
-			if _, err := m2.HandleSessionLoad(ctx, acp.SessionLoadParams{SessionID: res.SessionID, CWD: root}); err != nil {
-				t.Fatal(err)
-			}
-			snd.mu.Lock()
-			defer snd.mu.Unlock()
-			var chunks []string
-			for _, u := range snd.ups {
-				if chunk, ok := u.(acp.MessageChunkUpdate); ok && chunk.SessionUpdate == "agent_message_chunk" {
-					chunks = append(chunks, chunk.Content.Text)
-				}
-			}
-			if strings.Join(chunks, "|") != tc.want {
-				t.Fatalf("replayed chunks = %q, want %q", chunks, tc.want)
 			}
 		})
 	}

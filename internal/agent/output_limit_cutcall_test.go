@@ -2,8 +2,6 @@ package agent
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -19,56 +17,15 @@ import (
 // to a provider that parses the arguments of the history. The call is left out
 // of the transcript, so the tool-call pairing stays whole; calls before it in
 // the same step were written whole and run; the model is asked to make the cut
-// call again in smaller pieces, inside the bound the other cut-off steps have.
-// The happy path is features/turn_end_reasons.feature; these are its edges.
+// call again in smaller pieces (cutOffToolCallNudge), inside the bound every
+// cut-off step has (output_limit_test.go). This file holds what counts as a cut
+// call, what runs and what does not, and how the calls that ran before the cut
+// count for the bound and for agent.llm_retry_max. The happy path is
+// features/turn_end_reasons.feature; these are its edges.
 
-const cutWritePath = "module.go"
-
-// cutWrite is a write call whose arguments stop inside the content string.
-func cutWrite(id string) llm.ToolCall {
-	return llm.ToolCall{ID: id, Name: "write", InputJSON: `{"path":"` + cutWritePath + `","content":"package module\n\nfunc Run() {`}
-}
-
-// notesRead is a whole read of one line of the notes file.
+// notesRead is a whole read of one line of the notes file of cutCallAgent.
 func notesRead(id string, line int) llm.ToolCall {
 	return llm.ToolCall{ID: id, Name: "read", InputJSON: fmt.Sprintf(`{"path":"notes.txt","offset":%d,"limit":1}`, line)}
-}
-
-// cutWriteStep is a step that said something, asked for a write and was cut off
-// in the middle of it.
-func cutWriteStep(text string, calls ...llm.ToolCall) outputLimitStep {
-	return outputLimitStep{text: text, calls: calls, stop: "max_tokens"}
-}
-
-// cutCallAgent is an outputLimitAgent whose workspace holds a notes file and
-// whose client records what it is sent. The agent's permission mode is the
-// default one, which asks for a write.
-func cutCallAgent(t *testing.T, p llm.Provider, adjust func(*config.Config)) (*Agent, *session.State, *outputLimitSender) {
-	t.Helper()
-	sender := &outputLimitSender{}
-	ag, st := outputLimitAgentWith(t, p, adjust, sender)
-	var lines []string
-	for i := 1; i <= 9; i++ {
-		lines = append(lines, fmt.Sprintf("line %d", i))
-	}
-	if err := os.WriteFile(filepath.Join(st.CWD, "notes.txt"), []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return ag, st, sender
-}
-
-// callIDs lists the ids of the tool calls the assistant messages of msgs make.
-func callIDs(msgs []llm.Message) []string {
-	var ids []string
-	for _, m := range msgs {
-		if m.Role != llm.RoleAssistant {
-			continue
-		}
-		for _, tc := range m.ToolCalls {
-			ids = append(ids, tc.ID)
-		}
-	}
-	return ids
 }
 
 // toolResults is the content of the tool messages of msgs by tool call id.
@@ -80,22 +37,6 @@ func toolResults(msgs []llm.Message) map[string]string {
 		}
 	}
 	return out
-}
-
-func requireWholePairing(t *testing.T, msgs []llm.Message) {
-	t.Helper()
-	if issues := session.ValidateToolPairing(msgs); len(issues) > 0 {
-		t.Fatalf("the tool-call pairing is broken: %+v", issues)
-	}
-}
-
-func requireNoFile(t *testing.T, st *session.State, name string) {
-	t.Helper()
-	if _, err := os.Stat(filepath.Join(st.CWD, name)); err == nil {
-		t.Fatalf("%s was written by a call that was cut off", name)
-	} else if !os.IsNotExist(err) {
-		t.Fatal(err)
-	}
 }
 
 // TestPromptCacheOutputLimitCutToolCallIsLeftOutAndAppendOnly: the call the
@@ -246,39 +187,28 @@ func TestOutputLimitCallsBeforeTheCutOffOneRun(t *testing.T) {
 	requireNoFile(t, st, cutWritePath)
 }
 
-// TestOutputLimitWholeLastCallRunsWhateverStoppedTheStep: a step that stopped at
-// the limit right after a call that is whole is not a cut call. It runs, and
-// nobody is asked to do anything again.
-func TestOutputLimitWholeLastCallRunsWhateverStoppedTheStep(t *testing.T) {
-	p := &outputLimitProvider{steps: []outputLimitStep{
-		{calls: []llm.ToolCall{notesRead("call_r", 2)}, stop: "max_tokens"},
-		answered,
-	}}
-	ag, st, _ := cutCallAgent(t, p, nil)
-	stop, err := runOutputLimitTurn(ag)
-	if err != nil || stop != string(acp.StopReasonEndTurn) || p.calls != 2 {
-		t.Fatalf("stop = %q, err = %v after %d calls; want end_turn after 2", stop, err, p.calls)
-	}
-	if got := countNudges(p.seen[1], cutOffToolCallNudge("read")); got != 0 {
-		t.Fatalf("a whole call was answered with the message for a cut one")
-	}
-	if res := toolResults(st.GetMessages()); !strings.Contains(res["call_r"], "line 2") {
-		t.Fatalf("the whole call did not run: %q", res["call_r"])
-	}
-}
-
-// TestOutputLimitLastCallWithoutArgumentsRuns: the Anthropic adapter hands over
-// a call that takes no arguments as an empty string, and an OpenAI-compatible
-// server may do the same. Empty arguments say nothing about where the step
-// stopped, so the call is a whole call that takes none: it runs, its result
-// reaches the model, and the step is not answered with the message for a cut
-// call, though it stopped at the output limit.
-func TestOutputLimitLastCallWithoutArgumentsRuns(t *testing.T) {
-	for _, args := range []string{"", " \n"} {
-		t.Run(fmt.Sprintf("%q", args), func(t *testing.T) {
-			call := llm.ToolCall{ID: "call_np", Name: "coddy_todo_plan_read", InputJSON: args}
+// TestOutputLimitALastCallThatIsNotCutRuns: a step that stopped at the limit
+// right after a call that is whole is not a cut call, and neither is one whose
+// call takes no arguments: the Anthropic adapter hands over such a call as an
+// empty string, an OpenAI-compatible server may do the same, and empty
+// arguments say nothing about where the step stopped. The call runs, its result
+// reaches the model, and the step is answered with no message, though it
+// stopped at the output limit.
+func TestOutputLimitALastCallThatIsNotCutRuns(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		text string
+		call llm.ToolCall
+		// result is what the call's result holds when it ran.
+		result string
+	}{
+		{"whole arguments", "", notesRead("call_r", 2), "line 2"},
+		{"no arguments", "Reading the plan.", llm.ToolCall{ID: "call_np", Name: "coddy_todo_plan_read", InputJSON: ""}, ""},
+		{"blank arguments", "Reading the plan.", llm.ToolCall{ID: "call_np", Name: "coddy_todo_plan_read", InputJSON: " \n"}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			p := &outputLimitProvider{steps: []outputLimitStep{
-				{text: "Reading the plan.", calls: []llm.ToolCall{call}, stop: "max_tokens"},
+				{text: tc.text, calls: []llm.ToolCall{tc.call}, stop: "max_tokens"},
 				answered,
 			}}
 			ag, st, sender := cutCallAgent(t, p, nil)
@@ -287,33 +217,33 @@ func TestOutputLimitLastCallWithoutArgumentsRuns(t *testing.T) {
 				t.Fatalf("stop = %q, err = %v after %d calls; want end_turn after 2", stop, err, p.calls)
 			}
 			second := p.seen[1]
-			if got := countNudges(second, cutOffToolCallNudge(call.Name)); got != 0 {
-				t.Fatalf("a call without arguments was answered with the message for a cut call")
+			if got := countNudges(second, cutOffToolCallNudge(tc.call.Name)); got != 0 {
+				t.Fatalf("a call that is not cut was answered with the message for a cut call")
 			}
 			if got := countNudges(second, outputLimitNudge) + countNudges(second, outputLimitContinueNudge); got != 0 {
 				t.Fatalf("the step was answered in words although its call ran")
 			}
-			if ids := callIDs(second); len(ids) != 1 || ids[0] != call.ID {
-				t.Fatalf("the second request replays calls %v, want only %s", ids, call.ID)
+			if ids := callIDs(second); len(ids) != 1 || ids[0] != tc.call.ID {
+				t.Fatalf("the second request replays calls %v, want only %s", ids, tc.call.ID)
 			}
-			res, ran := toolResults(second)[call.ID]
-			if !ran || strings.TrimSpace(res) == "" || strings.Contains(res, "not run") {
+			res, ran := toolResults(second)[tc.call.ID]
+			if !ran || strings.TrimSpace(res) == "" || strings.Contains(res, "not run") || !strings.Contains(res, tc.result) {
 				t.Fatalf("the call did not run; its result in the next request is %q (present: %v)", res, ran)
 			}
 			stored := st.GetMessages()
-			if ids := callIDs(stored); len(ids) != 1 || ids[0] != call.ID {
-				t.Fatalf("the transcript keeps calls %v, want only %s", ids, call.ID)
+			if ids := callIDs(stored); len(ids) != 1 || ids[0] != tc.call.ID {
+				t.Fatalf("the transcript keeps calls %v, want only %s", ids, tc.call.ID)
 			}
 			requireWholePairing(t, stored)
-			statuses := sender.toolStatuses(call.ID)
+			statuses := sender.toolStatuses(tc.call.ID)
 			if len(statuses) == 0 || statuses[len(statuses)-1] != "completed" {
 				t.Fatalf("statuses of the call = %q, want it completed", statuses)
 			}
-			meta, err := session.ReadToolCallMeta(st.GetPersistedSessionDir(), call.ID)
+			meta, err := session.ReadToolCallMeta(st.GetPersistedSessionDir(), tc.call.ID)
 			if err != nil || meta.Status == "failed" {
 				t.Fatalf("tool-call record = %+v, %v; want a call that ran", meta, err)
 			}
-			if got, err := session.ReadToolCallResult(st.GetPersistedSessionDir(), call.ID); err != nil || strings.Contains(got, "cut off") {
+			if got, err := session.ReadToolCallResult(st.GetPersistedSessionDir(), tc.call.ID); err != nil || strings.Contains(got, "cut off") {
 				t.Fatalf("tool-call result = %q, %v; want the tool's own result", got, err)
 			}
 			if notice := st.TakeTurnStopNotice(); notice != "" {
@@ -349,148 +279,58 @@ func TestOutputLimitOnlyTheLastCallCanBeCut(t *testing.T) {
 	}
 }
 
-// TestOutputLimitCutToolCallIsBoundedAndTheNoticeSaysSo: a model that keeps
-// writing a call too long for its output limit is asked maxOutputLimitRecoveries
-// times, the call is never run, and the turn then ends with the notice that
-// says the model was already asked.
-func TestOutputLimitCutToolCallIsBoundedAndTheNoticeSaysSo(t *testing.T) {
-	p := &outputLimitProvider{steps: []outputLimitStep{cutWriteStep("", cutWrite("call_w"))}}
-	ag, st, sender := cutCallAgent(t, p, nil)
-	stop, err := runOutputLimitTurn(ag)
-	if err != nil || stop != string(acp.StopReasonMaxTokens) {
-		t.Fatalf("stop = %q, err = %v; want max_tokens", stop, err)
+// TestOutputLimitCutStepsWhoseCallsRan: calls written whole before the cut one
+// run, whatever happens to the step after them, and they are progress: the
+// message that asks for the cut call again is paid from a fresh allowance of
+// agent.llm_retry_max, as a step after any other progress is (the
+// retryAllowance reset at the cut call in react.go). The step was still cut
+// off, though, so it counts for maxOutputLimitRecoveries: a model cut off three
+// steps in a row is stopped after it was asked twice, whatever it read in
+// between, and only a step that was not cut off starts the count over.
+func TestOutputLimitCutStepsWhoseCallsRan(t *testing.T) {
+	// cut is a step that reads a line of the notes and is cut off in the write
+	// after it.
+	cut := func(line int) outputLimitStep {
+		return cutWriteStep("", notesRead(fmt.Sprintf("call_r%d", line), line), cutWrite(fmt.Sprintf("call_w%d", line)))
 	}
-	if want := 1 + maxOutputLimitRecoveries; p.calls != want {
-		t.Fatalf("provider called %d times, want %d", p.calls, want)
-	}
-	if got := countNudges(p.seen[len(p.seen)-1], cutOffToolCallNudge("write")); got != maxOutputLimitRecoveries {
-		t.Fatalf("the last request carries the message %d times, want %d", got, maxOutputLimitRecoveries)
-	}
-	requireNoFile(t, st, cutWritePath)
-	requireWholePairing(t, st.GetMessages())
-	if n := sender.permissionRequests(); n != 0 {
-		t.Fatalf("the client was asked %d times to approve a call that never ran", n)
-	}
-	notice := st.TakeTurnStopNotice()
-	for _, want := range []string{"max_tokens", "2 times", "keep its steps short", "Send a message"} {
-		if !strings.Contains(notice, want) {
-			t.Fatalf("notice %q does not say %q", notice, want)
-		}
-	}
-}
-
-// TestOutputLimitCutToolCallHonoursLLMRetryMax: the recovery takes a slot of
-// agent.llm_retry_max, so 0 turns it off and the turn ends without running the
-// cut call; the whole calls before it still run.
-func TestOutputLimitCutToolCallHonoursLLMRetryMax(t *testing.T) {
+	whole := outputLimitStep{calls: []llm.ToolCall{notesRead("call_ok", 9)}, stop: "tool_use"}
 	for _, tc := range []struct {
-		name       string
-		retryMax   int
-		step       outputLimitStep
-		wantCalls  int
-		wantNotice string
-		wantRead   bool
+		name   string
+		adjust func(*config.Config)
+		steps  []outputLimitStep
+		calls  int
+		stop   acp.StopReason
+		notice string
+		// read are the lines whose reads ran.
+		read []int
 	}{
-		{"off", 0, cutWriteStep("", cutWrite("call_w")), 1, plainOutputLimitNotice, false},
-		{"off with a whole call before", 0, cutWriteStep("", notesRead("call_r", 5), cutWrite("call_w")), 1, plainOutputLimitNotice, true},
-		{"one slot", 1, cutWriteStep("", cutWrite("call_w")), 2, "after the agent had already asked the model once", false},
+		{"the calls before the cut run with the recovery off", llmRetryMax(0), []outputLimitStep{cut(5)}, 1, acp.StopReasonMaxTokens, plainOutputLimitNotice, []int{5}},
+		{"every cut step counts, whatever ran before the cut", nil, []outputLimitStep{cut(1), cut(2), cut(3), answered}, 1 + maxOutputLimitRecoveries, acp.StopReasonMaxTokens, plainOutputLimitNotice, []int{1, 2, 3}},
+		{"a step that was not cut off starts the count over", nil, []outputLimitStep{cut(1), cut(2), whole, cut(3), cut(4), answered}, 6, acp.StopReasonEndTurn, "", []int{1, 2, 3, 4}},
+		// With one retry allowed, two cut-off steps in a row still end in an
+		// answer when the second ran something: its message is paid from a
+		// fresh allowance, not from what the first step left.
+		{"progress takes a fresh allowance", llmRetryMax(1), []outputLimitStep{cutWriteStep("", cutWrite("call_w")), cut(5), answered}, 3, acp.StopReasonEndTurn, "", []int{5}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			p := &outputLimitProvider{steps: []outputLimitStep{tc.step}}
-			ag, st, _ := cutCallAgent(t, p, func(c *config.Config) { c.Agent.LLMRetryMax = &tc.retryMax })
+			p := &outputLimitProvider{steps: tc.steps}
+			ag, st, _ := cutCallAgent(t, p, tc.adjust)
 			stop, err := runOutputLimitTurn(ag)
-			if err != nil || stop != string(acp.StopReasonMaxTokens) {
-				t.Fatalf("stop = %q, err = %v; want max_tokens", stop, err)
+			if err != nil || stop != string(tc.stop) || p.calls != tc.calls {
+				t.Fatalf("stop = %q, err = %v after %d calls; want %s after %d", stop, err, p.calls, tc.stop, tc.calls)
 			}
-			if p.calls != tc.wantCalls {
-				t.Fatalf("provider called %d times, want %d", p.calls, tc.wantCalls)
+			if notice := st.TakeTurnStopNotice(); notice != tc.notice {
+				t.Fatalf("notice = %q, want %q", notice, tc.notice)
 			}
-			if notice := st.TakeTurnStopNotice(); !strings.Contains(notice, tc.wantNotice) {
-				t.Fatalf("notice = %q, want it to contain %q", notice, tc.wantNotice)
+			res := toolResults(st.GetMessages())
+			for _, line := range tc.read {
+				if !strings.Contains(res[fmt.Sprintf("call_r%d", line)], fmt.Sprintf("line %d", line)) {
+					t.Fatalf("the whole call before the cut one in the step reading line %d did not run: %v", line, res)
+				}
 			}
 			requireNoFile(t, st, cutWritePath)
 			requireWholePairing(t, st.GetMessages())
-			if got := strings.Contains(toolResults(st.GetMessages())["call_r"], "line 5"); got != tc.wantRead {
-				t.Fatalf("the whole call before the cut one ran = %v, want %v", got, tc.wantRead)
-			}
 		})
-	}
-}
-
-// TestOutputLimitCutToolCallAtTheStepCapEndsOnTheOutputLimit: on the last
-// allowed step there is no iteration to read the message in, so the turn ends
-// on the output limit with its own notice, the cut call unrun.
-func TestOutputLimitCutToolCallAtTheStepCapEndsOnTheOutputLimit(t *testing.T) {
-	p := &outputLimitProvider{steps: []outputLimitStep{cutWriteStep("", cutWrite("call_w")), answered}}
-	ag, st, _ := cutCallAgent(t, p, func(c *config.Config) { c.Agent.MaxTurns = 1 })
-	stop, err := runOutputLimitTurn(ag)
-	if err != nil || stop != string(acp.StopReasonMaxTokens) || p.calls != 1 {
-		t.Fatalf("stop = %q, err = %v after %d calls; want max_tokens after 1", stop, err, p.calls)
-	}
-	if notice := st.TakeTurnStopNotice(); notice != plainOutputLimitNotice {
-		t.Fatalf("notice = %q, want the plain output-limit notice", notice)
-	}
-	requireNoFile(t, st, cutWritePath)
-}
-
-// TestOutputLimitCutToolCallLeavesAStoppedTurnAlone: a Stop pressed during the
-// cut step ends the turn; the model is not asked again behind the user's back.
-func TestOutputLimitCutToolCallLeavesAStoppedTurnAlone(t *testing.T) {
-	var st *session.State
-	step := cutWriteStep("", cutWrite("call_w"))
-	step.during = func() { st.SetUserCancelledTurn() }
-	p := &outputLimitProvider{steps: []outputLimitStep{step, answered}}
-	var ag *Agent
-	ag, st, _ = cutCallAgent(t, p, nil)
-	stop, _ := runOutputLimitTurn(ag)
-	if p.calls != 1 || stop != string(acp.StopReasonCancelled) {
-		t.Fatalf("stop = %q after %d calls after a Stop, want cancelled after 1", stop, p.calls)
-	}
-	requireNoFile(t, st, cutWritePath)
-}
-
-// TestOutputLimitCutStepsCountEvenWhenCallsBeforeThemRan: calls that ran in a
-// cut-off step are progress for the allowance of agent.llm_retry_max, but the
-// step was still cut off: a model that is cut off three steps in a row is
-// stopped after asking it twice, whatever it read in between.
-func TestOutputLimitCutStepsCountEvenWhenCallsBeforeThemRan(t *testing.T) {
-	step := func(line int) outputLimitStep {
-		return cutWriteStep("", notesRead(fmt.Sprintf("call_r%d", line), line), cutWrite(fmt.Sprintf("call_w%d", line)))
-	}
-	p := &outputLimitProvider{steps: []outputLimitStep{step(1), step(2), step(3), answered}}
-	ag, st, _ := cutCallAgent(t, p, nil)
-	stop, err := runOutputLimitTurn(ag)
-	if err != nil || stop != string(acp.StopReasonMaxTokens) || p.calls != 1+maxOutputLimitRecoveries {
-		t.Fatalf("stop = %q, err = %v after %d calls; want max_tokens after %d", stop, err, p.calls, 1+maxOutputLimitRecoveries)
-	}
-	res := toolResults(st.GetMessages())
-	for _, line := range []int{1, 2, 3} {
-		if !strings.Contains(res[fmt.Sprintf("call_r%d", line)], fmt.Sprintf("line %d", line)) {
-			t.Fatalf("the whole call of step %d did not run: %v", line, res)
-		}
-	}
-	requireWholePairing(t, st.GetMessages())
-	if notice := st.TakeTurnStopNotice(); !strings.Contains(notice, "2 times") {
-		t.Fatalf("notice = %q, want it to count both recoveries", notice)
-	}
-}
-
-// TestOutputLimitCutStepsCountStartsOverAfterAStepThatWasNotCut: a step that
-// ran its calls and was not cut off starts the count again, as tool progress
-// always did.
-func TestOutputLimitCutStepsCountStartsOverAfterAStepThatWasNotCut(t *testing.T) {
-	cut := func(line int) outputLimitStep {
-		return cutWriteStep("", notesRead(fmt.Sprintf("call_c%d", line), line), cutWrite(fmt.Sprintf("call_w%d", line)))
-	}
-	whole := outputLimitStep{calls: []llm.ToolCall{notesRead("call_ok", 9)}, stop: "tool_use"}
-	p := &outputLimitProvider{steps: []outputLimitStep{cut(1), cut(2), whole, cut(3), cut(4), answered}}
-	ag, st, _ := cutCallAgent(t, p, nil)
-	stop, err := runOutputLimitTurn(ag)
-	if err != nil || stop != string(acp.StopReasonEndTurn) || p.calls != 6 {
-		t.Fatalf("stop = %q, err = %v after %d calls; want end_turn after 6", stop, err, p.calls)
-	}
-	if notice := st.TakeTurnStopNotice(); notice != "" {
-		t.Fatalf("a recovered turn left a stop notice: %q", notice)
 	}
 }
 
@@ -523,16 +363,12 @@ func TestPromptCacheCutToolCallRecoverySurvivesARebuild(t *testing.T) {
 	})
 
 	t.Run("compaction", func(t *testing.T) {
-		enabled, keep := false, 1
+		adjust, arm := armedCompaction()
 		first := cut
-		first.during = func() { enabled = true }
+		first.during = arm
 		p := &outputLimitProvider{steps: []outputLimitStep{first, answered}}
-		ag, st, _ := cutCallAgent(t, p, func(c *config.Config) {
-			c.Compaction = config.Compaction{Enabled: &enabled, ThresholdPercent: 1, KeepRecentTurns: &keep}
-			c.Models[0].MaxContextTokens = 10000
-		})
-		st.AddMessage(llm.Message{Role: llm.RoleUser, Content: "Earlier question."})
-		st.AddMessage(llm.Message{Role: llm.RoleAssistant, Content: "Earlier answer."})
+		ag, st, _ := cutCallAgent(t, p, adjust)
+		addEarlierTurn(st)
 		stop, err := runOutputLimitTurn(ag)
 		if err != nil || stop != string(acp.StopReasonEndTurn) || p.calls != 2 {
 			t.Fatalf("stop = %q, err = %v after %d calls; want end_turn after 2", stop, err, p.calls)
@@ -541,31 +377,10 @@ func TestPromptCacheCutToolCallRecoverySurvivesARebuild(t *testing.T) {
 		if n := len(hist); n < 2 || !strings.HasPrefix(hist[n-2], "tool: ") || hist[n-1] != "user: "+cutOffToolCallNudge("write") {
 			t.Fatalf("the rebuilt request does not end with the read's result and the message:\n%s", strings.Join(hist, "\n"))
 		}
-		var summarized bool
-		for _, m := range p.seen[1] {
-			if strings.Contains(m.Content, "Earlier turn summary.") {
-				summarized = true
-			}
-		}
-		if !summarized {
+		if !compacted(p.seen[1]) {
 			t.Fatal("the history was not compacted between the two requests; the test proves nothing")
 		}
 	})
-}
-
-// TestOutputLimitCutToolCallInASubagent: a child has nobody to type "continue",
-// so the recovery is what keeps its run going.
-func TestOutputLimitCutToolCallInASubagent(t *testing.T) {
-	p := &outputLimitProvider{steps: []outputLimitStep{cutWriteStep("", cutWrite("call_w")), answered}}
-	ag, st, _ := cutCallAgent(t, p, nil)
-	ag.subagent = &session.SubagentMeta{Name: "general"}
-	stop, err := runOutputLimitTurn(ag)
-	if err != nil || stop != string(acp.StopReasonEndTurn) || p.calls != 2 {
-		t.Fatalf("subagent: stop = %q, err = %v after %d calls; want end_turn after 2", stop, err, p.calls)
-	}
-	if notice := st.TakeTurnStopNotice(); notice != "" {
-		t.Fatalf("a recovered subagent left a notice: %q", notice)
-	}
 }
 
 // TestCutOffToolCall pins what counts as a call the output limit cut off.

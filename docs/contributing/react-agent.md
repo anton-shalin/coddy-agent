@@ -296,10 +296,10 @@ messages: [
      one slot and a normal **`max_turns`** iteration. The plain replay uses
      a normal iteration too; transport retries stay inside that iteration.
      The nudge projection also removes the empty assistant message from the
-     LLM-facing history. If an auto-compaction or a provider recovery
-     rebuilds that history between attempts, the pending recovery projection
-     and the nudges that still stand at its end are restored; signed reasoning
-     stays in the transcript. After the budget or nudge limit is exhausted the turn
+     LLM-facing history. If an auto-compaction rebuilds that history between
+     attempts, the pending recovery projection and the nudges that still stand
+     at its end are restored; a provider recovery rebuilds nothing, it runs the
+     request that failed again. Signed reasoning stays in the transcript. After the budget or nudge limit is exhausted the turn
      ends with **`StopReasonRefused`**.
    - **Output-limit recovery.** A step that stops at `max_tokens`
      (`finish_reason: "length"`) does not end the turn and is never replayed,
@@ -316,25 +316,25 @@ messages: [
        user read it. The continuation is the next assistant message, and the
        cut one is stored marked `truncated` (`llm.Message.Truncated`), both
        exactly as streamed, the whitespace at the join included
-       (`session.StripAssistantContent`); the placement markers of shared files
-       go in front of a truncated text, never inside the joined one.
+       (`session.StripAssistantContent`); a truncated text takes no placement
+       markers of shared files, and the message that completes the answer
+       closes with them.
        No event marks the seam: a live surface appends the chunks to the
        message it is drawing. These readers of the transcript join the two
        with nothing between, passing over a step that came back empty between
        them (`session.FollowsTruncated`): every history built from the
        transcript - the next turn's, and a rebuild within the turn after a
-       provider failure or a compaction (`foldSplitAnswers` in
-       `buildMessages`); a reloaded transcript in the
+       compaction (`foldSplitAnswers` in `buildMessages`); a reloaded
+       transcript in the
        web UI (`transcriptFromMessages.ts`), which keeps them apart only where
        the stream drew them apart - the continuation began with thinking of its
-       own, or a notice stands between them; a replay to the console, an ACP
-       client or a `--remote` console (`session.ReplayedAssistantText`); an
-       export (`BuildExportDocument`: one entry, `truncated` on an entry the
-       turn ended on); and the answer a turn hands over - a subagent's report,
+       own, or a notice stands between them; and the answer a turn hands over - a subagent's report,
        the reply of a non-streaming request, the Stop hook's
        `last_assistant_message` (`session.ContinuedAnswer`, without the
        placement markers). A paged read of the history never starts or ends a
-       page between them (`session.PageMessages`). Telegram and Pachca read
+       page between them (`session.PageMessages`). A replay to the console, an
+       ACP client or a `--remote` console and an export show the parts as the
+       messages they are stored as. Telegram and Pachca read
        nothing back: they stream the whole answer into one message. The goal
        supervisor's digest of a turn (`goal_digest.go`) does not join them: it
        reads each assistant message on its own, so the parts before the last
@@ -352,16 +352,9 @@ messages: [
        again is asked to go on from it, so it stays one text with the rest.
        The requests of the turn itself are not touched: the local message
        stands between the two there.
-     - A last tool call the output limit cut off (**`cutOffToolCall`**): the
-       provider said the answer ended inside it (**`llm.ToolCall.Incomplete`**:
-       an Anthropic block of an answer the output limit ended without its
-       `content_block_stop`, in a stream that closes blocks - a compatible
-       server that sends none says nothing, and under `stop_reason: tool_use`
-       a block left open says nothing either - or a Codex item whose status is
-       `incomplete`), or it has arguments that are not a whole JSON
-       document. Both count, since Anthropic closes every block, the cut one
-       included. Without the provider's word, empty arguments are a call that
-       takes none and runs. **`cutOffToolCallNudge`** names the tool (a
+     - A last tool call the output limit cut off (**`cutOffToolCall`**): its
+       arguments are there and are not a whole JSON document. Empty arguments
+       are a call that takes none and runs. **`cutOffToolCallNudge`** names the tool (a
        plain identifier only), says the call was cut off and not run, and asks
        for several smaller calls. Only the last call can be cut; an earlier
        call that does not parse is a model error and runs, and fails, as
@@ -370,22 +363,7 @@ messages: [
        stays whole and no provider is sent half a JSON document. Its pending
        row closes as `failed` and its record in the tool-call store says why.
        The calls before it were written whole and run in order; their results
-       come first, then the message. A call the provider reported unfinished
-       never runs whatever stopped the step (**`dropUnfinishedToolCalls`**: a
-       Codex response the content filter ended can close the item it was
-       writing as `incomplete` too); its row closes as `failed` the same way,
-       and only at the output limit is the model asked to make it again.
-       Under another stop reason no message goes to the model: the provider
-       ended the answer itself, for a reason writing the call again does not
-       get past (the content filter would read the same call). The row and the
-       tool-call record say the call was not run and why; a step that goes on
-       after whole calls ran sees their results and no trace of the dropped
-       one. A step whose only output was such a call is not an empty answer:
-       it is neither replayed nor answered with the message that says it held
-       no tool call, and the turn ends the way any turn ends - the Stop hooks
-       run, queued messages are read, and a turn that showed nothing ends with
-       the notice that the model produced no reply, naming the call that was
-       not run.
+       come first, then the message.
 
      The history only grows at its end, so the cached prefix is untouched. The
      loop keeps one ordered list of the messages that stand at the end of the
@@ -393,10 +371,8 @@ messages: [
      sent, in the words it was sent in, and a step that leaves text or a tool
      call in the history clears it, since what came before was answered. A
      history rebuilt from the transcript between the attempts (an
-     auto-compaction, a provider recovery) puts that list back
-     (**`restoreRecoveries`**) and leaves the empty steps out again; the answer
-     a provider failure kept goes after the list, followed by the request to go
-     on. At most
+     auto-compaction, or the compaction after a refused request) puts that list
+     back (**`restoreRecoveries`**) and leaves the empty steps out again. At most
      **`maxOutputLimitRecoveries`** (2) cut-off steps in a row. Each consumes
      one slot and a normal **`max_turns`** iteration (on the last iteration the
      turn ends on the output limit, not on the step limit), so
@@ -404,8 +380,7 @@ messages: [
      off reset the count; a cut-off step that also ran whole calls does not,
      though those calls restart the allowance. Subagents and scheduled runs
      take the same path. When the retries are spent the turn ends with
-     **`StopReasonMaxTokens`** and a notice (**`outputLimitNotice`**) that
-     says the model was already asked.
+     **`StopReasonMaxTokens`** and a notice (**`outputLimitNotice`**).
    - **Provider recovery.** A call that failed because of the provider's lane
      (**`llm.IsTransientProviderError`**: 5xx, a cut or silent stream - an event
      cut inside its JSON included, a stream frame that is not JSON at all not -
@@ -415,7 +390,11 @@ messages: [
      calls, a **`notice`** row goes to the UI log, and after a pause
      (**`providerRecoveryDelay`**: 5x then 20x **`llm_retry_base_ms`**, or a
      longer **`Retry-After`**, capped at 2 minutes) the step runs again on a
-     fresh allowance, with an LLM-facing nudge to continue when text was kept.
+     fresh allowance as the request that failed, byte for byte, so the
+     provider's cached prefix holds (issue #520): the working history is not
+     rebuilt from the transcript, which would bring back the steps that came
+     back empty and drop the messages the recoveries sent. When text was kept,
+     the kept answer and an LLM-facing nudge to continue are appended to it.
      The nudge stands at the end of the history like the messages of the other
      recoveries (and like the loop guard's nudge), so a compaction before the
      step runs again puts it back after the kept answer instead of ending the

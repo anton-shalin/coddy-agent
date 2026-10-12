@@ -95,7 +95,11 @@ func placePendingArtifacts(msgs []llm.Message, assistant *llm.Message) {
 	}
 	keepStart := FollowsTruncated(msgs)
 	assistant.Content = StripAssistantContent(assistant.Content, keepStart, assistant.Truncated)
-	if assistant.Content == "" {
+	// A truncated text and the message that goes on from it are one text,
+	// joined with nothing between, so markers after it would stand inside that
+	// text. A truncated message takes none: the message that completes the
+	// answer takes them.
+	if assistant.Content == "" || assistant.Truncated {
 		return
 	}
 	placed := make(map[string]struct{})
@@ -131,21 +135,6 @@ func placePendingArtifacts(msgs []llm.Message, assistant *llm.Message) {
 		}
 	}
 	if len(pending) == 0 {
-		return
-	}
-	if assistant.Truncated {
-		// A truncated text and the message that goes on from it are one text,
-		// joined with nothing between, so markers after it would stand inside
-		// that text, in the middle of a word as often as not. They go in front
-		// of it instead: tools run only before the first part of such an
-		// answer, so that part is the one that meets them. A part that goes on
-		// from another has no front of its own and leaves them to the message
-		// after it.
-		if keepStart {
-			return
-		}
-		assistant.Artifacts = append(assistant.Artifacts, pending...)
-		assistant.Content = ArtifactMarkers(pending) + "\n\n" + assistant.Content
 		return
 	}
 	assistant.Artifacts = append(assistant.Artifacts, pending...)

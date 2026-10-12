@@ -241,15 +241,9 @@ func TestAnthropicStreamCutToolUseDoesNotDependOnItsIndex(t *testing.T) {
 		}
 		got[i] = resp
 	}
-	if len(got[0].ToolCalls) != 1 || len(got[1].ToolCalls) != 1 {
-		t.Fatalf("tool calls = %+v and %+v, want the call in both", got[0].ToolCalls, got[1].ToolCalls)
+	if len(got[0].ToolCalls) != 1 {
+		t.Fatalf("cut call as first block: tool calls = %+v, want the call", got[0].ToolCalls)
 	}
-	// Whether a call is reported unfinished depends on the stream having closed
-	// some block (the text block here), not on the call's index.
-	if !got[1].ToolCalls[0].Incomplete {
-		t.Errorf("cut call after a closed text block: %+v, want it reported unfinished", got[1].ToolCalls[0])
-	}
-	got[0].ToolCalls[0].Incomplete, got[1].ToolCalls[0].Incomplete = false, false
 	if !reflect.DeepEqual(got[1].ToolCalls, got[0].ToolCalls) {
 		t.Errorf("cut call after text: tool calls = %+v, want %+v as for the first block", got[1].ToolCalls, got[0].ToolCalls)
 	}
@@ -284,8 +278,6 @@ func TestAnthropicStreamCancelKeepsToolUseBehindText(t *testing.T) {
 	if resp == nil || resp.Content != "Writing." {
 		t.Fatalf("resp = %+v, want the text kept", resp)
 	}
-	// A user stop is no output limit: the call is kept as it stands and is not
-	// reported unfinished (the turn ends on the stop, nothing runs).
 	want := []ToolCall{{ID: "toolu_a", Name: "write", InputJSON: `{"path":"a.go","content":"pack`}}
 	if !reflect.DeepEqual(resp.ToolCalls, want) {
 		t.Errorf("tool calls = %+v, want %+v", resp.ToolCalls, want)

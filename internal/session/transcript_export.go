@@ -569,10 +569,6 @@ type ExportEntry struct {
 	Attachments []ExportAttachment  `json:"attachments,omitempty"`
 	ToolCallID  string              `json:"tool_call_id,omitempty"`
 	Plan        *ExportPlanDocument `json:"plan,omitempty"`
-	// Truncated marks an assistant entry whose text stops partway: the model's
-	// output limit cut it off and nothing in the export goes on from it. An
-	// answer the model continued is one entry already (BuildExportDocument).
-	Truncated bool `json:"truncated,omitempty"`
 }
 
 // ExportDocument is the format-agnostic export of one session.
@@ -787,13 +783,7 @@ func BuildExportDocument(in ExportInput) ExportDocument {
 	type callRef struct{ entry, call int }
 	pending := map[string]callRef{}
 	entries := make([]ExportEntry, 0, len(in.Messages))
-	// continuable is the entry of a text the output limit cut off with nothing
-	// after it yet: the assistant message that goes on from it joins it, as the
-	// web UI draws the two. -1 when there is none.
-	continuable := -1
 	for _, m := range in.Messages {
-		joinAt := continuable
-		continuable = -1
 		if info.StartedAt == "" && strings.TrimSpace(m.CreatedAt) != "" {
 			info.StartedAt = m.CreatedAt
 		}
@@ -831,32 +821,14 @@ func BuildExportDocument(in ExportInput) ExportDocument {
 			if in.Options.NoTools {
 				calls = nil
 			}
-			if strings.TrimSpace(e.Text) == "" && e.Reasoning == "" && len(calls) == 0 {
-				// A step that came back empty is not in the way of a join
-				// (FollowsTruncated).
-				continuable = joinAt
+			if e.Text == "" && e.Reasoning == "" && len(calls) == 0 {
 				continue
 			}
-			// The message goes on from the text the output limit cut off:
-			// its text continues that entry, as it streamed, and its calls
-			// follow it. A continuation that thought first keeps an entry of
-			// its own, as the web UI keeps it a bubble of its own.
-			at := len(entries)
-			if joinAt >= 0 && joinAt == len(entries)-1 && e.Reasoning == "" {
-				at = joinAt
-				entries[at].Text += e.Text
-				entries[at].Truncated = m.Truncated
-			} else {
-				e.Truncated = m.Truncated
-				entries = append(entries, e)
+			for i, tc := range calls {
+				e.ToolCalls = append(e.ToolCalls, ExportToolCall{ID: tc.ID, Name: tc.Name, Input: toolInputJSON(tc.InputJSON)})
+				pending[tc.ID] = callRef{entry: len(entries), call: i}
 			}
-			for _, tc := range calls {
-				entries[at].ToolCalls = append(entries[at].ToolCalls, ExportToolCall{ID: tc.ID, Name: tc.Name, Input: toolInputJSON(tc.InputJSON)})
-				pending[tc.ID] = callRef{entry: at, call: len(entries[at].ToolCalls) - 1}
-			}
-			if entries[at].Truncated && len(calls) == 0 {
-				continuable = at
-			}
+			entries = append(entries, e)
 		case m.Role == llm.RoleTool:
 			if in.Options.NoTools {
 				continue

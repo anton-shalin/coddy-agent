@@ -63,26 +63,22 @@ func plainToolName(name string) bool {
 }
 
 // cutOffToolCall reports the last tool call of a response when the output
-// limit cut it off: the step stopped at max_tokens and either the provider said
-// the answer ended inside the call (llm.ToolCall.Incomplete: an Anthropic block
-// that got no content_block_stop, a Codex item with the status "incomplete"),
-// or the call has arguments that are not a whole JSON document. Both are
-// needed: Anthropic closes every block, the one the limit cut included, so only
-// the arguments show that cut, and a Codex item the limit cut may hold
-// arguments that parse, or none. Generation stops where it stops, so only the
-// last call can be cut; an earlier call that does not parse is a model error,
-// not a truncation, and runs (and fails) as it always did. Without the
-// provider's word, arguments that parse are whole, whatever stopped the step,
-// and so are empty ones: the Anthropic adapter hands over a call that takes no
-// arguments as an empty string, and an OpenAI-compatible server may do the
-// same. One the limit cut right after its name runs with no arguments, as every
-// call at the limit did before, and the tool answers with what is missing.
+// limit cut it off: the step stopped at max_tokens and the call has arguments
+// that are not a whole JSON document. Generation stops where it stops, so only
+// the last call can be cut; an earlier call that does not parse is a model
+// error, not a truncation, and runs (and fails) as it always did. Arguments that
+// parse are whole, whatever stopped the step. Empty arguments say nothing about
+// where the step stopped: the Anthropic adapter hands over a call that takes no
+// arguments as an empty string, and an OpenAI-compatible server may do the same,
+// so such a call is taken as written whole and runs. One the limit cut right
+// after its name runs with no arguments, as every call at the limit did before,
+// and the tool answers with what is missing.
 func cutOffToolCall(response *llm.Response) (llm.ToolCall, bool) {
 	if response == nil || response.StopReason != "max_tokens" || len(response.ToolCalls) == 0 {
 		return llm.ToolCall{}, false
 	}
 	last := response.ToolCalls[len(response.ToolCalls)-1]
-	if !last.Incomplete && !argumentsStopShort(last.InputJSON) {
+	if !argumentsStopShort(last.InputJSON) {
 		return llm.ToolCall{}, false
 	}
 	return last, true
@@ -116,60 +112,11 @@ func outputLimitStepNudge(content string, cutCall *llm.ToolCall) string {
 // itself is left out of the assistant message the loop stores, so it never
 // takes part in the tool-call pairing of the transcript.
 func (a *Agent) dropCutOffToolCall(tc llm.ToolCall) {
-	a.closeUnrunToolCall(tc, cutOffToolCallResult)
-}
-
-// unfinishedToolCallResult is what the row of a tool call its provider reported
-// unfinished says when no output limit cut it, and what the call's record in the
-// tool-call store holds.
-const unfinishedToolCallResult = "not run: the provider reported that the answer ended before the call was finished"
-
-// dropUnfinishedToolCalls leaves out of a response every tool call its provider
-// reported unfinished (llm.ToolCall.Incomplete) and closes the row each one
-// left open, whatever stopped the step: a call the provider says it did not
-// finish is never run. The output limit is not the only cause: a Codex response
-// the content filter ended (response.incomplete) can close the item it was
-// writing as "incomplete" as well. At the output limit cutOffToolCall has taken
-// such a call out already and the step is answered in words; under any other
-// stop reason it is not, and the turn goes on, or ends, as that stop reason
-// says. No message goes to the model then: the provider ended the answer
-// itself, for a reason writing the call again does not get past (the content
-// filter would read the same call), so asking for it again would only spend a
-// step. The row and the tool-call record say the call was not run and why; a
-// step that goes on after whole calls ran sees their results and no trace of
-// the dropped one.
-//
-// It reports how many calls it dropped. A step whose only output they were is
-// not an empty answer: it is neither replayed nor nudged with a message saying
-// it held no tool call, and it ends the turn through the ordinary end of a
-// turn (the Stop hooks, the queued messages, the notice of a turn that showed
-// nothing).
-func (a *Agent) dropUnfinishedToolCalls(response *llm.Response) int {
-	if response == nil {
-		return 0
-	}
-	var kept []llm.ToolCall
-	dropped := 0
-	for _, tc := range response.ToolCalls {
-		if tc.Incomplete {
-			a.closeUnrunToolCall(tc, unfinishedToolCallResult)
-			dropped++
-			continue
-		}
-		kept = append(kept, tc)
-	}
-	response.ToolCalls = kept
-	return dropped
-}
-
-// closeUnrunToolCall finishes, as failed with the reason given, the row and the
-// tool-call record of a call that will never run.
-func (a *Agent) closeUnrunToolCall(tc llm.ToolCall, result string) {
 	sessionDir := ""
 	if st := sessionStatePtr(a.state); st != nil {
 		sessionDir = strings.TrimSpace(st.GetPersistedSessionDir())
 	}
-	a.finishToolCall(sessionDir, a.state.GetID(), tc, result, nil, "failed")
+	a.finishToolCall(sessionDir, a.state.GetID(), tc, cutOffToolCallResult, nil, "failed")
 }
 
 // stopsPartway says whether a step's text stops partway because the output limit
