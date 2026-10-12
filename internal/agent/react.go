@@ -667,21 +667,15 @@ func (a *Agent) keepInterruptedAnswer(model, text, reasoning string, clockStart,
 	return strings.TrimSpace(text) != ""
 }
 
-// splitKeptAnswer takes the answer keepInterruptedAnswer added off the end of
-// stored, for a history rebuilt before the step runs again: the answer goes after
-// the messages that stood at the end of the request that failed, not before them.
-// It comes back as buildMessages would carry it: without the placement markers of
-// shared files, which are for the web UI only, and with the whitespace it starts
-// with when it goes on from a truncated text. ok is false when stored does not
-// end on an assistant message.
-func splitKeptAnswer(stored []llm.Message) (prior []llm.Message, answer llm.Message, ok bool) {
+// keptAnswerOf is the answer keepInterruptedAnswer added at the end of stored,
+// as the request that runs the step again carries it: without the placement
+// markers of shared files, which are for the web UI only, and with the
+// whitespace it starts with when it goes on from a truncated text.
+func keptAnswerOf(stored []llm.Message) llm.Message {
 	n := len(stored)
-	if n == 0 || stored[n-1].Role != llm.RoleAssistant {
-		return stored, llm.Message{}, false
-	}
-	prior, answer = stored[:n-1], stored[n-1]
-	answer.Content = session.StripAssistantContent(answer.Content, session.FollowsTruncated(prior), answer.Truncated)
-	return prior, answer, true
+	answer := stored[n-1]
+	answer.Content = session.StripAssistantContent(answer.Content, session.FollowsTruncated(stored[:n-1]), answer.Truncated)
+	return answer
 }
 
 // maxEmptyAssistantReissues bounds how many times an empty turn is answered by
@@ -743,7 +737,7 @@ func emptyRecoveryProjection(messages []llm.Message, nudges ...string) []llm.Mes
 }
 
 // restoreRecoveries puts back, on a history rebuilt from the transcript after a
-// compaction or a provider failure, what the recoveries in progress had done to
+// compaction, what the recoveries in progress had done to
 // the working slice: the steps that came back empty are left out of its end, and
 // the local-only messages that stood there follow it. Without that the history
 // would end on the very step the model was asked to redo, with the message gone.
@@ -753,8 +747,8 @@ func emptyRecoveryProjection(messages []llm.Message, nudges ...string) []llm.Mes
 // sent before such a step was answered by it and does not stand at the end
 // anymore. recovering says a recovery is in progress, so that an empty step
 // replayed with no message at all is left out too. Nothing in progress leaves
-// the history as it is. A provider failure leaves the answer it kept out of the
-// rebuild and puts it after what stood (splitKeptAnswer).
+// the history as it is. A provider failure rebuilds nothing: the step runs again
+// as the request that failed.
 func restoreRecoveries(msgs []llm.Message, standing []string, recovering bool) []llm.Message {
 	if !recovering {
 		return msgs
@@ -1403,20 +1397,13 @@ func (a *Agent) runReActLoop(
 					return string(acp.StopReasonRefused), fmt.Errorf("LLM error: %w (the pause before running the step again was interrupted: %v)", streamErr, ctx.Err())
 				case <-timer.C:
 				}
-				// The rebuild reads the transcript, which holds the steps that came
-				// back empty and none of the messages the recoveries sent: the
-				// ones that still stand at the end of the working slice are put
-				// back (restoreRecoveries), so the step runs again as the request
-				// that failed. The answer kept above is the last message of the
-				// transcript; it is left out of the rebuild and goes after those
-				// messages, where it was written, followed by the request to go
-				// on from it.
-				stored := a.state.GetMessages()
-				var keptAnswer llm.Message
-				if kept {
-					stored, keptAnswer, kept = splitKeptAnswer(stored)
-				}
-				messages = restoreRecoveries(a.buildMessagesFrom(sys.Content, stored), standing, recovering())
+				// The step runs again as the request that failed (issue #520): the
+				// working slice is what that request was built from, so it is kept
+				// as it is - the messages the recoveries sent still stand at its
+				// end, and nothing the transcript holds that the request left out
+				// (an empty step, a signed one) comes back. The answer kept above
+				// goes after them, where it was written, followed by the request
+				// to go on from it.
 				if kept {
 					// LLM-facing only; never persisted to the transcript. It stands
 					// at the end of the history like the messages of the other
@@ -1424,7 +1411,7 @@ func (a *Agent) runReActLoop(
 					// it back after the kept answer instead of ending the request
 					// on that answer. The kept answer is text, so what stood before
 					// it was answered.
-					messages = append(messages, keptAnswer, llm.Message{Role: llm.RoleUser, Content: providerRecoveryNudge})
+					messages = append(messages, keptAnswerOf(a.state.GetMessages()), llm.Message{Role: llm.RoleUser, Content: providerRecoveryNudge})
 					standing = []string{providerRecoveryNudge}
 				}
 				nextCallReason = "provider_recovery"
@@ -2651,12 +2638,6 @@ func (a *Agent) currentToolDefinitions(mode string) []llm.ToolDefinition {
 // so the LLM sees the full skill instructions immediately before the user's request.
 // The stored history content is never modified — only the slice sent to the LLM differs.
 func (a *Agent) buildMessages(systemPrompt string) []llm.Message {
-	return a.buildMessagesFrom(systemPrompt, a.state.GetMessages())
-}
-
-// buildMessagesFrom is buildMessages over stored, a transcript or the part of it
-// a request is built from.
-func (a *Agent) buildMessagesFrom(systemPrompt string, stored []llm.Message) []llm.Message {
 	// After a compaction only the last summary and the messages after it are
 	// replayed to the LLM; earlier history stays in the transcript for the UI.
 	// Tool result eviction (read, grep and the listing tools) is applied at the
@@ -2666,7 +2647,7 @@ func (a *Agent) buildMessagesFrom(systemPrompt string, stored []llm.Message) []l
 	// replayed exactly as it was stored: what a /skill or an @mention brought
 	// was written into it when it was sent (mentions.go), so no request
 	// rewrites an earlier message and the provider's cached prefix holds.
-	history := session.MessagesForLLM(stored)
+	history := session.MessagesForLLM(a.state.GetMessages())
 	// UI-only rows (a bare plan document between a call and its result) must be
 	// out of the analysis: they would cut a batch's contiguous result chain and
 	// make a healthy pair look misplaced.

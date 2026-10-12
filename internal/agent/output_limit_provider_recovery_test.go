@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -22,10 +23,11 @@ func recoveringAgent(t *testing.T, p llm.Provider) (*Agent, *session.State) {
 }
 
 // TestPromptCacheProviderRecoveryKeepsThePendingRecoveries: a provider recovery
-// rebuilds the history from the transcript, which still holds the steps that
-// came back empty and none of the local-only nudges. The request run again must
-// be the one that failed - the empty steps left out, the nudges the recovery has
-// earned back at the end - not a history that ends on the cut-off step.
+// runs the step again as the request that failed (issue #520). The transcript
+// still holds the steps that came back empty and none of the local-only nudges,
+// so a history rebuilt from it would differ; the request run again must be the
+// one that failed - the empty steps left out, the nudges the recovery has earned
+// at the end - not a history that ends on the cut-off step.
 func TestPromptCacheProviderRecoveryKeepsThePendingRecoveries(t *testing.T) {
 	signedEmpty := outputLimitStep{reasoning: "Hmm.", signature: "sig", stop: "end_turn"}
 	unsignedEmpty := outputLimitStep{reasoning: "Hmm.", stop: "end_turn"}
@@ -211,12 +213,11 @@ func TestProviderRecoveryDuringAContinuationKeepsTheMessagesInOrder(t *testing.T
 	}
 }
 
-// TestSplitKeptAnswer: the answer a provider failure kept is taken off the end
-// of the transcript to go after the messages that stood at the end of the
-// request that failed. It comes back as a request carries an assistant message:
-// the markers of shared files taken out, the whitespace it starts with kept only
-// where it goes on from a text the output limit cut off.
-func TestSplitKeptAnswer(t *testing.T) {
+// TestKeptAnswerOf: the answer a provider failure kept goes after the messages
+// that stood at the end of the request that failed, as a request carries an
+// assistant message: the markers of shared files taken out, the whitespace it
+// starts with kept only where it goes on from a text the output limit cut off.
+func TestKeptAnswerOf(t *testing.T) {
 	user := llm.Message{Role: llm.RoleUser, Content: "go"}
 	cut := llm.Message{Role: llm.RoleAssistant, Content: "Press the butt", Truncated: true}
 	empty := llm.Message{Role: llm.RoleAssistant}
@@ -224,29 +225,18 @@ func TestSplitKeptAnswer(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		stored     []llm.Message
-		wantOK     bool
-		wantPrior  int // messages left in front of the answer
 		wantAnswer string
 	}{
-		{"markers are taken out", []llm.Message{user, reply("Here it is.\n\n<coddy_file id=\"a\"/>")}, true, 1, "Here it is."},
-		{"whitespace at the start goes after a message that was not cut off", []llm.Message{user, reply("  Here it is. ")}, true, 1, "Here it is."},
-		{"whitespace at the start stays after a text the output limit cut off", []llm.Message{user, cut, reply(" on labelled Save. ")}, true, 2, " on labelled Save."},
-		{"an empty step between does not make it a new answer", []llm.Message{user, cut, empty, reply(" on")}, true, 3, " on"},
-		{"a user message between ends the join", []llm.Message{cut, user, reply(" on")}, true, 2, "on"},
-		{"nothing stored", nil, false, 0, ""},
-		{"the transcript ends on a user message", []llm.Message{user}, false, 1, ""},
-		{"the transcript ends on a tool result", []llm.Message{user, {Role: llm.RoleTool, ToolCallID: "c1", Content: "ok"}}, false, 2, ""},
+		{"markers are taken out", []llm.Message{user, reply("Here it is.\n\n<coddy_file id=\"a\"/>")}, "Here it is."},
+		{"whitespace at the start goes after a message that was not cut off", []llm.Message{user, reply("  Here it is. ")}, "Here it is."},
+		{"whitespace at the start stays after a text the output limit cut off", []llm.Message{user, cut, reply(" on labelled Save. ")}, " on labelled Save."},
+		{"an empty step between does not make it a new answer", []llm.Message{user, cut, empty, reply(" on")}, " on"},
+		{"a user message between ends the join", []llm.Message{cut, user, reply(" on")}, "on"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			prior, answer, ok := splitKeptAnswer(tc.stored)
-			if ok != tc.wantOK || len(prior) != tc.wantPrior {
-				t.Fatalf("splitKeptAnswer = %d messages in front, ok = %v; want %d and %v", len(prior), ok, tc.wantPrior, tc.wantOK)
-			}
-			if tc.wantOK && (answer.Role != llm.RoleAssistant || answer.Content != tc.wantAnswer) {
+			answer := keptAnswerOf(tc.stored)
+			if answer.Role != llm.RoleAssistant || answer.Content != tc.wantAnswer {
 				t.Fatalf("answer = %+v, want an assistant message holding %q", answer, tc.wantAnswer)
-			}
-			if !tc.wantOK && answer.Content != "" {
-				t.Fatalf("answer = %+v, want none when ok is false", answer)
 			}
 		})
 	}
@@ -271,74 +261,26 @@ func countEmptyAssistants(msgs []llm.Message) int {
 	return n
 }
 
-// signedEmptiesKept is how many steps that only thought, with signed thinking,
-// a history rebuilt after the first failing step still holds: those with a step
-// that said something (text or a call) after them. The empty steps at the very
-// end are cut off the rebuilt history, signed or not, and unsigned ones are
-// never replayed.
-func signedEmptiesKept(steps []outputLimitStep) int {
-	var before []outputLimitStep
-	for _, s := range steps {
-		if s.err != nil {
-			break
-		}
-		before = append(before, s)
-	}
-	lastSaid := -1
-	for i, s := range before {
-		if s.text != "" || len(s.calls) > 0 {
-			lastSaid = i
-		}
-	}
-	var n int
-	for i, s := range before {
-		if i < lastSaid && s.signature != "" && s.text == "" && len(s.calls) == 0 {
-			n++
-		}
-	}
-	return n
-}
-
-// tailLines is the last n lines of a history joined with newlines, for a
-// failure message that has to stay readable under a system prompt.
-func tailLines(joined string, n int) string {
-	lines := strings.Split(joined, "\n")
-	return strings.Join(lines[max(len(lines)-n, 0):], "\n")
-}
-
-// TestProviderRecoveryRestoresOnlyTheNudgesThatStillStandAtTheEnd: a message
-// that asked for a shorter step stands at the end of the working history only
-// until a step that leaves something there answers it. A history rebuilt from
-// the transcript (a provider failure rebuilds it, it does not replay the working
-// slice) puts back the messages sent since the last such step, in the order they
-// were sent, and no older one: the older one would come after text that already
-// answered it.
-func TestProviderRecoveryRestoresOnlyTheNudgesThatStillStandAtTheEnd(t *testing.T) {
+// TestProviderRecoveryRunsTheFailedRequestAgain: after a provider failure the
+// step runs again as the request that failed, byte for byte (issue #520), not a
+// history rebuilt from the transcript. Whatever the recoveries before the
+// failure did to the working history - texts the output limit cut off, the
+// messages that asked for a shorter step or for the rest, empty steps left out,
+// signed or not - the request run again carries exactly what the failed one
+// carried, in the same order.
+func TestProviderRecoveryRunsTheFailedRequestAgain(t *testing.T) {
 	failing := outputLimitStep{err: errConnectionReset}
-	text, thinking, goOn := "assistant: "+partialText, "user: "+outputLimitNudge, "user: "+outputLimitContinueNudge
-	wording := "user: " + emptyAssistantContinuationNudge
 	for _, tc := range []struct {
 		name  string
 		steps []outputLimitStep
-		// tail is the end of the history the request run again carries.
-		tail []string
-		// absent is a message that request must not carry at all.
-		absent string
 	}{
-		// Two texts the output limit cut off are one text in a history rebuilt from
-		// the transcript, joined with nothing between (foldSplitAnswers).
-		{"a text cut off twice", []outputLimitStep{partialStep, partialStep, failing, answered}, []string{text + partialText, goOn}, ""},
-		{"thinking, then a text", []outputLimitStep{cutOff, partialStep, failing, answered}, []string{text, goOn}, thinking},
-		{"a text, then thinking", []outputLimitStep{partialStep, cutOff, failing, answered}, []string{text, goOn, thinking}, ""},
-		// An empty answer is replayed, then nudged in words; a text cut off after
-		// that answers the wording message, which then belongs in the middle of the
-		// history and not at its end.
-		{"two empty answers, then a text", []outputLimitStep{signedEmptyStep, signedEmptyStep, partialStep, failing, answered}, []string{text, goOn}, wording},
-		{"two unsigned empty answers, then a text", []outputLimitStep{unsignedEmptyStep, unsignedEmptyStep, partialStep, failing, answered}, []string{text, goOn}, wording},
-		{"an empty answer, then a text, then thinking", []outputLimitStep{signedEmptyStep, partialStep, cutOff, failing, answered}, []string{text, goOn, thinking}, wording},
-		// Thinking cut off after the wording message: both stand, in the order
-		// they were sent.
-		{"two empty answers, then thinking cut off", []outputLimitStep{signedEmptyStep, signedEmptyStep, cutOff, failing, answered}, []string{wording, thinking}, ""},
+		{"a text cut off twice", []outputLimitStep{partialStep, partialStep, failing, answered}},
+		{"thinking, then a text", []outputLimitStep{cutOff, partialStep, failing, answered}},
+		{"a text, then thinking", []outputLimitStep{partialStep, cutOff, failing, answered}},
+		{"two empty answers, then a text", []outputLimitStep{signedEmptyStep, signedEmptyStep, partialStep, failing, answered}},
+		{"two unsigned empty answers, then a text", []outputLimitStep{unsignedEmptyStep, unsignedEmptyStep, partialStep, failing, answered}},
+		{"an empty answer, then a text, then thinking", []outputLimitStep{signedEmptyStep, partialStep, cutOff, failing, answered}},
+		{"two empty answers, then thinking cut off", []outputLimitStep{signedEmptyStep, signedEmptyStep, cutOff, failing, answered}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := &outputLimitProvider{steps: tc.steps}
@@ -347,25 +289,20 @@ func TestProviderRecoveryRestoresOnlyTheNudgesThatStillStandAtTheEnd(t *testing.
 			if err != nil || stop != string(acp.StopReasonEndTurn) || p.calls != len(tc.steps) {
 				t.Fatalf("stop = %q, err = %v after %d calls; want end_turn after %d", stop, err, p.calls, len(tc.steps))
 			}
-			rerun := p.seen[len(p.seen)-1]
-			hist := requestHistory(rerun)
-			n := len(tc.tail)
-			if len(hist) < n || strings.Join(hist[len(hist)-n:], "\n") != strings.Join(tc.tail, "\n") {
-				t.Fatalf("the request run again does not end with %q:\n%s", tc.tail, tailLines(strings.Join(hist, "\n"), n+3))
-			}
-			for _, line := range hist {
-				if tc.absent != "" && line == tc.absent {
-					t.Fatalf("the request run again carries %q, which a kept step had answered", tc.absent)
-				}
-			}
-			// A step that only thought is not replayed, unless its thinking is signed:
-			// Anthropic, Codex and Devin replay that, so it keeps its message in the
-			// middle of the history, and never at its end (the tail above).
-			if got, want := countEmptyAssistants(rerun), signedEmptiesKept(tc.steps); got != want {
-				t.Fatalf("the request run again holds %d steps that only thought, want the %d with signed thinking:\n%s", got, want, tailLines(strings.Join(hist, "\n"), n+4))
+			failed, rerun := p.seen[len(p.seen)-2], p.seen[len(p.seen)-1]
+			if !reflect.DeepEqual(withoutTurnContext(failed), withoutTurnContext(rerun)) {
+				t.Fatalf("the request run again is not the one that failed:\nfailed: %s\nagain:  %s",
+					strings.Join(requestHistory(failed), "\n"), strings.Join(requestHistory(rerun), "\n"))
 			}
 		})
 	}
+}
+
+// tailLines is the last n lines of a history joined with newlines, for a
+// failure message that has to stay readable under a system prompt.
+func tailLines(joined string, n int) string {
+	lines := strings.Split(joined, "\n")
+	return strings.Join(lines[max(len(lines)-n, 0):], "\n")
 }
 
 // TestCompactionKeepsOnlyTheNudgesThatStillStandAtTheEnd: a compaction rebuilds
