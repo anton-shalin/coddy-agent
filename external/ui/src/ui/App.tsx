@@ -4998,9 +4998,7 @@ export function App() {
     try {
       // Resume after the last frame this tab consumed, so a dropped connection costs
       // a gap rather than a replay of the whole turn.
-      const resumeFrom = resume
-        ? String(resume.frames)
-        : relayCursorFor(key);
+      const resumeFrom = resume ? String(resume.frames) : relayCursorFor(key);
       const headers: Record<string, string> = { [HDR]: key };
       if (resumeFrom) {
         headers["Last-Event-ID"] = resumeFrom;

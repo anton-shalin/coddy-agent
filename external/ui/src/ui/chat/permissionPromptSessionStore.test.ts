@@ -90,7 +90,12 @@ test("an unanswered prompt whose call has a result is dropped with its record", 
       id: "pp_1",
       payload: payload("call_stopped"),
     },
-    { type: "tool_call", id: "tc_2", toolCallId: "call_open", status: "pending" },
+    {
+      type: "tool_call",
+      id: "tc_2",
+      toolCallId: "call_open",
+      status: "pending",
+    },
     { type: "permission_prompt", id: "pp_2", payload: payload("call_open") },
   ];
   const out = dropSettledPermissionPrompts(items, SID);
@@ -118,7 +123,12 @@ test("an answered prompt stays, and nothing changes without a settled call", () 
   ];
   expect(dropSettledPermissionPrompts(items, SID)).toBe(items);
   const open: TranscriptItem[] = [
-    { type: "tool_call", id: "tc_2", toolCallId: "call_open", status: "pending" },
+    {
+      type: "tool_call",
+      id: "tc_2",
+      toolCallId: "call_open",
+      status: "pending",
+    },
     { type: "permission_prompt", id: "pp_2", payload: payload("call_open") },
   ];
   expect(dropSettledPermissionPrompts(open, SID)).toBe(open);
