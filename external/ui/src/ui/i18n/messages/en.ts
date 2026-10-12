@@ -476,7 +476,7 @@ export const messagesEn: Record<string, string> = {
     "Cap on ReAct iterations (LLM calls plus tool rounds) for one user request. The default is 165; 0 disables the cap.",
   "settings.schema.agent.llm_retry_max.label": "LLM retry max",
   "settings.schema.agent.llm_retry_max.desc":
-    "Extra attempts shared by transport retries, empty-answer recovery and first-token re-issues until tool progress or a new follow-up. 0 disables these retries. Loop guards, Stop hooks, fallback models and quota-reset waits have separate limits.",
+    "Extra attempts shared by transport retries, empty-answer recovery, first-token re-issues and output-limit recovery (a step cut off at max_tokens) until tool progress or a new follow-up. 0 disables these retries. Loop guards, Stop hooks, fallback models and quota-reset waits have separate limits.",
   "settings.schema.agent.llm_retry_base_ms.label": "LLM retry base ms",
   "settings.schema.agent.llm_retry_base_ms.desc":
     "Initial backoff between LLM retries in milliseconds; a server-provided pause (Retry-After) overrides it.",

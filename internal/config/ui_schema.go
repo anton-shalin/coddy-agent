@@ -413,7 +413,7 @@ func UISchemaMap() map[string]interface{} {
 				"max_turns": intProp("Max turns",
 					"Cap on ReAct iterations (LLM calls plus tool rounds) for one user request; 0 means no limit."),
 				"llm_retry_max": intProp("LLM retry max",
-					"Extra attempts shared by transport retries, empty-answer recovery and first-token re-issues until tool progress or a new follow-up. 0 disables these retries. Loop guards, Stop hooks, fallback models and quota-reset waits have separate limits."),
+					"Extra attempts shared by transport retries, empty-answer recovery, first-token re-issues and output-limit recovery (a step cut off at max_tokens) until tool progress or a new follow-up. 0 disables these retries. Loop guards, Stop hooks, fallback models and quota-reset waits have separate limits."),
 				"llm_retry_base_ms": intProp("LLM retry base ms",
 					"Initial backoff between LLM retries in milliseconds; a server-provided pause (Retry-After) overrides it."),
 				"llm_min_interval_ms": intProp("LLM min interval ms",
