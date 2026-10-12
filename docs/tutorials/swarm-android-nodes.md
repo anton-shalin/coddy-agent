@@ -1,6 +1,6 @@
 # Android phones as swarm nodes
 
-https://github.com/user-attachments/assets/c1e1d306-d5d3-40db-a84b-77e3cd5ddd46
+https://github.com/user-attachments/assets/e7786835-0676-47be-8b42-477630dfa998
 
 *A two-minute recording on 1.3.0: Coddy in Termux on an Android phone joins a relay, the laptop connects to the relay from its environment menu, the phone shows up on the map canvas, runs `getprop` and writes a note, and the Files window opens the phone's workspace through the relay. The file is in the repository as [android-swarm.mp4](../assets/video/android-swarm.mp4).*
 

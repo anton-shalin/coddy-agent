@@ -2,7 +2,7 @@
 
 This page captures the original UI requirements and the intended end state. It is a functional spec and a design contract, with a screenshot of each surface next to the section that specifies it. The visual tokens and component contracts are in [DESIGN.md](../../DESIGN.md).
 
-https://github.com/user-attachments/assets/34752734-2715-4aa3-936b-acfb5c7233bf
+https://github.com/user-attachments/assets/604d01bb-b730-4ca5-9955-a7a593891054
 
 *A two-minute recording of the web UI on 1.3.0: the model picker, a picture read by the model, a `/goal` that moves the work into a git worktree and that a supervisor confirms, the edits window with the patch of each file, the Files window, and a `/commit` skill from the slash menu. The file is in the repository as [web-ui.mp4](../assets/video/web-ui.mp4).*
 

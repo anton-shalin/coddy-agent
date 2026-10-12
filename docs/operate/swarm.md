@@ -1,6 +1,6 @@
 # Swarm: relays, nodes, and one list of everything
 
-https://github.com/user-attachments/assets/fd4837ae-23d0-400e-8e60-52706755bb4b
+https://github.com/user-attachments/assets/2a26f40a-97dd-46ef-b554-80e53602ed44
 
 *A three-minute recording on 1.3.0: two relays and three nodes in the console, then the relay as a remote of a laptop's web UI, the map canvas in Graph layout, a permission answered across two relays, and the Files and edits windows of a node behind both relays. The file is in the repository as [swarm.mp4](../assets/video/swarm.mp4).*
 

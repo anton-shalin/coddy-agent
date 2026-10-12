@@ -1,6 +1,6 @@
 # Рой - релеи, узлы и единый список всего
 
-https://github.com/user-attachments/assets/fd4837ae-23d0-400e-8e60-52706755bb4b
+https://github.com/user-attachments/assets/2a26f40a-97dd-46ef-b554-80e53602ed44
 
 *Трёхминутная запись на версии 1.3.0 - два релея и три узла в консоли, затем релей как удалённое окружение веб-интерфейса ноутбука, холст карты в графовой раскладке, разрешение, отвеченное через два релея, и окна файлов и правок узла за обоими релеями. Файл лежит в репозитории как [swarm.mp4](../../assets/video/swarm.mp4).*
 
@@ -468,4 +468,4 @@ swarm:
 - `examples/swarm/` - живой стенд: релеи, агенты, кольцо и узел, который только сам подключается наружу;
 - руководства: [релей и его узлы в Docker](../tutorials/swarm-relay-and-nodes.md), [цепочка релеев](../tutorials/swarm-multi-hop.md), [работа с удалёнными узлами](../tutorials/swarm-remote-nodes.md).
 
-<!-- docsgen:source sha256=4fa5a582ea70d779 -->
+<!-- docsgen:source sha256=c28d75be954b0bf9 -->

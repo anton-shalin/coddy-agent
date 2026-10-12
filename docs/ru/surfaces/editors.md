@@ -2,11 +2,11 @@
 
 Две записи показывают, как редактор управляет Coddy через ACP.
 
-https://github.com/user-attachments/assets/753944db-3b53-4889-8972-1f2dde2480cb
+https://github.com/user-attachments/assets/4fb167a1-ddd8-4a82-8f63-4ea0d156998f
 
 *Zed на версии 1.3.0, две минуты - селекторы, которые публикует Coddy, картинка, которую читает модель, `/goal` в свежем worktree, команда оболочки, которую проверка безопасности пропускает без запроса, и `/commit`. В репозитории файл лежит как [zed-acp.mp4](../../assets/video/zed-acp.mp4).*
 
-https://github.com/user-attachments/assets/7bdba217-2adb-4863-8a8a-d697a157cea1
+https://github.com/user-attachments/assets/6335b103-d6fb-40c3-975f-9db24b89fa94
 
 *VS Code с расширением ACP-клиента на версии 1.3.0, две минуты - селекторы, проверка безопасности команд в режиме accept edits, `/goal` с карточками правок и команды, `/commit`, сессия, восстановленная из дерева, и worktree. В репозитории файл лежит как [vscode-acp.mp4](../../assets/video/vscode-acp.mp4).*
 
@@ -128,4 +128,4 @@ coddy acp --remote nas02 --remote-token "$CODDY_REMOTE_TOKEN"
 
 Более общие сбои - бинарника нет в `PATH`, провайдер отвергает ключ, порт занят - описаны в разделе [Решение проблем](../getting-started/troubleshooting.md).
 
-<!-- docsgen:source sha256=8aa42b07f4b41192 -->
+<!-- docsgen:source sha256=efa26f5d64e52ebb -->

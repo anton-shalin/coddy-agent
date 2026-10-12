@@ -2,11 +2,11 @@
 
 Two recordings show an editor driving Coddy over ACP.
 
-https://github.com/user-attachments/assets/753944db-3b53-4889-8972-1f2dde2480cb
+https://github.com/user-attachments/assets/4fb167a1-ddd8-4a82-8f63-4ea0d156998f
 
 *Zed on 1.3.0, two minutes: the selectors Coddy publishes, a picture read by the model, a `/goal` worked on in a fresh worktree, a shell command the safety check lets through without a prompt, and `/commit`. The file is in the repository as [zed-acp.mp4](../assets/video/zed-acp.mp4).*
 
-https://github.com/user-attachments/assets/7bdba217-2adb-4863-8a8a-d697a157cea1
+https://github.com/user-attachments/assets/6335b103-d6fb-40c3-975f-9db24b89fa94
 
 *VS Code with an ACP client extension on 1.3.0, two minutes: the selectors, the command safety check in accept-edits mode, a `/goal` with its edit and shell cards, `/commit`, a session restored from the tree and a worktree. The file is in the repository as [vscode-acp.mp4](../assets/video/vscode-acp.mp4).*
 
