@@ -1668,8 +1668,10 @@ func (m *Manager) HandleSessionPromptWithSender(ctx context.Context, params acp.
 	subagentTurn := opts != nil && opts.subagentTurn
 	// Ask mode is read-only: the run-plan metadata shortcut is refused, and a
 	// plan mention below stays material to read (HydrateSessionPlanMentions
-	// inlines the document) instead of turning into a run request.
-	askMode := state.GetMode() == string(ModeAsk)
+	// inlines the document) instead of turning into a run request. The mode
+	// is the turn's, which the settings bracket above has just fixed: an
+	// /ask --once turn in an agent session is just as read-only.
+	askMode := state.EffectiveMode() == string(ModeAsk)
 
 	// A restricted turn (a messenger user who is not the bot's admin) does not
 	// run a plan: running one switches the session's mode, which is the

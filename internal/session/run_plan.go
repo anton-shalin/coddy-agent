@@ -43,9 +43,10 @@ func (m *Manager) RunPlan(ctx context.Context, sessionID, slug string, sender ac
 // refuseAskModePlanRun fails closed for a read-only ask session: a plan run
 // switches to agent with the full tool set, so the prompt shortcuts and the
 // HTTP route refuse earlier with friendlier codes, and no caller can run a
-// plan out of an ask session by mistake.
+// plan out of an ask session by mistake. The mode is the running turn's: a
+// turn held in ask by /ask --once is read-only too.
 func refuseAskModePlanRun(state *State, slug string) error {
-	if state.GetMode() == string(ModeAsk) {
+	if state.EffectiveMode() == string(ModeAsk) {
 		return fmt.Errorf("plan %q cannot be run in ask mode: switch to agent mode first", slug)
 	}
 	return nil
@@ -78,7 +79,19 @@ func (m *Manager) runPlanAdmitted(ctx context.Context, sessionID, slug string, s
 		return nil, err
 	}
 	state.SetPendingPlanContext(plans.RunContextText(doc))
+	// Running a plan switches the session to agent mode the way /agent does:
+	// it is the operator's last word on the mode, so a plan detour armed with
+	// --once or --count, which this very turn may already hold, ends here.
+	// Otherwise the turn would carry the plan out in plan mode, where every
+	// write is refused.
+	modeOverridden := false
+	for _, o := range state.TurnOverrides() {
+		if o.Setting == SettingMode {
+			modeOverridden = true
+		}
+	}
 	state.SetMode(string(ModeAgent))
+	state.ClearTurnOverride(SettingMode)
 	if err := sender.SendSessionUpdate(sessionID, acp.ModeUpdate{
 		SessionUpdate: acp.UpdateTypeCurrentModeUpdate,
 		CurrentModeID: string(ModeAgent),
@@ -86,6 +99,9 @@ func (m *Manager) runPlanAdmitted(ctx context.Context, sessionID, slug string, s
 		m.log.Warn("failed to send mode update", "error", err)
 	}
 	m.sendConfigOptionUpdate(sessionID, state)
+	if modeOverridden {
+		m.PublishSessionSettings(sessionID, state, "", "plan_run")
+	}
 
 	prompt := []acp.ContentBlock{{Type: acp.ContentTypeText, Text: runPlanUserText}}
 	cwdAbs, err := filepath.Abs(state.GetCWD())

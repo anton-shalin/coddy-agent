@@ -262,3 +262,162 @@ func TestRestrictedTurnDoesNotRunAPlan(t *testing.T) {
 		}
 	}
 }
+
+// newRunPlanSession is a persisted agent-mode session holding the plan
+// "run-me", with a runner that records the mode every turn runs in.
+func newRunPlanSession(t *testing.T, sender acp.UpdateSender) (*session.Manager, *session.State, *[]string) {
+	t.Helper()
+	store := &session.FileStore{Root: filepath.Join(t.TempDir(), "sessions")}
+	var modes []string
+	runner := func(_ context.Context, st *session.State, _ []acp.ContentBlock, _ acp.UpdateSender) (string, error) {
+		modes = append(modes, st.EffectiveMode())
+		return string(acp.StopReasonEndTurn), nil
+	}
+	mgr := session.NewManager(testConfig(), sender, runner, slog.Default(), t.TempDir(), store)
+	res, err := mgr.HandleSessionNew(context.Background(), acp.SessionNewParams{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := store.EnsureLayout(res.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := plans.Write(dir, "run-me", plans.DefaultContent("run-me", "Run me")); err != nil {
+		t.Fatal(err)
+	}
+	return mgr, mgr.SessionByID(res.SessionID), &modes
+}
+
+// armMode sends a prompt that is only a mode command, which runs no turn.
+func armMode(t *testing.T, mgr *session.Manager, id, command string) {
+	t.Helper()
+	res, err := mgr.HandleSessionPrompt(context.Background(), acp.SessionPromptParams{
+		SessionID: id,
+		Prompt:    []acp.ContentBlock{{Type: acp.ContentTypeText, Text: command}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.SettingsNotice == "" {
+		t.Fatalf("%q was not taken as a settings command", command)
+	}
+}
+
+func modeOverrides(st *session.State) []session.TurnOverride {
+	var out []session.TurnOverride
+	for _, o := range st.TurnOverrides() {
+		if o.Setting == session.SettingMode {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+// A plan run is the switch to agent mode: an armed plan detour neither keeps
+// the run in plan mode nor outlives it, and a permission answered later
+// resumes the run in agent mode too. Every surface is told the detour ended.
+func TestRunPlanEndsAnArmedModeDetour(t *testing.T) {
+	sender := &captureSender{}
+	mgr, state, modes := newRunPlanSession(t, sender)
+	id := state.GetID()
+	armMode(t, mgr, id, "/plan --count=3")
+
+	if _, err := mgr.HandleSessionPrompt(context.Background(), acp.SessionPromptParams{
+		SessionID: id,
+		Meta:      map[string]interface{}{plans.MetaRunPlanSlug: "run-me"},
+		Prompt:    []acp.ContentBlock{{Type: acp.ContentTypeText, Text: "Implement the plan."}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(*modes) != 1 || (*modes)[0] != string(session.ModeAgent) {
+		t.Fatalf("the plan run ran in %v, want one agent-mode turn", *modes)
+	}
+	if got := modeOverrides(state); len(got) != 0 {
+		t.Fatalf("the plan detour outlived the plan run: %+v", got)
+	}
+	state.ResumeTurnSettings()
+	if got := state.EffectiveMode(); got != string(session.ModeAgent) {
+		t.Fatalf("a permission resume of the plan run would run in %q mode", got)
+	}
+	state.EndTurnSettings()
+
+	published := false
+	sender.mu.Lock()
+	for _, u := range sender.ups {
+		if up, ok := u.(acp.SessionSettingsUpdate); ok && up.Source == "plan_run" {
+			published = true
+			for _, o := range up.Settings.Overrides {
+				if o.Setting == session.SettingMode {
+					t.Errorf("the published snapshot still holds the mode override %+v", o)
+				}
+			}
+		}
+	}
+	sender.mu.Unlock()
+	if !published {
+		t.Fatal("no settings snapshot told the surfaces that the plan detour ended")
+	}
+
+	if _, err := mgr.HandleSessionPrompt(context.Background(), acp.SessionPromptParams{
+		SessionID: id,
+		Prompt:    []acp.ContentBlock{{Type: acp.ContentTypeText, Text: "and the tests"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := (*modes)[len(*modes)-1]; got != string(session.ModeAgent) {
+		t.Fatalf("the turn after the plan run ran in %q mode", got)
+	}
+}
+
+// The direct route (RunPlan, behind the HTTP plans endpoint) does not take the
+// armed settings of a turn, but the plan run still ends them.
+func TestRunPlanDirectRouteEndsAnArmedModeDetour(t *testing.T) {
+	mgr, state, modes := newRunPlanSession(t, noopSender{})
+	armMode(t, mgr, state.GetID(), "/plan --count=2")
+	if _, err := mgr.RunPlan(context.Background(), state.GetID(), "run-me", nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(*modes) != 1 || (*modes)[0] != string(session.ModeAgent) {
+		t.Fatalf("the plan run ran in %v, want one agent-mode turn", *modes)
+	}
+	if got := modeOverrides(state); len(got) != 0 {
+		t.Fatalf("the plan detour outlived the plan run: %+v", got)
+	}
+}
+
+// A turn held in ask mode by /ask --once is read-only like an ask session: the
+// run-plan metadata is refused and a plan mention stays reading material.
+func TestAskOnceTurnNeverRunsPlans(t *testing.T) {
+	mgr, state, modes := newRunPlanSession(t, noopSender{})
+	id := state.GetID()
+
+	armMode(t, mgr, id, "/ask --once")
+	_, err := mgr.HandleSessionPrompt(context.Background(), acp.SessionPromptParams{
+		SessionID: id,
+		Meta:      map[string]interface{}{plans.MetaRunPlanSlug: "run-me"},
+		Prompt:    []acp.ContentBlock{{Type: acp.ContentTypeText, Text: "Implement the plan."}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "ask mode") {
+		t.Fatalf("runPlanSlug in an /ask --once turn: err = %v, want the ask refusal", err)
+	}
+	if len(*modes) != 0 {
+		t.Fatalf("a turn ran despite the refusal: %v", *modes)
+	}
+	if got := state.GetMode(); got != string(session.ModeAgent) {
+		t.Fatalf("the session mode moved to %q", got)
+	}
+
+	armMode(t, mgr, id, "/ask --once")
+	if _, err := mgr.HandleSessionPrompt(context.Background(), acp.SessionPromptParams{
+		SessionID: id,
+		Prompt:    []acp.ContentBlock{{Type: acp.ContentTypeText, Text: "Please review @plans/run-me.plan.md and explain it."}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(*modes) != 1 || (*modes)[0] != string(session.ModeAsk) {
+		t.Fatalf("expected one ask-mode turn reading the plan, got %v", *modes)
+	}
+	if state.PendingPlanContext() != "" {
+		t.Fatal("the plan mention started a plan run in an ask turn")
+	}
+}
