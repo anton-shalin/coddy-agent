@@ -459,11 +459,16 @@ type SessionMeta struct {
 	// LastErrorSeq records the activity generation of the latest real failure.
 	LastErrorSeq uint64 `json:"lastErrorSeq,omitempty"`
 	// PermissionMode records the mode a subagent child ran with, narrowed from
-	// its parent's: part of the child's record, never read back. An ordinary
-	// session's override is not written - it lasts as long as the process and
-	// a restart returns to tools.permission_mode (#292) - and a key an older
-	// version wrote for one is ignored.
+	// its parent's: part of the child's record, never read back. A key an
+	// older version wrote for an ordinary session under this name is ignored
+	// too: the session's own choice lives in SessionPermissionMode.
 	PermissionMode string `json:"permissionMode,omitempty"`
+	// SessionPermissionMode is the permission mode an ordinary session was
+	// switched to (the selectors, /permissions, the permission dialog's
+	// session switch), restored when the session is opened again, after a
+	// restart too (#512). Empty takes the default of new sessions. Overrides
+	// armed for the next turns only are never written.
+	SessionPermissionMode string `json:"sessionPermissionMode,omitempty"`
 }
 
 // ExcludedFromComposerSessionList reports whether this session should not appear on default composer UI lists (GET /coddy/sessions).
@@ -877,8 +882,9 @@ func (f *FileStore) ListSnapshotsWith(opts ListOptions) ([]SessionListEntry, err
 // appendBundleRow reads one bundle's metadata and adds its row when opts admit
 // it. It deliberately does not open messages.json: default History needs no
 // transcript fields, and archive filters must exclude a row before a large or
-// damaged transcript can affect the scan. descend is false for a print run the
-// options leave out, whose children stay out with it.
+// damaged transcript can affect the scan. descend is false for a print run or
+// a scheduler job session the options leave out, whose children stay out with
+// it.
 func (f *FileStore) appendBundleRow(out []SessionListEntry, dir, id, cwdFilter string, opts ListOptions) (_ []SessionListEntry, descend bool) {
 	meta, err := f.readListMetaAt(dir, id)
 	if err != nil {
@@ -890,8 +896,11 @@ func (f *FileStore) appendBundleRow(out []SessionListEntry, dir, id, cwdFilter s
 	if recovered, ok := RecoverManagedWorktreeCWD(meta.CWD); ok {
 		meta.CWD = recovered
 	}
+	// The runs of a scheduler job are child sessions inside its bundle: they
+	// are the scheduler's work and stay out with the job session, so a
+	// listing that admits subagents does not reach them either.
 	if !opts.IncludeSchedulerRuns && meta.ExcludedFromComposerSessionList(id) {
-		return out, true
+		return out, false
 	}
 	if !opts.IncludeSubagents && meta.IsSubagentRun() {
 		return out, true
@@ -1273,6 +1282,9 @@ func (f *FileStore) Save(state *State) error {
 	meta.LastErrorSeq = newLastErrorSeq
 	if state.IsSubagentRun() {
 		meta.PermissionMode = state.GetPermissionMode()
+	} else if !state.IsSchedulerJob() {
+		// The session's own choice, read back when it opens again (#512).
+		meta.SessionPermissionMode = state.GetPermissionMode()
 	}
 
 	// The stamp stands only when this save puts nothing new anywhere - not the

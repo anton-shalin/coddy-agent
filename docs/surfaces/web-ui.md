@@ -2,9 +2,9 @@
 
 This page captures the original UI requirements and the intended end state. It is a functional spec and a design contract, with a screenshot of each surface next to the section that specifies it. The visual tokens and component contracts are in [DESIGN.md](../../DESIGN.md).
 
-https://github.com/user-attachments/assets/34752734-2715-4aa3-936b-acfb5c7233bf
+https://github.com/user-attachments/assets/604d01bb-b730-4ca5-9955-a7a593891054
 
-*A three-minute recording of the web UI on 1.2.31: the model picker, tool calls as rows that name their action, the permission card with the diff of an edit, a `/commit` skill from the slash menu, and History grouped by folder, from which the session is continued. The file is in the repository as [web-ui.mp4](../assets/video/web-ui.mp4).*
+*A two-minute recording of the web UI on 1.3.0: the model picker, a picture read by the model, a `/goal` that moves the work into a git worktree and that a supervisor confirms, the edits window with the patch of each file, the Files window, and a `/commit` skill from the slash menu. The file is in the repository as [web-ui.mp4](../assets/video/web-ui.mp4).*
 
 ## Constraints
 
@@ -28,6 +28,7 @@ https://github.com/user-attachments/assets/34752734-2715-4aa3-936b-acfb5c7233bf
 - **Theme cookie:** **`coddy_ui_theme`** with the seven theme ids (**`dark`**, **`light`**, **`midnight`**, **`solarized-dark`**, **`monokai`**, **`nord`**, **`rose-pine`**; path **`/`**, **`SameSite=Lax`**, 1-year `Max-Age`).
 - **Theme picker:** **Settings** (**`#/settings`**) → **Appearance** → theme swatch grid (**`data-testid="theme-swatch-<id>"`** inside **`appearance-theme-picker`**). Selection applies immediately and is client-side only (no config save).
 - **Language picker:** one native select **directly under the theme grid** (**`data-testid="appearance-language-select"`**) with **Auto** (resolves from **`navigator.language`**, stores no cookie) followed by every locale registered in **`locales.ts`**. The current registry renders **English** and **Русский**; changing the select applies the locale immediately.
+- **Notifications switch:** under the language picker (**`data-testid="appearance-notifications-switch"`**): system notifications while Coddy is in the background, kept in the cookie **`coddy_ui_notify`** ([Notifications](#notifications)).
 - **Language cookie:** **`coddy_ui_lang`** stores a registered locale id (currently **`en`** or **`ru`**), with the same flags as the theme cookie. Choosing **Auto** clears it. Resolution order on load: **`?lang=<registered-id>`** in the URL (also persisted to the cookie) > cookie > **`navigator.language`**. Switching sets **`document.documentElement.lang`** and re-renders without a reload. The documentation follows it: the reader asks for its pages in that language (**`lang=`** on **`/coddy/docs*`**) and every turn names it (**`metadata.lang`**), so the agent reads and attaches Coddy's documentation in it too ([Built-in documentation](../features/built-in-docs.md#languages)). Nothing is written to the config.
 - **i18n engine:** **`external/ui/src/ui/i18n/`** (**`translate`/`t`**, locale store, **`I18nProvider`** + **`useT()`**). **`locales.ts`** is the single registry for supported ids, picker labels, and dictionaries; picker generation, locale validation, bootstrap, and parity tests derive from it. **`main.tsx`** wraps the app plus shared confirmation provider in **`I18nProvider`**. **`useT()` falls back to `translate` outside a provider**, so components render in tests without wrapping; default-English values match the former hardcoded literals exactly.
 - **Locale maintenance:** adding a locale requires its dictionary plus one **`locales.ts`** entry. Every registered dictionary must add or change the same key and interpolation tokens in one patch; **`messagesParity.test.ts`** enforces both.
@@ -110,7 +111,7 @@ Clear the field to use the session model for summarization.
 
 ## Settings: tabs and form layout
 
-- The tabs read in groups: **Appearance** and **Sessions**; where the models come from (**LLM providers**, **Logical models**); the loop that runs them (**ReAct loop**, **Context compaction**, **Memory**); what the agent can do (**Tools and permissions**, **MCP servers**, **Skills**, **Subagents**, **Hooks**); what runs it without a person at the composer (**Scheduler**, **Gateways**); and the operation of the process (**Logger**, **Prompts**). **Prompts** holds the prompt templates and the instruction files and is always last.
+- The tabs read in groups: **Appearance** and **Sessions**; where the models come from (**LLM providers**, **Logical models**); the loop that runs them (**ReAct loop**, **Session goal**, **Context compaction**, **Memory**); what the agent can do (**Command safety (decisions)**, **Tools and permissions**, **MCP servers**, **Skills**, **Subagents**, **Hooks**); what runs it without a person at the composer (**Scheduler**, **Gateways**); and the operation of the process (**Logger**, **Prompts**). **Prompts** holds the prompt templates and the instruction files and is always last.
 - **Sessions** edits where the session bundles are stored (**Storage**, `sessions.dir`) above the table of stored sessions; the table itself acts at once, the storage path saves with **Save all**.
 - A tab's own **Enabled** switch opens the form, above every block (Subagents, Hooks, Memory, Context compaction, Scheduler). The other fields sit in fieldsets by meaning, for example **Model and turns**, **Retries**, **Stream timeouts**, **Loop guard** and **Usage limits** on **ReAct loop**; a list (definition directories, fallback models, component levels) is a block of its own beside them. Inside a nested block a list keeps its frame (the Telegram admins, user groups and per-chat overrides).
 - A list of values is its inputs, each with a trash button, and **Add** under them: no per-row label and no rule between rows. An entry of a list of objects is a frame of its own, without a numbered title.
@@ -191,6 +192,46 @@ Off unless the server has an account, and a server without one renders exactly a
 - **Remote environments are not gated here.** A remote is reached cross-origin with the bearer token from the environment selector, and a cookie of this origin would not travel with those calls; **`AuthGate`** passes straight through in remote mode.
 
 Server behaviour, the cookie and the CSRF rule: [HTTP API](../reference/http-api.md#web-ui-sign-in-optional). Visual contract: [DESIGN.md](../../DESIGN.md).
+
+## Installing the web UI as an app
+
+The web UI is a web app a browser can install (issue [#508](https://github.com/coddy-project/coddy-agent/issues/508)). It carries a web app manifest (`/manifest.webmanifest`), icons for a home screen, a dock and a taskbar, and a service worker (`/sw.js`). An installed Coddy opens in a window of its own, with its own icon, and its title bar takes the colour of the theme picked in **Settings → Appearance**.
+
+- **Chrome and Edge on a desktop** - the install icon at the right end of the address bar, or the install item of the browser's menu.
+- **Chrome on Android** - **Add to Home screen** or **Install app** in the browser's menu.
+- **Safari on macOS** - **File → Add to Dock**.
+- **Safari on iPhone and iPad** - **Share → Add to Home Screen**.
+
+A browser offers the install only on a secure page: `https://`, or `http://localhost` and `http://127.0.0.1` on the machine that runs `coddy serve`. A server reached by its network address over plain http (`http://192.168.1.10:12345`) stays an ordinary page; publish it behind a TLS proxy, as for the [Telegram Mini App](gateway.md#mini-app).
+
+The installed app is the same page. It talks to the server that served it, keeps the sign-in of the browser it was installed from (a home-screen app on iPhone and iPad keeps a sign-in of its own, so you sign in there once more), and every environment, remote and relay works in it as in a tab. The service worker caches nothing: every request still goes to the server, a new build reaches the app on its next load, and with the server down the app shows the error a tab would.
+
+## Notifications
+
+![Settings, Appearance tab: the switch of system notifications under the language picker](../assets/web-ui/notifications-setting-dark-1280.png)
+
+*The switch of system notifications in Settings → Appearance, under the language picker.*
+
+While Coddy is in the background - another tab, another window, the app minimized - the browser can tell you that the agent needs you. Turn it on in **Settings → Appearance → Notifications**. The switch asks the browser for the permission, and the choice is kept in this browser only (cookie `coddy_ui_notify`), like the theme.
+
+A tab notifies about the chats it follows, the chat on screen and every chat you sent a prompt to from that tab, when:
+
+- a turn ends: **The agent finished its turn.**, or the error a failed turn ended with;
+- the agent asks for permission to run a tool: **Permission needed:** and the tool;
+- the agent asks you a question: its first line;
+- a background subagent of the chat asks for permission after the chat's turn ended.
+
+The notification carries the chat's title, and a click on it brings the tab forward and opens the chat. Nothing is shown while you look at Coddy: not while its tab is visible in a focused window, and not while another window of the app has the focus. Several tabs of one browser that follow the same chat show one notification. The turns of a Telegram conversation, a scheduler run or a subagent's own session are not announced unless the tab shows their chat.
+
+Limits:
+
+- Notifications need a secure page, like the install; on plain http the switch is off and says why.
+- The browser's permission decides. While the browser blocks notifications for the site the switch stays off and says where to allow them (the site settings of the browser). Turning the switch off stops the notifications and leaves the permission as it is.
+- A tab of Coddy has to be open, in the background or minimized. With every tab closed nothing is announced: notifications that reach a closed browser (Web Push) are not planned for now, and the design a contribution can follow is [docs/plans/pwa-push-notifications.md](../plans/pwa-push-notifications.md).
+- Safari on iPhone and iPad shows notifications only to Coddy added to the home screen and opened from it.
+- Inside the [Telegram Mini App](gateway.md#mini-app) there is no switch: Telegram shows a Mini App's page no notifications.
+
+The code is `external/ui/src/ui/pwa/` (`notifications.ts` shows a notice, `attentionTracker.ts` decides which events are worth one, `serviceWorker.ts` registers the worker) and `external/ui/public/sw.js`; the scenarios are `features/web_ui_installable_app.feature`.
 
 ## Environment (local / remote server)
 
@@ -361,14 +402,14 @@ Session title
 
 ### Session settings: permission chip, turn overrides, live mirror
 
-![The composer after a bypass from the dialog: the selectors end with a red Bypass chip, followed by "stub/qwen3.8-27b, 2 turns left"](../assets/session-settings/session-settings-composer-bypass-dark-1280.png)
+![The composer after a bypass from the dialog: the selectors end with a red Bypass chip, followed by "neuraldeep/qwen3.6-35b-a3b, 2 turns left"](../assets/session-settings/session-settings-composer-bypass-dark-1280.png)
 
 *The composer after the session was switched to bypass from a permission prompt and the model changed for two turns.*
 
 - The composer mirrors the session's settings snapshot ([Session settings](../features/session-settings.md)): **`settings`** on **`GET /coddy/sessions/{id}/messages`** and on the **`PATCH /coddy/sessions/{id}`** answer, and **`event: session_settings`** on the turn stream and on **`GET /coddy/events`**. **`chat/sessionSettings.ts`** parses it; **`App.tsx`** keeps the highest **`version`** per session (**`isNewerSettings`**), so the same change arriving down both connections, or an answer arriving after the event of a later change, is applied once and never rolled back.
 - **Mode**, **Model** and **Reasoning** follow a change made anywhere - a typed command, the permission dialog, the model's **`switch_model`**, a console or an editor on the same session. Every **`POST /v1/responses`** carries **`metadata.settingsVersion`**, the version the tab last applied; the server ignores the tab's **`model`** / **`reasoning`** / mode when a newer snapshot has been published since, so a stale tab cannot undo a change it has not seen.
 - **Mode**, **Model** and **Reasoning** belong to the session on screen. Opening a session shows the mode of its snapshot (**`settings.mode`**); a new chat - **New chat**, the Back button to **`#/`**, a draft in History, a session id the server answers **404** to - starts in **Agent** with a new chat's default model and level, never in the mode of the chat just left, and a mode picked on the start screen creates the chat in it. While the opened session is loading, the selectors still show the session left, and a prompt would carry their mode, **`metadata.model`** and **`metadata.reasoning`** with no **`settingsVersion`** of the opened session, so the server would keep them: **Send** and **Enter** wait until the session's own snapshot is applied, and the draft stays in the field. A read that fails is tried again after 1, 3 and 9 seconds and then every 30 seconds while the chat stays open, and only the server's **404** opens the address as a new chat: History holds one page, so a session missing from it may well exist. A message for a running turn still joins the queue, which carries none of them. Contract: **`App.settingsPerSession.test.tsx`**, **`Composer.sessionLoading.test.tsx`**, **`features/web_ui_session_settings.feature`**.
-- The **permission chip** (**`data-testid="composer-permission"`**) is the last selector of the row, after **Model** and **Reasoning**: **Ask first**, **Accept edits** or **Bypass**, the last in red with a glow, its tooltip naming the configuration's mode the session returns to after a restart. Its menu calls **`PATCH`** **`permissionMode`**. On a new chat - the start screen or a draft, before a session exists - the chip names the mode the server is configured with: **`permissionMode`** of **`GET /coddy/info`** (**`tools.permission_mode`**), read through the active environment (the local server, a remote, a node behind a relay's mount) and read again on every **`config_reloaded`** and every reconnect of **`GET /coddy/events`**. A pick there is held and sent as a **`/permissions <mode>`** line ahead of the first message unless it is that configured mode; while the configured mode is not known (no answer yet, a server that does not say) the pick is always sent, so an explicit **Ask first** under a **`bypass`** configuration is never dropped, and with no pick the mode the chip shows is sent, so the first turn never runs under a mode the page could not name. A first message the server never took keeps the pick for the next try into the same session. Contract: **`App.permissionDefault.test.tsx`**.
+- The **permission chip** (**`data-testid="composer-permission"`**) is the last selector of the row, after **Model** and **Reasoning**: **Ask first**, **Accept edits** or **Bypass**, the last in red with a glow, its tooltip naming the mode new sessions start in (*new sessions start in: bypass*). Its menu calls **`PATCH`** **`permissionMode`**, and the session's new mode also becomes the mode new sessions start in. On a new chat - the start screen or a draft, before a session exists - the chip names the mode a new session starts in, the one chosen last on any surface: **`permissionMode`** of **`GET /coddy/info`**, read through the active environment (the local server, a remote, a node behind a relay's mount) and read again on every **`config_reloaded`** and every reconnect of **`GET /coddy/events`**, and moved by **`configuredPermissionMode`** of every newer **`event: session_settings`**, whichever session it is about. A pick there is held and sent as a **`/permissions <mode>`** line ahead of the first message unless it is that mode; while that mode is not known (no answer yet, a server that does not say) the pick is always sent, so an explicit **Ask first** while new sessions start in **`bypass`** is never dropped, and with no pick the mode the chip shows is sent, so the first turn never runs under a mode the page could not name. A first message the server never took keeps the pick for the next try into the same session. Contract: **`App.permissionDefault.test.tsx`**.
 - The **overrides line** (**`data-testid="composer-overrides"`**) lists what is changed for the next turns (**`stub/qwen3.8-demo, 2 turns left`**, **`plan this turn`**), with the full list in its tooltip; it shrinks with an ellipsis on narrow shells rather than pushing the send button off the bar.
 - A prompt of settings commands only runs no turn: the stream ends with **`coddy_meta.settings_only`**, the tab drops its optimistic user and assistant rows and re-reads the transcript. The change shows on the selectors and the overrides line, and the transcript gets no row for it.
 - A **SYSTEM** notice row is left only by a change the agent made itself: its **`switch_model`** call, a skill's frontmatter (`Model: stub/qwen3.8-27b for this session`). What the user picks - a selector, a command, the permission dialog, the model and the mode a console or **`coddy -p`** started the session with - is on the selectors already; the rows a session saved by an earlier version holds for such changes are not shown.
@@ -412,9 +453,13 @@ Functional checklist for **Settings -> Logical models -> Reasoning levels**
 - **New folder** (the square **+** at the left of the footer, on the colours of the Scheduler's add button, with the **Show hidden** switch right after it; **Cancel** / **Open** sit on the right) opens an inline name row **between the path field and the list** - a sibling of the list, not a row inside it, so it never scrolls away under you and it stays whole on a short window where the list itself has shrunk to nothing. **Enter** or **Create folder** posts **`POST /coddy/workspace/folders`** **`{"path": <browsed folder>, "name"}`**; the dialog then shows the listing the server answers with, which is the **new folder**, so **Open** picks it straight away. **Escape** or the row's **×** abandons it; with no row open, **Escape** closes the dialog as **Cancel** does. The button is disabled on the drive level (there is no directory to create in) and while the row is already open; **Create folder** stays disabled until a name is typed. A name that is already taken (**409**) keeps the row open with the typed text and says so, and so does any other failure - nothing is created and the browsed folder does not change.
 - **Leaving the drive (Windows)** — **`..`** from a drive root opens the **drive level** (**`?path=:drives:`**, **`drives:true`** in the response): one row per volume (**`C:`**, **`D:`**, …), no **`..`** above it, and **Open** disabled because it is a place to navigate, not a workspace. The **path row is an editable field** (**`workspace-modal-path`**): typing or pasting a path and pressing **Enter** jumps there, surrounding quotes from Explorer's *Copy as path* are stripped (**`cleanPathInput`**), and while the field holds an unvisited path the primary button reads **Go** instead of **Open**, so a pasted path is never mistaken for the folder being opened. The browser starts at **`pathParent(ctx.path)`**, which keeps the current drive (it used to collapse Windows paths to **`/`**). Picking calls **`POST /coddy/sessions/{id}/workspace`** **`{"path"}`** — the session cwd switches and persists; skills, project rules, slash commands, configured MCP servers (re-dialed for the new workspace through its trust gate, the old workspace's closed) and the SessionStart hook context re-derive from the new cwd.
 - **The branch pick** opens the branch list (current first, marked selected) with a local filter for long lists. Picking one posts **`{"branch", "worktree": <checkbox>}`**: in-place checkout by default, or a dedicated feature worktree under **`<repo>/.coddy/worktrees/<branch>/`** when the checkbox is on. Worktree creation fetches `origin`, starts a new branch from the fresh `origin/HEAD` default and refuses the default branch or one tracking it. Without the checkbox, selecting a branch already checked out in another worktree jumps there (including back to the main checkout).
-- **The branch list is fresh**: every time it opens, the list first fetches every configured remote of the repository (**`POST /coddy/workspace/fetch`**, the folder the new chat picked or the session's), shows **Fetching branches from the remotes…** while it waits, and then lists the branches as git has them after the fetch, so a branch pushed since the last fetch is there without a terminal, and one deleted on its remote since is gone from it (a local branch of that name stays, it is yours). The fetch is `git fetch --all --prune` without tags: it only moves remote-tracking refs and never checks out, resets, merges or touches the working tree, the index, local branches or tags. It uses the repository's own credentials (a credential helper, the ssh agent) and never asks for one, in a terminal or in an askpass dialog; without the git binary only remotes that need no credentials, or take ssh keys from the agent, can be refreshed. The whole refresh is bounded to 20 seconds, past which it counts as failed.
+- **The branch list is fresh**: every time it opens, the list shows the branches it already knows - the local ones and the remote ones as the last fetch left them - and fetches every configured remote of the repository in the background (**`POST /coddy/workspace/fetch`**, the folder the new chat picked or the session's). A spinner at the right end of the filter field says the fetch is running; the rows stay on screen and can be picked meanwhile, so the menu keeps the size it opened with. When the fetch answers, the list shows the branches as git has them after it, so a branch pushed since the last fetch joins the list without a terminal, and one deleted on its remote since leaves it (a local branch of that name stays, it is yours). A branch picked before the fetch answers stays the choice. Only a list with no branch to show yet reads **Fetching branches from the remotes…** while it waits. The fetch is `git fetch --all --prune` without tags: it only moves remote-tracking refs and never checks out, resets, merges or touches the working tree, the index, local branches or tags. It uses the repository's own credentials (a credential helper, the ssh agent) and never asks for one, in a terminal or in an askpass dialog; without the git binary only remotes that need no credentials, or take ssh keys from the agent, can be refreshed. The whole refresh is bounded to 20 seconds, past which it counts as failed.
 - **Branches only on a remote** are in the same list as the local ones, in one alphabetical order after the current branch, named as a local branch would be (**`feature/search`**, not **`origin/feature/search`**) and marked with a cloud at the start of the row; a branch you already have locally is listed once, as the local one, and a name that several remotes carry is listed once too. Picking one creates the local branch tracking the remote one - origin's when origin has it, else that of the first remote by name - in place or in a worktree as the checkbox says; before the first message the plate shows the pick and the branch is made when the chat starts.
 - **A failed refresh** (no network, a refused login, a remote that does not answer) keeps the list it had and says so in an amber note over it, **Could not refresh the remote branches. The list may be out of date.**, with git's first line of the reason under it and the whole of it in the note's tooltip. The workspace stays usable: the branches listed can still be picked.
+
+![The branch list while the remotes are fetched: the branches it already knows stay listed and pickable, a small spinner at the right end of the filter field](../assets/ui-branch-menu/branch-menu-refreshing-dark-1280.png)
+
+*While the remotes are fetched, the list stays and the spinner in the filter field marks the refresh*
 
 ![The branch list after the refresh: the current branch first, then local branches and branches only on a remote in one alphabetical list, a cloud opening each remote-only row](../assets/ui-branch-menu/branch-menu-remote-dark-1280.png)
 
@@ -428,13 +473,13 @@ Functional checklist for **Settings -> Logical models -> Reasoning levels**
 - **History folder grouping** uses the main checkout path returned as `repoRoot` on each git session row. A conversation in `main` and conversations in its worktrees appear under one project heading, while each session keeps its own cwd. See [Git worktrees](../features/worktrees.md).
 - **Pre-session (draft/home)**: picks are stored client-side, previewed via **`GET /coddy/workspace/context?path=`**, and applied to the new session id on first send before **`POST /v1/responses`**. Returning from a project conversation to the start screen keeps that conversation's folder as the next-chat preview; switching to another session drops pending picks.
 - Errors (missing folder **400**, git conflicts / locked workspace **409**) keep the current chips; the context is re-fetched to stay truthful.
-- Automated checks: **`chat/workspaceContext.test.ts`**, **`chat/workspaceRecents.test.ts`** (helpers), **`chat/WorkspaceChips.test.tsx`** (chips, menus, the refresh before the branch list, the warning, remote rows, modal, lock), **`App.workspaceHome.test.tsx`** (which folder a refresh is asked for); backend behavior is specified executable in **`features/workspace_switching.feature`** (godog), the fetch itself in **`internal/gitws/remotes_test.go`** (every remote, prune, nothing local touched, the refspec guard, the deadline, both git backends).
+- Automated checks: **`chat/workspaceContext.test.ts`**, **`chat/workspaceRecents.test.ts`** (helpers), **`chat/WorkspaceChips.test.tsx`** (chips, menus, the refresh behind the open branch list, the warning, remote rows, modal, lock), **`App.workspaceHome.test.tsx`** (which folder a refresh is asked for, and that a branch picked during it stays the choice), the scenario of the branch list during a refresh in **`features/web_ui_menus.feature`**; backend behavior is specified executable in **`features/workspace_switching.feature`** (godog), the fetch itself in **`internal/gitws/remotes_test.go`** (every remote, prune, nothing local touched, the refspec guard, the deadline, both git backends).
 
 ## Session list
 
 ![History grouped by folder, with a plus on the heading](../assets/sessions-history-grouping-dark-1280.png)
 
-*Grouped by folder: the heading is the folder name with its row count, and hovering it offers a new chat in that workspace. The first row is pinned*
+*Grouped by folder: the heading is the folder name, and the plus beside it starts a new chat in that workspace. The pinned row sits on top under Pinned*
 
 ![The pinned group, mid-drag by the row itself](../assets/sessions-history-pinned-dark-1280.png)
 
@@ -870,7 +915,7 @@ The chat transcript renders a flat list of UI message blocks. Each block has a `
 
 For the whole of a running turn, streaming text included, the typing dots carry a live status line (`TypingDotsMessage.tsx`, pure derivation in `chat/liveStatus.ts`, visual contract in `DESIGN.md`):
 
-![A running turn: 1m 54s, 2.6k tokens, 1 running task, Writing the answer](../assets/turn-progress-live-line-dark-1280.png)
+![A running turn: 18s, 99 tokens, 1 running task, Writing the answer](../assets/turn-progress-live-line-dark-1280.png)
 
 *The live line of a running turn: the turn clock, the generated tokens, the running background task and what the agent is doing*
 
@@ -949,7 +994,7 @@ When a later assistant answer refers to verified shared files, their cards rende
 
 `spawn_agent` has a dedicated argument card: agent icon and name, optional description, a labelled timeout badge, and an inset panel for the multiline prompt. The prompt starts as a compact preview; **More…** opens a bounded, scrollable viewport and **Less** restores the preview, so a long subagent instruction does not take over the transcript. When the spawned task has a child session, the card offers **Show transcript**; the same action is below captured output on the opened background-task card. The timeout is the supplied execution limit in seconds, separate from the elapsed duration beside the tool title. The layout wraps on narrow screens and follows the active light/dark theme. Calls with truncated history arguments load the full arguments once per incomplete preview, including running calls; malformed arguments or failed fetches retain the plain argument preview. Card labels follow the active English/Russian UI locale.
 
-On a labelled wide rail, the active-turn badge sits immediately after **History** or **Scheduler**; icon-only rails keep the badge over the icon. History counts active child-subagent turns as well as ordinary active chats, while still keeping child transcripts out of the History list itself.
+The active-turn badge of **History** and **Scheduler** sits over the item's icon, on its top right corner, in every shape of the rail: icon-only, labelled (wide) and the rows of the phone's **More** menu; it never follows the label. History counts active chats and the turns of their subagents, while still keeping child transcripts out of the History list itself; a scheduler run is counted on **Scheduler** alone. The Scheduler's count is read when the page opens and again at every turn's start and end, whether or not the Scheduler is open.
 
 The happy path is in `features/spawn_agent_card.feature`, run by the `http,ui` godog harness through the React DOM test in `SpawnAgentCard.test.tsx`. Edge cases cover invalid arguments, absent/invalid timeouts, escaped prompt text, and history fetch failure.
 
@@ -1065,7 +1110,7 @@ Multiple requests keep the transcript's 10px spacing. A new request scrolls into
 
 ![Two background permission cards with the standard transcript spacing](../assets/subagents/chat-permissions-spaced-dark-1280.png)
 
-*The real ChatScreen rendered with two deterministic pending task rows, Dark theme, 1280px wide.*
+*Two background subagents of one turn asking for permission at the end of the parent chat, Dark theme, 1280px wide.*
 
 ![A background subagent asking for permission in its parent chat](../assets/subagents/chat-subagent-permission-dark-1280.png)
 
@@ -1685,7 +1730,7 @@ Automated checks:
 
 ![The swarm screen with relays, nodes and rings](../assets/swarm/map-dark-1280.png)
 
-*The swarm screen with relays, nodes and rings*
+*The swarm screen: this machine, the attached relay and the nodes one and two hops away*
 
 Guide: `docs/operate/swarm.md`. Visual contract: `DESIGN.md` (**Swarm screen**).
 
