@@ -462,9 +462,8 @@ func (s *subagentSender) render(update interface{}) {
 		s.line.WriteString(u.Content.Text)
 		s.flushLines(false)
 	case acp.ToolCallUpdate:
-		// A provider that streams the call's name before its arguments
-		// announces the same call twice (the pending row, then the complete
-		// call); the log names it once.
+		// The loop announces a call once, but a replay or another sender
+		// may repeat a tool_call for an id the log has named; it is named once.
 		if _, seen := s.toolName[u.ToolCallID]; seen && u.ToolCallID != "" {
 			s.toolName[u.ToolCallID] = u.Title
 			return

@@ -1007,6 +1007,10 @@ func (a *Agent) runReActLoop(
 		var chunkCount int
 		a.progress.beginCall()
 		inputProgress := make(map[string]*toolInputProgress)
+		// The calls this stream has announced. ACP draws a row for every
+		// tool_call, so a call announced by name is not announced again when it
+		// completes: everything after the first is a tool_call_update.
+		announced := make(map[string]bool)
 		response, streamErr = transport.provider.Stream(streamCtx, sendMessages, toolDefs, func(chunk llm.StreamChunk) {
 			if streamCtx.Err() != nil {
 				return
@@ -1079,6 +1083,12 @@ func (a *Agent) runReActLoop(
 			if announce != nil && announce.Name != "" {
 				streamedAny = true
 				maybeMarkReasonEnd(now)
+				stopFirstTokenTimer()
+				id := strings.TrimSpace(announce.ID)
+				if id != "" && announced[id] {
+					return
+				}
+				announced[id] = true
 				if st := sessionStatePtr(a.state); st != nil {
 					if sd := strings.TrimSpace(st.GetPersistedSessionDir()); sd != "" && strings.TrimSpace(announce.ID) != "" {
 						_ = session.WriteToolCallMeta(sd, announce.ID, session.ToolCallMeta{
@@ -1096,7 +1106,6 @@ func (a *Agent) runReActLoop(
 					Kind:          toolKind(announce.Name),
 					Status:        "pending",
 				})
-				stopFirstTokenTimer()
 			}
 		})
 		if streamErr != nil {
