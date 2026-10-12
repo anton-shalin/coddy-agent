@@ -112,7 +112,7 @@ Already on disk:
   and the section is not written with **`tools.background.enable`** false.
 
 The block is never persisted: it is appended at the **`provider.Stream`** send boundary, next to the
-read/grep eviction projection, and the working message slice the loop keeps appending to never sees
+result eviction projection, and the working message slice the loop keeps appending to never sees
 it. Only the last few hundred tokens of a request are therefore uncached; the conversation behind
 them is a cache hit.
 
@@ -136,17 +136,24 @@ render them - at the cost of that cache, on every request. Such a template gets 
 checklist after the history; its block carries the two sections no template prints, the memory
 report and the running background tasks, and is left out when there is neither.
 
-### The other half: read/grep eviction
+### The other half: result eviction
 
-Freezing the system message is only half of a stable prefix. Read/grep result
-eviction (**`internal/agent/result_eviction.go`**) writes placeholders **into the middle** of the
+Freezing the system message is only half of a stable prefix. Result eviction of reads, greps and
+the listings of `glob`, `print_tree`, `websearch` and `webfetch`
+(**`internal/agent/result_eviction.go`**) writes placeholders **into the middle** of the
 replayed history, which invalidates the cache from that point on just as surely. With the default
 sliding working window that used to happen on nearly every step, so the conversation was reprocessed
 each time even with the prompt frozen. **`compaction.result_eviction.start_percent`** (default 50)
 holds the projection off until the estimated context reaches that share of the model's
 **`max_context_tokens`**; below it the history goes out exactly as the provider already has it. The
 decision is measured on the **unpruned** messages, so pruning cannot push the estimate back under the
-mark and make the projection flap between two shapes. See
+mark and make the projection flap between two shapes. A request the provider
+refused as too large opens the gate for the rest of that turn
+(**`Agent.evictionForced`**): the cache the gate protects is moot once the
+provider has refused to read the prefix. The fold inside a turn
+(**`compact_in_turn.go`**) is the same trade: it rewrites the history only at the
+compaction threshold, and the summary row it writes starts with the prompt, so the
+rewritten prefix still opens with what the model was asked. See
 [compaction.md](../features/compaction.md).
 
 ### Reading the cache hit
@@ -305,8 +312,22 @@ messages: [
      fresh allowance, with an LLM-facing nudge to continue when text was kept.
      At most **`maxProviderRecoveries`** (2) in a row; a successful call resets
      the count. Uses a normal **`max_turns`** iteration.
+   - **Overflow recovery.** A call the provider refused as larger than the
+     model's window (**`llm.IsContextOverflow`**) with nothing streamed yet
+     compacts the turn and runs the step again, once per step
+     (**`maxOverflowRecoveries`**; a successful call resets it): earlier turns
+     when a regular split fits the limit the refusal revealed, otherwise the
+     steps of the turn itself, behind the prompt (**`internal/agent/compact_in_turn.go`**).
+     It forces result eviction past its **`start_percent`** gate for the rest
+     of the turn (**`Agent.evictionForced`**), writes a **`notice`** row, and
+     uses a normal **`max_turns`** iteration. A second refusal of the same
+     step, a fold that fails or has nothing to fold, and
+     **`compaction.auto_enable: false`** end the turn with
+     **`contextOverflowError`**.
 
-   An explicit **`llm_retry_max: 0`** disables all of the above. The
+   An explicit **`llm_retry_max: 0`** disables all of the above except the
+   overflow recovery, which is a compaction and not a retry of the same
+   request. The
    `loop_guard`, Stop hooks, fallback models, and `wait_for_limit_reset` are
    independent policies, each governed by their own settings.
 
@@ -314,7 +335,8 @@ messages: [
    `msg="llm call finished"` with `provider_attempts` (total inner adapter
    calls including transport-layer retries), `transport_retries`, `call_reason`
    (one of `step`, `empty_reissue`, `empty_nudge`, `first_token_retry`,
-   `loop_guard`, `quota_reset_wait`, `stop_hook`, `queued_followup`), and
+   `loop_guard`, `quota_reset_wait`, `stop_hook`, `queued_followup`,
+   `context_overflow_recovery`), and
    `retries_remaining` (budget slots left after this call).
 
    Two guards bound a streamed call that stops answering. The first-token guard

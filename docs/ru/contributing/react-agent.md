@@ -112,7 +112,7 @@ Already on disk:
   список не попадают, а при **`tools.background.enable`**, равном false, раздел не пишется.
 
 Блок никогда не сохраняется. Он добавляется на границе отправки **`provider.Stream`**, рядом с
-проекцией вытеснения результатов read/grep, и рабочий срез сообщений, к которому цикл продолжает
+проекцией вытеснения результатов, и рабочий срез сообщений, к которому цикл продолжает
 добавлять сообщения, его никогда не видит. Поэтому некэшированными остаются только последние
 несколько сотен токенов запроса, а диалог перед ними попадает в кэш.
 
@@ -137,17 +137,23 @@ Already on disk:
 истории; его блок несёт два раздела, которые не печатает ни один шаблон, то есть отчёт памяти и
 выполняющиеся фоновые задачи, и не добавляется, если нет ни того, ни другого.
 
-### Вторая половина - вытеснение результатов read/grep
+### Вторая половина - вытеснение результатов
 
 Заморозка системного сообщения даёт только половину стабильного префикса. Вытеснение результатов
-read/grep (**`internal/agent/result_eviction.go`**) пишет заглушки **в середину** повторно
+чтений, поисков grep и просмотров `glob`, `print_tree`, `websearch` и `webfetch`
+(**`internal/agent/result_eviction.go`**) пишет заглушки **в середину** повторно
 отправляемой истории, и это так же надёжно сбрасывает кэш начиная с этого места. Со скользящим
 рабочим окном по умолчанию так раньше происходило почти на каждом шаге, и диалог обрабатывался
 заново каждый раз, даже при замороженном промпте. **`compaction.result_eviction.start_percent`** (по умолчанию 50)
 откладывает проекцию, пока оценка контекста не достигнет этой доли **`max_context_tokens`** модели;
 ниже порога история уходит ровно в том виде, в каком она уже есть у провайдера. Решение принимается
 по **необрезанным** сообщениям, поэтому обрезка не может вернуть оценку ниже отметки и заставить
-проекцию метаться между двумя формами. См.
+проекцию метаться между двумя формами. Запрос, который провайдер отклонил как слишком большой,
+открывает этот порог до конца хода (**`Agent.evictionForced`**): кэш, который порог защищает,
+теряет смысл, когда провайдер отказался читать префикс. Сворачивание внутри хода
+(**`compact_in_turn.go`**) устроено по тому же компромиссу: оно переписывает историю только на
+пороге сжатия, а строка сводки, которую оно пишет, начинается с промпта, поэтому переписанный
+префикс по-прежнему открывается тем, о чём модель спросили. См.
 [compaction.md](../features/compaction.md).
 
 ### Как прочитать попадание в кэш
@@ -306,8 +312,22 @@ messages: [
      fresh allowance, with an LLM-facing nudge to continue when text was kept.
      At most **`maxProviderRecoveries`** (2) in a row; a successful call resets
      the count. Uses a normal **`max_turns`** iteration.
+   - **Overflow recovery.** A call the provider refused as larger than the
+     model's window (**`llm.IsContextOverflow`**) with nothing streamed yet
+     compacts the turn and runs the step again, once per step
+     (**`maxOverflowRecoveries`**; a successful call resets it): earlier turns
+     when a regular split fits the limit the refusal revealed, otherwise the
+     steps of the turn itself, behind the prompt (**`internal/agent/compact_in_turn.go`**).
+     It forces result eviction past its **`start_percent`** gate for the rest
+     of the turn (**`Agent.evictionForced`**), writes a **`notice`** row, and
+     uses a normal **`max_turns`** iteration. A second refusal of the same
+     step, a fold that fails or has nothing to fold, and
+     **`compaction.auto_enable: false`** end the turn with
+     **`contextOverflowError`**.
 
-   An explicit **`llm_retry_max: 0`** disables all of the above. The
+   An explicit **`llm_retry_max: 0`** disables all of the above except the
+   overflow recovery, which is a compaction and not a retry of the same
+   request. The
    `loop_guard`, Stop hooks, fallback models, and `wait_for_limit_reset` are
    independent policies, each governed by their own settings.
 
@@ -315,7 +335,8 @@ messages: [
    `msg="llm call finished"` with `provider_attempts` (total inner adapter
    calls including transport-layer retries), `transport_retries`, `call_reason`
    (one of `step`, `empty_reissue`, `empty_nudge`, `first_token_retry`,
-   `loop_guard`, `quota_reset_wait`, `stop_hook`, `queued_followup`), and
+   `loop_guard`, `quota_reset_wait`, `stop_hook`, `queued_followup`,
+   `context_overflow_recovery`), and
    `retries_remaining` (budget slots left after this call).
 
    Two guards bound a streamed call that stops answering. The first-token guard
@@ -404,4 +425,4 @@ messages: [
 - Слишком длинный контекст - старые сообщения сжимаются в сводку, работа продолжается со сводкой;
 - Отмена - все операции прерываются, возвращается причина остановки `cancelled`.
 
-<!-- docsgen:source sha256=264bd420422e9767 -->
+<!-- docsgen:source sha256=a567ea6e0f9be993 -->
