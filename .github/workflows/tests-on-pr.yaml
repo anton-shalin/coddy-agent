@@ -164,18 +164,8 @@ jobs:
         if: matrix.tags == 'http,scheduler,ui,memory,cli,swarm'
         run: CODDY_BIN="$PWD/build/coddy" npm --prefix external/ui run check:files
 
-      # The Settings search: the same binary starts an agent with a provider
-      # and three logical models and a relay of its own, and Chromium types
-      # config keys into the drawer's field in English and in Russian, from a
-      # 1280px desktop down to phones held both ways. A result is picked by
-      # its anchor and must take the reader to the setting - the ring painted,
-      # the box in sight, the cursor in the control a mouse is given or in the
-      # box a touch screen is - including a setting inside a provider's folded
-      # block and one in a model's row. It holds the life of the query to
-      # account: kept after a choice and brought back by `/` or a tap, cleared
-      # by an emptied field, a tab that keeps its scroll position under the
-      # results, and Escape stepping back one layer at a time. The relay's own
-      # Settings gets its Swarm relay tab revealed the same way.
+      # The Settings search in Chromium, in English and Russian, from a desktop
+      # to a phone: a result must reveal its setting, on an agent and on a relay.
       - name: Drive the Settings search in a browser
         if: matrix.tags == 'http,scheduler,ui,memory,cli,swarm'
         run: CODDY_BIN="$PWD/build/coddy" npm --prefix external/ui run check:settings-search

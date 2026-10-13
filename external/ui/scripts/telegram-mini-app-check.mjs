@@ -27,14 +27,9 @@
  *            localhost while the app is on 127.0.0.1 - a cross-site frame,
  *            the way Telegram Web frames a Mini App: the sign-in the server
  *            accepts is not kept, and the screen says so;
- *   settings the Settings search inside the Mini App, in a touch phone's own
- *            context (the shared assertions are in settings-search-assert.mjs):
- *            a search for a setting reveals it with the box holding the focus,
- *            so no keyboard rises; Telegram's Back leaves the section with the
- *            query kept and the results hidden, a tap on the field shows them
- *            again, Back clears the query and keeps the tiles, Back once more
- *            closes Settings; and a tab's own name finds a block of it while
- *            Notifications, which the Mini App does not draw, finds nothing.
+ *   settings the Settings search on a touch phone (assertions shared with
+ *            settings-search-assert.mjs): a reveal leaves the focus on the box,
+ *            Back steps out layer by layer, Notifications is not found.
  *
  * Usage, from the repository root:
  *   make build TAGS="http ui gateway"
@@ -60,15 +55,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  assertRevealed,
+  assertDrawerState,
   assertTouchOnly,
-  openResult,
   openSearch,
-  resultsShowing,
+  revealResult,
   searchFor,
   shownResults,
-  SEARCH_INPUT,
-  TILE_GRID,
 } from "./settings-search-assert.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -332,55 +324,38 @@ const frame = () =>
   page.frame({ name: "miniapp" }) ||
   page.frames().find((f) => f.url().startsWith(NODE));
 
-/** Thrown after a step of the settings scenario failed and was reported. */
-class SettingsStopped extends Error {}
-
 /**
- * The Settings search inside the Mini App, in a context of its own: a phone,
- * touch and no hover, so the touch-only media query that decides where the
- * reveal puts the focus is the real one (the desktop context above keeps its
- * mouse, and its scenarios are left as they were). Every step reports itself
- * and the first failure ends the scenario, since each step stands on the one
- * before it.
+ * The Settings search inside the Mini App, in a phone context of its own (touch
+ * and no hover), so the touch-only media query that decides where a reveal puts
+ * the focus is the real one. The first failure ends the scenario.
  */
 async function settingsScenario() {
   const phoneContext = await browser.newContext({
     viewport: { width: 390, height: 844 },
     hasTouch: true,
     isMobile: true,
-    deviceScaleFactor: 2,
     colorScheme: "dark",
   });
   const phone = await phoneContext.newPage();
-  phone.on("pageerror", (err) => console.log(`page error: ${err.message}`));
-  // The stand's page stacks its chat, its controls and the phone one under
-  // the other at this width, and the phone is taller than the window: a tap
-  // reaches only what the window shows, and Playwright does not scroll the
-  // page to reach into a frame. So every step starts with the phone's top at
-  // the window's top.
+  // The stand's page stacks its chat, controls and phone under each other and
+  // the phone is taller than the window; Playwright does not scroll the page to
+  // reach into a frame, so every step starts with the phone at the top.
   const showPhone = () =>
     phone.evaluate(() =>
-      document.querySelector("#miniappPhone")?.scrollIntoView({
-        block: "start",
-      }),
+      document
+        .querySelector("#miniappPhone")
+        ?.scrollIntoView({ block: "start" }),
     );
+  let at = "the Mini App opens";
   const step = async (label, fn) => {
-    try {
-      await showPhone();
-      const result = await fn();
-      check(label, true);
-      return result;
-    } catch (err) {
-      check(label, false, err.message);
-      throw new SettingsStopped(label);
-    }
+    at = label;
+    await showPhone();
+    await fn();
+    check(label, true);
   };
   try {
     await phone.goto(`${TG}/`);
     await phone.locator(".kb button.webapp").last().click();
-    await until("the app to be ready", () =>
-      phone.evaluate(() => window.__tgfakeMiniApp.ready),
-    );
     const app = await until(
       "the Mini App frame",
       () =>
@@ -389,136 +364,58 @@ async function settingsScenario() {
     );
     await app.waitForSelector('html[data-telegram-mini-app="true"]');
     await app.waitForSelector(".composer-card");
-
-    await step("the Mini App's frame is a touch-only device", () =>
-      assertTouchOnly(app, true),
-    );
-
     // Telegram's Back is a button of the page around the frame.
     const back = async () => {
-      await until("Back to show", () =>
-        phone.evaluate(() => window.__tgfakeMiniApp.backVisible),
-      );
+      await showPhone();
+      await phone.waitForFunction(() => window.__tgfakeMiniApp.backVisible);
       await phone.locator("#miniappBack").click();
     };
-    const tilesShown = () =>
-      app.evaluate(
-        (sel) => document.querySelector(sel)?.getClientRects().length > 0,
-        TILE_GRID,
-      );
-    const settingsOpen = () =>
-      app.evaluate(
-        () =>
-          document.querySelector('[data-testid="settings-screen"]') !== null,
-      );
-    const queryOf = () => app.locator(SEARCH_INPUT).first().inputValue();
-    const openSettings = async () => {
-      // The gear of the top bar, a link named Settings.
-      await app.getByRole("link", { name: "Settings", exact: true }).tap();
-      await app.waitForSelector(TILE_GRID, { state: "visible" });
-    };
+    const drawer = (expected) =>
+      assertDrawerState(app, { open: true, ...expected });
+    // The gear of the top bar, a link named Settings.
+    const gear = () =>
+      app.getByRole("link", { name: "Settings", exact: true }).tap();
 
-    // 1. Open Settings and reveal a setting: the box holds the focus.
-    await step("Settings opens on its tiles", openSettings);
-    const turns = await step("a search for max_turns finds it", async () => {
+    await step("max_turns is revealed, its box holds the focus", async () => {
+      await assertTouchOnly(app, true);
+      await gear();
       await openSearch(app, { narrow: true });
       await searchFor(app, "max_turns");
-      return openResult(app, { anchor: "agent:max_turns" });
+      await revealResult(app, { anchor: "agent:max_turns", focus: "box" });
     });
-    await step(
-      "the setting is revealed and its box, not a field, holds the focus",
-      () =>
-        assertRevealed(app, {
-          anchor: "agent:max_turns",
-          focus: "box",
-          name: turns,
-        }),
-    );
-    if (SHOTS) {
-      fs.mkdirSync(SHOTS, { recursive: true });
-      await phone.waitForTimeout(400);
-      // The Mini App itself: at this width the stand stacks its own
-      // controls and logs around the phone.
-      await phone
-        .locator("iframe")
-        .first()
-        .screenshot({
-          path: path.join(
-            SHOTS,
-            "telegram-mini-app-settings-reveal-dark-390.png",
-          ),
-        });
-    }
-
-    // 2. Back from the section: the tiles, the query kept, the results hidden.
-    await step(
-      "Back from the section shows the tiles with the query kept and no results",
-      async () => {
-        await back();
-        await until("the tiles", tilesShown);
-        const kept = await queryOf();
-        if (kept !== "max_turns") throw new Error(`the field holds "${kept}"`);
-        if (await resultsShowing(app)) throw new Error("the results are shown");
-      },
-    );
-
-    // 3. Reopen explicitly: the tiles are on screen, so a tap on the field
-    // shows the results; Back then clears the query and keeps the tiles.
-    await step("a tap on the field shows the results again", async () => {
-      await openSearch(app, { narrow: true });
-      await until("the results", () => resultsShowing(app));
-    });
-    await step(
-      "Back clears the query and leaves the tiles on screen",
-      async () => {
-        await back();
-        await until("the query cleared", async () => (await queryOf()) === "");
-        if (!(await tilesShown())) throw new Error("the tiles are gone");
-        if (await resultsShowing(app)) throw new Error("the results are shown");
-      },
-    );
-
-    // 4. Back again: Settings closes, as it always did.
-    await step("Back once more closes Settings", async () => {
+    // Back undoes one layer at a time: the section (the tiles, the query
+    // kept), then the results a tap on the field brought back, then Settings.
+    await step("Back: the section, the results, then Settings", async () => {
       await back();
-      await until("Settings closed", async () => !(await settingsOpen()));
+      await drawer({ tiles: true, query: "max_turns", resultsShowing: false });
+      await openSearch(app, { narrow: true });
+      await drawer({ resultsShowing: true });
+      await back();
+      await drawer({ tiles: true, query: "", resultsShowing: false });
+      await back();
+      await assertDrawerState(app, { open: false });
     });
-
-    // 5. Notifications is not drawn inside Telegram, so nothing finds it, and
-    // the name of the Appearance tile, read from the page, finds the Theme
-    // block next to it: the positive control of the same search.
-    await step("Settings opens again", openSettings);
-    const label = await step("the Appearance tile names itself", async () => {
-      const text = await app
-        .locator('[data-testid="settings-tile-appearance"]')
-        .evaluate((tile) =>
-          (
-            tile.querySelector(".settings-tile-title") || tile
-          ).textContent.trim(),
-        );
-      if (!text) throw new Error("the tile has no label");
-      return text;
+    // Notifications is not drawn inside Telegram, so nothing finds it; the name
+    // of the Appearance tile, read from the page, finds the Theme block next to
+    // it, the positive control of the same search.
+    await step("Theme is found and Notifications is not", async () => {
+      await gear();
+      const tile = '[data-testid="settings-tile-appearance"]';
+      const label = await app
+        .locator(`${tile} .settings-tile-title`)
+        .textContent();
+      await openSearch(app, { narrow: true });
+      await searchFor(app, label.trim());
+      const anchors = (await shownResults(app)).map((r) => r.anchor);
+      if (!anchors.includes("landmark:appearance:theme")) {
+        throw new Error(`no Theme block among ${anchors.join(", ")}`);
+      }
+      if (anchors.includes("landmark:appearance:notifications")) {
+        throw new Error("Notifications is offered, and the Mini App has none");
+      }
     });
-    await step(
-      `a search for "${label}" finds the Theme block and no Notifications`,
-      async () => {
-        await openSearch(app, { narrow: true });
-        await searchFor(app, label);
-        const anchors = (await shownResults(app)).map((r) => r.anchor);
-        if (!anchors.includes("landmark:appearance:theme")) {
-          throw new Error(`no Theme block among ${anchors.join(", ")}`);
-        }
-        if (anchors.includes("landmark:appearance:notifications")) {
-          throw new Error(
-            "Notifications is offered, and the Mini App has none",
-          );
-        }
-      },
-    );
   } catch (err) {
-    if (!(err instanceof SettingsStopped)) {
-      check("the settings scenario finished", false, err.stack || String(err));
-    }
+    check(at, false, err.message);
   } finally {
     await phoneContext.close();
   }

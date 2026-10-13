@@ -1,18 +1,13 @@
 /**
- * The two stands the Settings search check drives, started from a binary:
- *
- *   an agent  `coddy serve` with one `openai` provider named `demo`, no key and
- *             no model call, and three logical models (`demo/qwen3-27b`,
- *             `demo/qwen3-8b`, `demo/llama-3`), so a setting of a list's row
- *             exists once per row;
- *   a relay   `coddy serve` with `swarm.enable: true` and no API of its own,
- *             whose client token the page needs even on loopback (a relay
- *             makes one up for the run otherwise).
- *
- * Each has a home of its own under the system's temporary directory, its own
- * loopback port and an environment with nothing of the caller's in it: no
- * token, no login, no key. `stop()` ends both and removes the homes; the
- * scripts call it at exit, so a failed run leaves nothing behind either.
+ * The two stands the Settings search check drives, started from a binary: an
+ * agent (`coddy serve` with one `openai` provider `demo`, no key and no model
+ * call, and three logical models, so a setting of a list's row exists once per
+ * row) and a relay (`coddy serve` with `swarm.enable: true` and no API of its
+ * own, whose client token the page needs even on loopback). Each has a home of
+ * its own under the system's temporary directory, a loopback port and an
+ * environment with nothing of the caller's in it. `stop()` ends both and
+ * removes the homes; the scripts call it at exit, so a failed run leaves
+ * nothing behind either.
  */
 
 import { spawn } from "node:child_process";
@@ -147,10 +142,9 @@ export async function startStands(bin) {
     const relayPort = await freePort();
     const agentHome = path.join(scratch, "agent");
     const relayHome = path.join(scratch, "relay");
-    for (const home of [agentHome, relayHome]) {
-      fs.mkdirSync(path.join(home, "tmp"), { recursive: true });
+    for (const dir of ["agent/tmp", "agent/work", "relay/tmp"]) {
+      fs.mkdirSync(path.join(scratch, dir), { recursive: true });
     }
-    fs.mkdirSync(path.join(agentHome, "work"), { recursive: true });
     fs.writeFileSync(path.join(agentHome, "config.yaml"), AGENT_STAND_CONFIG);
     fs.writeFileSync(
       path.join(relayHome, "config.yaml"),
