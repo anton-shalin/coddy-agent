@@ -1,5 +1,12 @@
 import type { ChangeEvent, ReactNode } from "react";
-import { Fragment, useEffect, useId, useRef, useState } from "react";
+import {
+  Fragment,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { Chevron } from "../components/Chevron";
 
@@ -791,8 +798,11 @@ export function CollapsibleFieldset(props: {
   const bodyId = useId();
   const fieldsetRef = useRef<HTMLFieldSetElement>(null);
   // Something inside is being revealed (a search took the operator to it): a
-  // fold above it opens, so the setting is not left in a hidden body.
-  useEffect(() => {
+  // fold above it opens, so the setting is not left in a hidden body. The
+  // listener goes on while the fold is committed, not after the paint: the
+  // reveal asks the moment the box is in the page, which is before a passive
+  // effect has run.
+  useLayoutEffect(() => {
     const fieldset = fieldsetRef.current;
     if (!fieldset) {
       return;

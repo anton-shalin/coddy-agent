@@ -1,4 +1,4 @@
-import { createElement } from "react";
+import { createElement, useEffect, useState, type ReactNode } from "react";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,6 +7,7 @@ import { fireEvent, render } from "@testing-library/react";
 
 import { ConfirmProvider } from "../components/useConfirm";
 import { initLocale, setLocale } from "../i18n/i18n";
+import { parseAppHash, setSettingsSectionHash } from "../scheduler/hashRoute";
 import {
   captureTelegramLaunch,
   resetTelegramLaunchForTests,
@@ -329,7 +330,41 @@ export type MountOptions = PageOptions & {
   section?: string | null;
   item?: string | null;
   onClose?: () => void;
+  /**
+   * The drawer follows the address as App makes it: `section` and `item` are
+   * written to the hash first, and a change of the hash (the drawer's own
+   * writes included) is handed back to it as its `initialSection` and
+   * `initialItem`. Without it the two stay what they were mounted with.
+   */
+  routed?: boolean;
+  /** Rendered before the drawer, so it listens first (an OpenRailScreen). */
+  beside?: ReactNode;
 };
+
+/** Settings the way App mounts it: the address says which tab and row are open. */
+function RoutedSettings(props: {
+  onClose: () => void;
+  relay: boolean;
+}): ReactNode {
+  const read = () => {
+    const route = parseAppHash();
+    return route.branch === "settings"
+      ? { section: route.section, item: route.item }
+      : { section: null, item: null };
+  };
+  const [route, setRoute] = useState(read);
+  useEffect(() => {
+    const on = () => setRoute(read());
+    window.addEventListener("hashchange", on);
+    return () => window.removeEventListener("hashchange", on);
+  }, []);
+  return createElement(Settings, {
+    onClose: props.onClose,
+    initialSection: route.section,
+    initialItem: route.item,
+    relay: props.relay,
+  });
+}
 
 /** The page, the stubbed server and the document of a drawer about to mount. */
 function prepareDrawer(opts: MountOptions) {
@@ -339,17 +374,30 @@ function prepareDrawer(opts: MountOptions) {
   resetSettingsConfigForTests();
   const server = newServerState({ schema, config });
   const fetch = stubServer(server);
+  const relay = schema["x-coddy-relay"] === true;
+  const onClose = opts.onClose ?? (() => {});
+  if (opts.routed) {
+    // The address App would hold for this tab and row.
+    if (opts.section) {
+      setSettingsSectionHash(opts.section, { item: opts.item ?? null });
+    } else {
+      window.location.hash = "#/settings";
+    }
+  }
   const draw = () =>
     render(
       createElement(
         ConfirmProvider,
         null,
-        createElement(Settings, {
-          onClose: opts.onClose ?? (() => {}),
-          initialSection: opts.section ?? null,
-          initialItem: opts.item ?? null,
-          relay: schema["x-coddy-relay"] === true,
-        }),
+        opts.beside ?? null,
+        opts.routed
+          ? createElement(RoutedSettings, { onClose, relay })
+          : createElement(Settings, {
+              onClose,
+              initialSection: opts.section ?? null,
+              initialItem: opts.item ?? null,
+              relay,
+            }),
       ),
     );
   return { draw, fetch, server };

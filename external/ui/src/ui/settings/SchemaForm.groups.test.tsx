@@ -1,4 +1,5 @@
 import React from "react";
+import { createRoot } from "react-dom/client";
 import { afterEach, expect, test } from "vitest";
 import {
   act,
@@ -6,6 +7,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import {
@@ -403,4 +405,67 @@ test("a folded group opens when something inside it is revealed", () => {
   });
   expect([expanded(more), expanded(other)]).toEqual(["true", "false"]);
   expect(screen.getByLabelText("Timeout")).toBeVisible();
+});
+
+// A reveal asks for the fold the moment the box is in the page, which a mutation
+// observer sees in the microtask after the commit - before React has run the
+// passive effects of that commit. The fold must already be listening then.
+// Inside act every effect has run when render returns, so the page's own order
+// is set up by hand: act off, one render scheduled the way a browser's is.
+test("a fold hears a reveal asked the moment it is in the page, before its passive effects ran", async () => {
+  const env = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const actEnvironment = env.IS_REACT_ACT_ENVIRONMENT;
+  env.IS_REACT_ACT_ENVIRONMENT = false;
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    const asked = new Promise<void>((resolve) => {
+      const observer = new MutationObserver(() => {
+        const box = container.querySelector(
+          '[data-settings-anchor="demo:timeout"]',
+        );
+        if (box) {
+          observer.disconnect();
+          box.dispatchEvent(
+            new CustomEvent(SETTINGS_REVEAL_EVENT, { bubbles: true }),
+          );
+          resolve();
+        }
+      });
+      observer.observe(container, { childList: true, subtree: true });
+    });
+    root.render(
+      <Harness
+        domain="demo"
+        groups={[
+          { id: "main", legend: "Settings" },
+          {
+            id: "more",
+            legend: "Advanced",
+            paths: ["timeout"],
+            collapsible: true,
+          },
+        ]}
+      />,
+    );
+    await asked;
+    await waitFor(() =>
+      expect(
+        container
+          .querySelector(
+            ".settings-fieldset--collapsible .settings-form-group-body",
+          )!
+          .hasAttribute("hidden"),
+      ).toBe(false),
+    );
+  } finally {
+    root.unmount();
+    container.remove();
+    if (actEnvironment === undefined) {
+      delete env.IS_REACT_ACT_ENVIRONMENT;
+    } else {
+      env.IS_REACT_ACT_ENVIRONMENT = actEnvironment;
+    }
+  }
 });
