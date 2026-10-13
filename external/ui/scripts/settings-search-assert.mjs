@@ -362,10 +362,16 @@ function probeReveal({ anchor, row, focus, names }) {
     };
   }
 
+  // The ring is an outline over an inset wash (or, in a theme that paints it
+  // so, a shadow): either one painted on the marked box counts.
   const cs = getComputedStyle(box);
+  const marked = box.classList.contains("is-search-target");
+  const outlined =
+    cs.outlineStyle !== "none" && Number.parseFloat(cs.outlineWidth) > 0;
+  const shadowed = cs.boxShadow !== "none";
   const ring = {
-    ok: box.classList.contains("is-search-target") && cs.boxShadow !== "none",
-    why: `.is-search-target ${box.classList.contains("is-search-target")}, box-shadow ${cs.boxShadow}`,
+    ok: marked && (outlined || shadowed),
+    why: `.is-search-target ${marked}, outline ${cs.outlineStyle} ${cs.outlineWidth}, box-shadow ${shadowed ? "painted" : "none"}`,
   };
 
   const rect = box.getBoundingClientRect();
@@ -378,18 +384,27 @@ function probeReveal({ anchor, row, focus, names }) {
     visible.right = Math.min(visible.right, s.right);
     visible.bottom = Math.min(visible.bottom, s.bottom);
   }
+  // The outline stands 3px off the box and is 2px wide: it is part of what
+  // has to be in sight. A box taller than the room is aligned by its top,
+  // 12px under the edge (scroll-margin-block), instead of centred.
   const slack = 1;
+  const reach = 5;
+  const margin = 12;
+  const tall = rect.height + 2 * reach > visible.bottom - visible.top;
   const r = (n) => Math.round(n * 10) / 10;
   const bounds = {
     ok:
       scroller !== null &&
       rect.width > 0 &&
       rect.height > 0 &&
-      rect.left >= visible.left - slack &&
-      rect.right <= visible.right + slack &&
-      rect.top >= visible.top - slack &&
-      rect.bottom <= visible.bottom + slack,
-    why: `box top ${r(rect.top)} bottom ${r(rect.bottom)} left ${r(rect.left)} right ${r(rect.right)}, visible part top ${r(visible.top)} bottom ${r(visible.bottom)} left ${r(visible.left)} right ${r(visible.right)}${scroller ? "" : " (no .settings-scroll around the box)"}`,
+      rect.left - reach >= visible.left - slack &&
+      rect.right + reach <= visible.right + slack &&
+      (tall
+        ? rect.top >= visible.top - slack &&
+          rect.top <= visible.top + margin + reach + slack
+        : rect.top - reach >= visible.top - slack &&
+          rect.bottom + reach <= visible.bottom + slack),
+    why: `box top ${r(rect.top)} bottom ${r(rect.bottom)} left ${r(rect.left)} right ${r(rect.right)}, visible part top ${r(visible.top)} bottom ${r(visible.bottom)} left ${r(visible.left)} right ${r(visible.right)}, ${tall ? "taller than the room: aligned by its top" : "the 5px of outline included"}${scroller ? "" : " (no .settings-scroll around the box)"}`,
   };
 
   // The accessible name of a control, from aria-labelledby, aria-label or its
@@ -728,6 +743,223 @@ export async function assertRowForm(target, row) {
     if (Date.now() > deadline) {
       throw new Error(
         `The result of the row ${row} should open that row's form and ring a setting inside it, but the forms on screen are ${JSON.stringify(seen.rows)} and ${seen.strays} of ${seen.rings} rings lie outside it.`,
+      );
+    }
+    await sleep(60);
+  }
+}
+
+// ------------------------------------- the address, groups and the badge
+
+/**
+ * The Settings address, read apart: `#/settings/<tab>?id=<row>&field=<anchor>`
+ * is `{tab, id, field}`, each null when the address does not carry it.
+ */
+export async function addressOf(target) {
+  return target.evaluate(() => {
+    const [path, query = ""] = location.hash.replace(/^#/, "").split("?");
+    const params = new URLSearchParams(query);
+    const parts = path.split("/").filter(Boolean);
+    return {
+      hash: location.hash,
+      tab: parts[0] === "settings" ? (parts[1] ?? null) : null,
+      id: params.get("id"),
+      field: params.get("field"),
+    };
+  });
+}
+
+/**
+ * Holds the address to what a choice should leave in it: `field` names the
+ * setting by its anchor (null: the address names none) and, when `id` is
+ * given, `id` names the row (null: no row).
+ */
+export async function assertAddress(target, { field, id }, sentence) {
+  const deadline = Date.now() + 2000;
+  let seen = null;
+  for (;;) {
+    seen = await addressOf(target);
+    if (seen.field === field && (id === undefined || seen.id === id)) return;
+    if (Date.now() > deadline) {
+      throw new Error(
+        `${sentence} The address is ${seen.hash}, but field should be ${
+          field === null ? "absent" : JSON.stringify(field)
+        }${id === undefined ? "" : ` and id ${id === null ? "absent" : JSON.stringify(id)}`}.`,
+      );
+    }
+    await sleep(60);
+  }
+}
+
+/**
+ * The tab stands open and no setting is ringed, for as long as a reveal would
+ * take to show a ring (an address that names a setting which is gone only
+ * opens its tab). Fails on a ring at any moment of the wait, and on an error
+ * line the drawer draws.
+ */
+export async function assertTabOnly(target, tab, sentence) {
+  const deadline = Date.now() + 1800;
+  for (;;) {
+    const seen = await target.evaluate(() => ({
+      rings: document.querySelectorAll(".is-search-target").length,
+      errors: [...document.querySelectorAll(".settings-error")].map((e) =>
+        e.textContent.trim(),
+      ),
+    }));
+    if (seen.rings > 0) {
+      throw new Error(
+        `${sentence} A setting is ringed, though none was found.`,
+      );
+    }
+    if (seen.errors.length > 0) {
+      throw new Error(
+        `${sentence} The drawer shows an error: ${seen.errors[0]}`,
+      );
+    }
+    if (Date.now() > deadline) break;
+    await sleep(80);
+  }
+  const address = await addressOf(target);
+  const drawn = await target.evaluate(
+    (id) =>
+      [
+        ...document.querySelectorAll(".settings-scroll[data-settings-tab]"),
+      ].some(
+        (el) => el.dataset.settingsTab === id && el.getClientRects().length > 0,
+      ) ||
+      // the narrow shell mounts the open tab alone
+      document.querySelector(".settings-mobile-detail") !== null,
+    tab,
+  );
+  if (address.tab !== tab || !drawn) {
+    throw new Error(
+      `${sentence} The tab ${tab} should be open (address ${address.hash}), but ${drawn ? "the address names another" : "it is not drawn"}.`,
+    );
+  }
+}
+
+/**
+ * The first group of a tab, or of a row's form, read from the page: its
+ * anchor (`group:<domain>:<id>`) and the legend it draws. `folded` asks for
+ * one that stands shut.
+ */
+export async function readGroup(target, { prefix, row, folded }) {
+  const deadline = Date.now() + 5000;
+  for (;;) {
+    const found = await target.evaluate(
+      ({ prefix, row, folded }) => {
+        const norm = (s) => s.replace(/[\s\u00a0]+/g, " ").trim();
+        const scopes =
+          row == null
+            ? [document]
+            : [
+                ...document.querySelectorAll(
+                  ".settings-detail[data-settings-row]",
+                ),
+              ].filter((e) => e.dataset.settingsRow === row);
+        for (const scope of scopes) {
+          for (const box of scope.querySelectorAll("[data-settings-anchor]")) {
+            const anchor = box.dataset.settingsAnchor;
+            if (!anchor.startsWith(prefix)) continue;
+            // A group that can fold carries --collapsible, and stands shut
+            // until it is open.
+            if (
+              folded &&
+              (!box.classList.contains("settings-fieldset--collapsible") ||
+                box.classList.contains("is-open"))
+            ) {
+              continue;
+            }
+            const legend = box.querySelector("legend");
+            if (!legend) continue;
+            let text = "";
+            const walk = (n) => {
+              if (n.nodeType === 3) text += n.nodeValue;
+              else if (
+                n.nodeType === 1 &&
+                !n.matches(".field-hint, [aria-hidden='true'], svg")
+              ) {
+                n.childNodes.forEach(walk);
+              }
+            };
+            walk(legend);
+            if (norm(text)) return { anchor, legend: norm(text) };
+          }
+        }
+        return null;
+      },
+      { prefix, row, folded },
+    );
+    if (found) return found;
+    if (Date.now() > deadline) {
+      throw new Error(
+        `No ${folded ? "folded " : ""}group with an anchor starting ${prefix}${row == null ? "" : ` in the form of ${row}`} is drawn, so there is no legend to search for.`,
+      );
+    }
+    await sleep(100);
+  }
+}
+
+/** A group the search opened is unfolded, whether it stood shut or not. */
+export async function assertGroupOpen(target, anchor, row) {
+  const deadline = Date.now() + 2000;
+  for (;;) {
+    const open = await target.evaluate(
+      ({ anchor, row }) => {
+        const scopes =
+          row == null
+            ? [document]
+            : [
+                ...document.querySelectorAll(
+                  ".settings-detail[data-settings-row]",
+                ),
+              ].filter((e) => e.dataset.settingsRow === row);
+        for (const scope of scopes) {
+          for (const box of scope.querySelectorAll("[data-settings-anchor]")) {
+            if (box.dataset.settingsAnchor === anchor) {
+              return box.classList.contains("is-open");
+            }
+          }
+        }
+        return null;
+      },
+      { anchor, row },
+    );
+    if (open === true) return;
+    if (Date.now() > deadline) {
+      throw new Error(
+        open === null
+          ? `The group ${anchor} should be drawn after the search opened it, but it is not.`
+          : `The group ${anchor} was the target of the search and should be unfolded, but it stands shut.`,
+      );
+    }
+    await sleep(60);
+  }
+}
+
+/**
+ * The "/" badge in the search field: drawn while the field is empty and does
+ * not hold the cursor, on every width; gone while it holds the cursor or a
+ * query; never drawn on a touch-only device. `shown` is what is expected.
+ */
+export async function assertKbd(target, shown, sentence) {
+  const deadline = Date.now() + 2000;
+  let seen = null;
+  for (;;) {
+    seen = await target.evaluate((sel) => {
+      const input = document.querySelector(sel);
+      const kbd = document.querySelector(".settings-search-kbd");
+      return {
+        drawn: !!kbd && kbd.getClientRects().length > 0,
+        text: kbd ? kbd.textContent.trim() : null,
+        query: input ? input.value : null,
+        focused: !!input && document.activeElement === input,
+      };
+    }, SEARCH_INPUT);
+    if (seen.drawn === shown && (!shown || seen.text === "/")) return;
+    if (Date.now() > deadline) {
+      throw new Error(
+        `${sentence} The badge is ${seen.drawn ? `drawn (${JSON.stringify(seen.text)})` : "not drawn"} with the field ${seen.query === "" ? "empty" : `holding ${JSON.stringify(seen.query)}`} and ${seen.focused ? "focused" : "not focused"}, but it should be ${shown ? 'drawn as "/"' : "gone"}.`,
       );
     }
     await sleep(60);

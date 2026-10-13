@@ -48,13 +48,17 @@ import fs from "node:fs";
 import path from "node:path";
 
 import {
+  assertAddress,
   assertChosenSelected,
   assertDrawerState,
+  assertGroupOpen,
   assertHighlight,
+  assertKbd,
   assertNoTextControlFocused,
   assertQueryKept,
   assertRevealed,
   assertRowForm,
+  assertTabOnly,
   assertTiers,
   assertTouchOnly,
   backToTiles,
@@ -63,10 +67,12 @@ import {
   openSearch,
   pressField,
   pressKey,
+  readGroup,
   searchFor,
   shownResults,
   typeQuery,
   SEARCH_INPUT,
+  TILE_GRID,
 } from "./settings-search-assert.mjs";
 import { startStands } from "./settings-search-stands.mjs";
 
@@ -361,12 +367,36 @@ async function searchOnAgent(browser, c, where) {
       narrow === c.width < 1200,
       `narrow ${narrow}`,
     );
+    await step(
+      where,
+      c.touch
+        ? 'the "/" badge is not drawn on a touch screen'
+        : 'the empty field shows the "/" badge',
+      () =>
+        assertKbd(
+          page,
+          !c.touch,
+          c.touch
+            ? 'A touch-only device has no "/" key, so the badge should not be drawn.'
+            : 'An empty field that does not hold the cursor should show the "/" badge.',
+        ),
+    );
 
     // 1. The field, a query that is a config key, the results inside the drawer.
     await step(where, "open the search and look for max_turns", async () => {
       await openSearch(page, { narrow });
       await searchFor(page, "max_turns");
     });
+    await step(
+      where,
+      'the "/" badge is gone while the field holds a query',
+      () =>
+        assertKbd(
+          page,
+          false,
+          "The badge should be gone while the field holds the cursor and a query.",
+        ),
+    );
     const layout = await page.evaluate(readResultsLayout);
     ok(where, "the results are drawn", !layout.missing, layout.missing);
     if (!layout.missing) {
@@ -410,6 +440,13 @@ async function searchOnAgent(browser, c, where) {
       "the ReAct loop tab is active",
       agentHash.startsWith("#/settings/agent"),
       agentHash,
+    );
+    await step(where, "the address names agent:max_turns", () =>
+      assertAddress(
+        page,
+        { field: "agent:max_turns", id: null },
+        "Choosing a setting should write its anchor into the address as field=.",
+      ),
     );
 
     // 3. Back to the field. A narrow shell goes through the head's arrow
@@ -455,6 +492,16 @@ async function searchOnAgent(browser, c, where) {
           focus,
           name: proxy,
         }),
+    );
+    await step(
+      where,
+      "the address names providers:proxy and the row demo",
+      () =>
+        assertAddress(
+          page,
+          { field: "providers:proxy", id: "demo" },
+          "Choosing a setting of a row should write the row as id= and the anchor as field= into the address.",
+        ),
     );
     if (c.touch) {
       await step(where, "no text control holds the cursor", () =>
@@ -550,12 +597,48 @@ async function searchOnAgent(browser, c, where) {
         `the form of ${row} is the one open, with the ring inside it`,
         () => assertRowForm(page, row),
       );
+      await step(where, `the address names the row ${row}`, () =>
+        assertAddress(
+          page,
+          { field: "models:temperature", id: row },
+          "Choosing a setting of a model's row should write that row as id= and the anchor as field= into the address.",
+        ),
+      );
       if (c.touch) {
         await step(where, "no text control holds the cursor", () =>
           assertNoTextControlFocused(page),
         );
       }
     }
+    // Leaving the revealed setting takes it out of the address: a rail click
+    // on the wide drawer, the head's arrow and a tap on a tile on the narrow
+    // shell.
+    await step(
+      where,
+      narrow
+        ? "the head's arrow and a tile tap take the setting out of the address"
+        : "a click on a section of the rail takes the setting out of the address",
+      async () => {
+        if (narrow) {
+          await backToTiles(page);
+          await assertAddress(
+            page,
+            { field: null },
+            "The head's back arrow should take the setting out of the address.",
+          );
+          await page.locator('[data-testid="settings-tile-agent"]').tap();
+        } else {
+          await page.locator('[data-testid="settings-tab-agent"]').click();
+        }
+        await assertAddress(
+          page,
+          { field: null, id: null },
+          narrow
+            ? "A tap on a tile should leave no setting in the address."
+            : "A click on a section of the rail should take the setting and the row out of the address.",
+        );
+      },
+    );
 
     // 7. The highlight, Enter, and an emptied field. A click in the field while
     // the results show leaves the highlighted result alone; Enter opens it;
@@ -626,6 +709,14 @@ async function searchOnAgent(browser, c, where) {
           page,
           { open: true, query: "", resultsShowing: false },
           "Emptying the field should clear the search and hide the results.",
+        );
+        await blurActive(page);
+        await assertKbd(
+          page,
+          !c.touch,
+          c.touch
+            ? 'A touch-only device has no "/" key, so the badge should stay away from the emptied field.'
+            : 'The "/" badge should come back once the field is empty and the cursor has left it.',
         );
         await searchFor(page, "proxy");
         await assertHighlight(
@@ -827,6 +918,131 @@ async function searchOnAgent(browser, c, where) {
         );
       },
     );
+
+    // 10. An address that names a setting opens it. Each link is a page of its
+    // own (a new document, with a query parameter of its own, so it is no
+    // navigation inside one) and reveals the setting as a choice does: the
+    // tab, the row and the folded block open, the ring, the cursor. An anchor
+    // that is gone only opens its tab.
+    const fresh = async (tag, hash) => {
+      const p = await ctx.newPage();
+      p.on("pageerror", (err) => fail(where, `page error: ${err.message}`));
+      await p.goto(`${BASE}/?lang=${c.lang}&${tag}#${hash}`);
+      await p.locator('[data-testid="settings-screen"]').waitFor();
+      return p;
+    };
+    const links = [
+      {
+        label: "a link to the Proxy URL of the row demo",
+        hash: "/settings/providers?id=demo&field=providers%3Aproxy",
+        anchor: "providers:proxy",
+        row: "demo",
+        name: proxy,
+      },
+      {
+        label: "a link to a field of an object tab",
+        hash: "/settings/agent?field=agent%3Amax_turns",
+        anchor: "agent:max_turns",
+        name: turns,
+      },
+    ];
+    for (const [i, link] of links.entries()) {
+      await step(where, `${link.label} reveals the setting`, async () => {
+        const p = await fresh(`link${i}`, link.hash);
+        try {
+          await assertRevealed(p, {
+            anchor: link.anchor,
+            row: link.row,
+            focus,
+            name: link.name,
+          });
+          if (link.row) {
+            await p.waitForFunction(rowFormWithAdvancedOpen, link.row, {
+              timeout: 3000,
+            });
+          }
+          if (c.touch) await assertNoTextControlFocused(p);
+        } finally {
+          await p.close();
+        }
+      });
+    }
+    await step(
+      where,
+      "a link to a setting that is gone only opens its tab",
+      async () => {
+        const p = await fresh("stale", "/settings/agent?field=agent%3Agone");
+        try {
+          await assertTabOnly(
+            p,
+            "agent",
+            "An address naming a setting that does not exist should only open its tab.",
+          );
+        } finally {
+          await p.close();
+        }
+      },
+    );
+
+    // 11. A group is a result of its own: the tab (and the row) opens, a
+    // folded group that is itself the target unfolds, and the group's
+    // fieldset is ringed and holds the cursor. The legends are read from the
+    // page. Each search starts on a page of its own, so the group stands as
+    // the page draws it.
+    for (const group of [
+      {
+        label: "the first group of the ReAct loop tab",
+        hash: "/settings/agent",
+        read: { prefix: "group:agent:" },
+      },
+      {
+        label: "the folded group of the row demo",
+        hash: "/settings/providers?id=demo",
+        read: { prefix: "group:providers:", row: "demo", folded: true },
+        row: "demo",
+        folded: true,
+      },
+    ]) {
+      const found = await step(
+        where,
+        `read the legend of ${group.label}`,
+        async () => {
+          const p = await fresh(`legend-${group.read.prefix}`, group.hash);
+          try {
+            return await readGroup(p, group.read);
+          } finally {
+            await p.close();
+          }
+        },
+      );
+      await step(
+        where,
+        `a search for "${found.legend}" opens ${group.label} and rings it`,
+        async () => {
+          const p = await fresh(`group-${group.read.prefix}`, "/settings");
+          try {
+            await openSearch(p, { narrow });
+            await searchFor(p, found.legend);
+            const name = await openResult(p, {
+              anchor: found.anchor,
+              row: group.row,
+            });
+            await assertRevealed(p, {
+              anchor: found.anchor,
+              row: group.row,
+              focus: "box",
+              name,
+            });
+            if (group.folded) {
+              await assertGroupOpen(p, found.anchor, group.row);
+            }
+            if (c.touch) await assertNoTextControlFocused(p);
+          } finally {
+            await p.close();
+          }
+        },
+      );
+    }
   } finally {
     await ctx.close();
   }
@@ -897,6 +1113,105 @@ async function searchOnRelay(browser, c, where) {
       hash.startsWith("#/settings/swarm"),
       hash,
     );
+    await step(
+      where,
+      "a link to a setting of the relay's own page reveals it",
+      async () => {
+        const link = await ctx.newPage();
+        link.on("pageerror", (err) =>
+          fail(where, `page error: ${err.message}`),
+        );
+        try {
+          await link.goto(
+            `${RELAY}/?lang=${c.lang}&link#/settings/swarm?field=swarm%3Apairing_tokens`,
+          );
+          await link.locator('[data-testid="settings-screen"]').waitFor();
+          await assertRevealed(link, {
+            anchor: "swarm:pairing_tokens",
+            focus: c.touch ? "box" : "control-or-box",
+            name: pairing,
+          });
+        } finally {
+          await link.close();
+        }
+      },
+    );
+  } finally {
+    await ctx.close();
+  }
+}
+
+/**
+ * The "/" badge on the narrow shell with a keyboard (a narrow desktop window):
+ * the touch cases never show it, so this is where it is seen on a shell of
+ * tiles.
+ */
+async function badgeOnNarrowKeyboard(browser) {
+  const where = "en 390x844 keyboard";
+  console.log(where);
+  const ctx = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    locale: "en-US",
+    extraHTTPHeaders: headers,
+  });
+  ctx.setDefaultTimeout(10000);
+  const page = await ctx.newPage();
+  page.on("pageerror", (err) => fail(where, `page error: ${err.message}`));
+  try {
+    await page.goto(`${BASE}/?lang=en#/settings`);
+    await step(where, "the tiles are drawn", () =>
+      page.locator(TILE_GRID).waitFor(),
+    );
+    await step(where, "the input is a mouse", () =>
+      assertTouchOnly(page, false),
+    );
+    await step(
+      where,
+      'the empty field shows the "/" badge over the tiles',
+      () =>
+        assertKbd(
+          page,
+          true,
+          'An empty field that does not hold the cursor should show the "/" badge on the narrow shell too.',
+        ),
+    );
+    await step(
+      where,
+      "the badge is gone while the field holds the cursor",
+      async () => {
+        await pressField(page);
+        await assertKbd(
+          page,
+          false,
+          "The badge should be gone while the field holds the cursor.",
+        );
+      },
+    );
+    await step(
+      where,
+      "the badge stays away while the field holds a query",
+      async () => {
+        await typeQuery(page, "proxy");
+        await assertKbd(
+          page,
+          false,
+          "The badge should be gone while the field holds a query.",
+        );
+      },
+    );
+    await step(
+      where,
+      "the badge comes back once the field is empty and left",
+      async () => {
+        await page.locator(SEARCH_INPUT).first().fill("");
+        await blurActive(page);
+        await assertKbd(
+          page,
+          true,
+          'The "/" badge should come back once the field is empty and the cursor has left it.',
+        );
+      },
+    );
   } finally {
     await ctx.close();
   }
@@ -946,6 +1261,13 @@ async function runSearch(browser) {
           fail(where + page, err.stack || String(err));
         }
       }
+    }
+  }
+  try {
+    await badgeOnNarrowKeyboard(browser);
+  } catch (err) {
+    if (!(err instanceof CaseAborted)) {
+      fail("en 390x844 keyboard", err.stack || String(err));
     }
   }
 }
