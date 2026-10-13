@@ -16,6 +16,10 @@ import {
 import { parseAppHash } from "../scheduler/hashRoute";
 import { initLocale } from "../i18n/i18n";
 import { OpenRailScreen } from "../nav/railEscape.fakes";
+import {
+  stubServer as stubServerFor,
+  type ServerState,
+} from "./settingsServer.fakes";
 
 const schema = {
   type: "object",
@@ -45,41 +49,11 @@ const schema = {
   },
 };
 
-type ServerState = {
-  config: Record<string, unknown>;
-  /** What PUT /coddy/config answers; ok unless a test says otherwise. */
-  put: { status: number; body: Record<string, unknown> };
-};
-
 let server: ServerState;
 
-/** A coddy serve behind fetch: the schema, the config document, a save. */
+/** A coddy serve behind fetch, reading the state this file keeps in `server`. */
 function stubServer() {
-  const fetch = vi.fn(async (path: string, init?: RequestInit) => {
-    const method = init?.method ?? "GET";
-    const reply = (status: number, body: unknown) => ({
-      ok: status >= 200 && status < 300,
-      status,
-      json: async () => structuredClone(body),
-    });
-    if (path === "/coddy/config/schema") return reply(200, schema);
-    if (path === "/coddy/config" && method === "GET") {
-      return reply(200, server.config);
-    }
-    if (path === "/coddy/config/validate") return reply(200, { ok: true });
-    if (path === "/coddy/config" && method === "PUT") {
-      if (server.put.status === 200) {
-        server.config = JSON.parse(String(init?.body)) as Record<
-          string,
-          unknown
-        >;
-      }
-      return reply(server.put.status, server.put.body);
-    }
-    return reply(200, { ok: true, models: [] });
-  });
-  vi.stubGlobal("fetch", fetch);
-  return fetch;
+  return stubServerFor(() => server);
 }
 
 function configReads(fetch: ReturnType<typeof stubServer>): string[] {
@@ -96,6 +70,7 @@ beforeEach(() => {
   initLocale("en");
   resetSettingsConfigForTests();
   server = {
+    schema,
     config: {
       providers: [{ name: "demo" }],
       models: [{ model: "demo/m1" }, { model: "demo/m2" }],
