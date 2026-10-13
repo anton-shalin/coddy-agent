@@ -1,6 +1,8 @@
 import { useCallback, useState, useSyncExternalStore } from "react";
 import { useT } from "../i18n/I18nProvider";
+import { landmarkAnchor } from "../settings/settingsSearch";
 import { SwitchField } from "../settings/SwitchField";
+import { SETTINGS_TEXTS } from "../settings/settingsTexts";
 import { telegramLaunch } from "../telegram/launch";
 import {
   disableNotifications,
@@ -67,9 +69,10 @@ export function NotificationsSetting() {
     <div
       className="appearance-notify-block"
       data-testid="appearance-notifications"
+      data-settings-anchor={landmarkAnchor("appearance", "notifications")}
     >
       <p className="appearance-section-label">
-        {t("appearance.notificationsLabel")}
+        {t(SETTINGS_TEXTS.appearanceNotifications.label)}
       </p>
       <SwitchField
         checked={on}

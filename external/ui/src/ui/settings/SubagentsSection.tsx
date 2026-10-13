@@ -21,6 +21,8 @@ import {
 } from "./subagentCatalog";
 import { fetchSubagentCatalog, setSubagentTrust } from "./subagentsApi";
 import { LegendWithHint } from "./FieldHint";
+import { landmarkAnchor } from "./settingsSearch";
+import { SETTINGS_TEXTS } from "./settingsTexts";
 import { IconShield } from "./icons";
 import {
   snapshotSettingsConfig,
@@ -133,10 +135,11 @@ export function SubagentsSection(props: {
       <fieldset
         className="settings-fieldset subagents-catalog-box"
         data-testid="subagents-catalog"
+        data-settings-anchor={landmarkAnchor("subagents", "catalog")}
       >
         <LegendWithHint
-          label={t("subagents.catalog.legend")}
-          description={t("subagents.catalog.description")}
+          label={t(SETTINGS_TEXTS.subagentsCatalog.label)}
+          description={t(SETTINGS_TEXTS.subagentsCatalog.desc)}
         />
         {error ? <p className="settings-error">{error}</p> : null}
         {trustError ? <p className="settings-error">{trustError}</p> : null}

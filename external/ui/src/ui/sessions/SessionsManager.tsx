@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "../components/useConfirm";
 import { useT } from "../i18n/I18nProvider";
 import { LegendWithHint } from "../settings/FieldHint";
+import { landmarkAnchor } from "../settings/settingsSearch";
+import { SETTINGS_TEXTS } from "../settings/settingsTexts";
 import { isClientDraftSessionId } from "./draftSessions";
 import {
   defaultSortOrder,
@@ -541,12 +543,13 @@ export function SessionsManager(props: {
     <fieldset
       className="settings-fieldset sessions-manager"
       data-testid="sessions-manager"
+      data-settings-anchor={landmarkAnchor("sessions_manager", "manage")}
     >
       {/* What the table is for goes behind the (i) of its legend, like every
           description of the settings drawer. */}
       <LegendWithHint
-        label={t("sessions.manage.legend")}
-        description={t("sessions.manage.lead")}
+        label={t(SETTINGS_TEXTS.sessionsManage.label)}
+        description={t(SETTINGS_TEXTS.sessionsManage.desc)}
       />
 
       <div className="sessions-manager-toolbar">

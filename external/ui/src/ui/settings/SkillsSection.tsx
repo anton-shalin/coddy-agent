@@ -12,6 +12,8 @@ import { sessionHeaders } from "./marketplaces";
 import { Switch } from "./Switch";
 import { SwitchField } from "./SwitchField";
 import { filterInstallableMatches } from "./installableMatches";
+import { landmarkAnchor } from "./settingsSearch";
+import { SETTINGS_TEXTS } from "./settingsTexts";
 import { schemaFieldDesc } from "./schemaI18n";
 import { useT } from "../i18n/I18nProvider";
 import { translate } from "../i18n/i18n";
@@ -371,8 +373,11 @@ export function SkillsSection(props: {
 
   return (
     <div className="settings-skills-section">
-      <fieldset className="settings-fieldset">
-        <legend>{t("skills.autoDiscovery.legend")}</legend>
+      <fieldset
+        className="settings-fieldset"
+        data-settings-anchor={landmarkAnchor("skills", "auto_discovery")}
+      >
+        <legend>{t(SETTINGS_TEXTS.skillsAutoDiscovery.label)}</legend>
         <SwitchField
           checked={autoDiscoveryOn}
           onChange={(next) => onChange({ ...value, auto_discovery: next })}
@@ -409,12 +414,13 @@ export function SkillsSection(props: {
       <fieldset
         className="settings-fieldset skills-installed-box"
         data-testid="skills-installed"
+        data-settings-anchor={landmarkAnchor("skills", "installed")}
       >
         {/* How else a skill gets here is about the whole list, so it is the
             (i) of the legend rather than a line inside the box. */}
         <LegendWithHint
-          label={t("skills.installed.legend")}
-          description={t("skills.install.cliHint")}
+          label={t(SETTINGS_TEXTS.skillsInstalled.label)}
+          description={t(SETTINGS_TEXTS.skillsInstalled.desc)}
         />
 
         <div className="skills-install">
