@@ -59,7 +59,9 @@ func TestMessageWithoutTextIsAnsweredAndLogged(t *testing.T) {
 
 	e.dm(t, 1, "@coddy_bot")
 	e.tickUntilQuiet(t, 2)
-	waitFor(t, func() bool { return strings.Contains(logs.String(), `msg="pachca: update ignored" reason="empty message"`) }, "the logged drop")
+	waitFor(t, func() bool {
+		return strings.Contains(logs.String(), `msg="pachca: update ignored" reason="empty message"`)
+	}, "the logged drop")
 	time.Sleep(50 * time.Millisecond)
 	if e.runner.promptCount() != 0 {
 		t.Fatal("a message without text ran a turn")
