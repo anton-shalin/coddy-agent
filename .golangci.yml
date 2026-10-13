@@ -2,11 +2,17 @@
 # `make lint` and `make lint-windows` run it three times each (Makefile, "Lint").
 version: "2"
 
-# Until this file existed the linters were golangci-lint's defaults. Naming the
-# set keeps it that way: a new golangci-lint release that widens the default
-# cannot fail the build unannounced, and widening it here is a deliberate edit.
+# Until this file existed the linters were golangci-lint's `standard` default:
+# these five. They are listed by name, so a golangci-lint release that widens
+# `standard` cannot fail the build unannounced; adding one is an edit here.
 linters:
-  default: standard
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
 
 # Formatters run inside `golangci-lint run` and report a file whose bytes differ
 # from what the formatter writes; `simplify` holds the tree to `gofmt -s`. Fix a

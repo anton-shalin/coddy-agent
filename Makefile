@@ -468,11 +468,16 @@ print-lint-tags-no-ui:
 # gofmt -s over every Go file git tracks, whatever its build constraints: no
 # build, no tags, a few seconds. CI's Lint job runs it as a step of its own.
 # A tracked file deleted from the working tree is skipped, as the linter
-# skips it.
+# skips it. The paths travel NUL-separated (any name, unquoted) and reach
+# gofmt 200 at a time: the whole list is longer than a Windows command line
+# takes, and Git Bash starts gofmt.exe through one.
 fmt-check:
-	@files=$$(git ls-files '*.go' | while IFS= read -r f; do [ ! -f "$$f" ] || printf '%s\n' "$$f"; done); \
-	if [ -z "$$files" ]; then echo "fmt-check: git ls-files lists no Go file" >&2; exit 1; fi; \
-	out=$$(gofmt -s -l $$files) || exit 1; \
+	@if ! git ls-files -- '*.go' | grep -q .; then \
+		echo "fmt-check: git ls-files lists no Go file" >&2; \
+		exit 1; \
+	fi; \
+	out=$$(git ls-files -z -- '*.go' | xargs -0 -n 200 sh -c \
+		'for f do shift; [ ! -f "$$f" ] || set -- "$$@" "$$f"; done; [ $$# -eq 0 ] || exec gofmt -s -l -- "$$@"' sh) || exit 1; \
 	if [ -n "$$out" ]; then \
 		echo "gofmt -s would reformat these files (fix: gofmt -s -w <file>):" >&2; \
 		echo "$$out" >&2; \
