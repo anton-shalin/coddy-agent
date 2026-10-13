@@ -1564,13 +1564,37 @@ describe("settings search", () => {
     typeQuery("proxy");
     const nearest = () => scrolledTo("nearest").length;
 
-    // The pointer enters the result that is already highlighted: nothing moves.
-    fireEvent.mouseEnter(options()[0]!);
+    // The pointer moves over the result that is already highlighted: nothing moves.
+    fireEvent.mouseMove(options()[0]!, { clientX: 40, clientY: 80 });
+    fireEvent.mouseMove(options()[0]!, { clientX: 42, clientY: 82 });
     const before = nearest();
     typeQuery("proxy url");
 
     expect(nearest()).toBeGreaterThan(before);
     expect(scrolledTo("nearest").at(-1)).toBe(options()[0]);
+  });
+
+  test("a pointer resting over the results does not take the highlight when the results change under it", async () => {
+    await drawer();
+    typeQuery("proxy");
+    const highlighted = () =>
+      options().filter((o) => o.getAttribute("aria-selected") === "true");
+
+    // A pointer moved onto a result highlights it.
+    fireEvent.mouseMove(options()[2]!, { clientX: 40, clientY: 200 });
+    fireEvent.mouseMove(options()[2]!, { clientX: 41, clientY: 202 });
+    expect(highlighted()).toEqual([options()[2]]);
+
+    // New results come in under the resting pointer: the browser reports a
+    // move at the same spot, which is no move of the operator's.
+    typeQuery("proxy url");
+    expect(highlighted()).toEqual([options()[0]]);
+    fireEvent.mouseMove(options()[2]!, { clientX: 41, clientY: 202 });
+    expect(highlighted()).toEqual([options()[0]]);
+
+    // Moving it again does.
+    fireEvent.mouseMove(options()[2]!, { clientX: 44, clientY: 206 });
+    expect(highlighted()).toEqual([options()[2]]);
   });
 
   test("emptying the field forgets the result chosen with the query, as Escape does", async () => {
@@ -1871,7 +1895,8 @@ describe("settings search", () => {
     }
     fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "ArrowUp" });
-    fireEvent.mouseEnter(options()[1]!);
+    fireEvent.mouseMove(options()[1]!, { clientX: 40, clientY: 120 });
+    fireEvent.mouseMove(options()[1]!, { clientX: 42, clientY: 122 });
     expect(options().length).toBeGreaterThan(0);
     expect(rowsKeyCalls.count).toBe(rendered);
 

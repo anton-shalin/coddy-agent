@@ -313,6 +313,14 @@ export function SettingsSearchResults(props: {
   // The highlighted result stays in view as the hits change and the arrows
   // move; a pointer moving it needs no scrolling.
   const byPointer = useRef(false);
+  // Where the pointer last moved over the results since they changed. A
+  // browser reports a move at the same spot when new results come in under a
+  // resting pointer; only a move to another spot is the operator's, so the
+  // first move seen after a change only records where the pointer is.
+  const pointerAt = useRef<{ x: number; y: number } | null>(null);
+  useLayoutEffect(() => {
+    pointerAt.current = null;
+  }, [hits]);
   useEffect(() => {
     if (byPointer.current) {
       byPointer.current = false;
@@ -378,7 +386,15 @@ export function SettingsSearchResults(props: {
                   className={`settings-hit${i === active ? " is-selected" : ""}`}
                   data-settings-target={entry.anchor ?? `tab:${entry.section}`}
                   data-settings-row={entry.row ?? undefined}
-                  onMouseEnter={() => {
+                  onMouseMove={(e) => {
+                    const last = pointerAt.current;
+                    pointerAt.current = { x: e.clientX, y: e.clientY };
+                    if (
+                      last === null ||
+                      (last.x === e.clientX && last.y === e.clientY)
+                    ) {
+                      return;
+                    }
                     // Only a move runs the effect that takes the flag down.
                     if (i !== active) {
                       byPointer.current = true;
