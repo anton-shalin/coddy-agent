@@ -182,6 +182,18 @@ function historyOpenInAddress(): boolean {
   return "historyOpen" in route && route.historyOpen;
 }
 
+/**
+ * Names a setting the address can take the operator to: the tab, the row of a
+ * list (none for a tab's own field) and the anchor of its box.
+ */
+function settingKey(
+  section: string | null,
+  row: string | null,
+  anchor: string,
+): string {
+  return JSON.stringify([section ?? "", row ?? "", anchor]);
+}
+
 export function Settings(props: {
   onClose: () => void;
   /** Called after the config is successfully saved so the app can re-fetch model metadata. */
@@ -190,6 +202,12 @@ export function Settings(props: {
   initialSection?: string | null;
   /** The row a list section has open, from `?id=` of that deep link. */
   initialItem?: string | null;
+  /**
+   * The setting the deep link names, from `?field=` (the anchor of its box):
+   * the tab and the row open as the link says, then the drawer takes the
+   * operator to the setting as a choice from the search does.
+   */
+  initialField?: string | null;
   /** The conversation on screen; the session table keeps it out of "delete all". */
   activeSessionId?: string;
   /** Session ids the table removed, so the shell can drop them from History. */
@@ -375,18 +393,20 @@ export function Settings(props: {
   }, [routeSection]);
 
   // Selecting a section (desktop tab or mobile tile), or one row of a list
-  // section, anchors it in the URL and puts the search results away, keeping
-  // the query.
+  // section, or one setting of a tab or a row, anchors it in the URL and puts
+  // the search results away, keeping the query. A rail click or a tile names
+  // neither a row nor a setting, so the address loses both.
   const selectSection = useCallback(
-    (id: string, row?: string) => {
+    (id: string, row?: string, field?: string) => {
       search.hide();
       setActiveTab(id);
       setMobileDetailId(id);
-      if (row === undefined) {
+      if (row === undefined && field === undefined) {
         setSettingsSectionHash(id);
       } else {
         setSettingsSectionHash(id, {
-          item: row,
+          item: row ?? null,
+          field: field ?? null,
           historySidebar: historyOpenInAddress(),
         });
       }
@@ -436,28 +456,77 @@ export function Settings(props: {
   );
 
   // Opening a result: the results hide and the query stays, the tab (and the
-  // row of a list) opens through the address, and the effect below takes the
-  // operator to the setting once the page draws it.
+  // row of a list) opens through the address, which also names the setting
+  // (`field=`), and the effect below takes the operator to the setting once
+  // the page draws it.
   const revealing = useRef<SettingsSearchEntry | null>(null);
+  // The setting the operator was last taken to, by a choice or by the address:
+  // the address read back after a choice names it again and is no second trip.
+  const takenTo = useRef<string | null>(null);
+  // Counts the trips an address asked for, as `choice` counts the search's.
+  const [addressTrips, setAddressTrips] = useState(0);
   const openResult = useCallback(
     (entry: SettingsSearchEntry) => {
       search.choose(entry.id);
       revealing.current = entry;
-      selectSection(entry.section, entry.row ?? undefined);
+      takenTo.current =
+        entry.anchor === null
+          ? null
+          : settingKey(entry.section, entry.row, entry.anchor);
+      selectSection(
+        entry.section,
+        entry.row ?? undefined,
+        entry.anchor ?? undefined,
+      );
     },
     [search, selectSection],
   );
   useEffect(() => {
     const entry = revealing.current;
     const root = rootRef.current;
-    if (choice === 0 || entry === null || root === null) {
+    if (entry === null || root === null) {
       return undefined;
     }
     return revealWhenReady(root, entry, {
       touchOnly: snapshotTouchOnly(),
       reducedMotion: prefersReducedMotion(),
     });
-  }, [choice]);
+  }, [choice, addressTrips]);
+
+  // An address that names a setting (a pasted link, a reload, a change of the
+  // hash, the Mini App's launch) is followed the way a choice is: the tab and
+  // the row open through the route, and the setting is found in the index by
+  // its anchor and its row. The index may not hold it yet (the first read is
+  // on its way), so the effect asks again when the index changes. A setting
+  // the index does not know - a link from another version - leaves the tab
+  // and the row open and nothing else happens.
+  const routeItem = props.initialItem ?? null;
+  const routeField = props.initialField ?? null;
+  const routeSetting =
+    routeField === null
+      ? null
+      : settingKey(routeSection, routeItem, routeField);
+  useEffect(() => {
+    if (routeField === null || routeSetting === null) {
+      takenTo.current = null;
+      return;
+    }
+    if (takenTo.current === routeSetting) {
+      return;
+    }
+    const entry = index.find(
+      (e) =>
+        e.anchor === routeField &&
+        e.section === routeSection &&
+        e.row === routeItem,
+    );
+    if (entry === undefined) {
+      return;
+    }
+    takenTo.current = routeSetting;
+    revealing.current = entry;
+    setAddressTrips((n) => n + 1);
+  }, [routeSetting, routeField, routeSection, routeItem, index]);
 
   // "/" puts the cursor in the search, as it does in the documentation reader,
   // unless a field has the cursor or a dialog is open. On the narrow shell
@@ -698,11 +767,22 @@ export function Settings(props: {
               // would otherwise report its closed form and undo the jump.
               onRouteItemChange={
                 section.id === (props.initialSection ?? "")
-                  ? (item) =>
+                  ? (item) => {
+                      // The row a search or a link opened keeps the setting
+                      // the address names; any other row, or none, leaves it
+                      // behind.
+                      const at = parseAppHash();
                       setSettingsSectionHash(section.id, {
                         item,
+                        field:
+                          at.branch === "settings" &&
+                          at.section === section.id &&
+                          at.item === item
+                            ? at.field
+                            : null,
                         historySidebar: historyOpenInAddress(),
-                      })
+                      });
+                    }
                   : undefined
               }
               hideBackLink
@@ -757,14 +837,13 @@ export function Settings(props: {
     return loading ? <SettingsSkeleton /> : null;
   };
 
-  const searchField = (showKbd: boolean) => (
+  const searchField = () => (
     <SettingsSearchField
       search={search}
       index={index}
       inputRef={inputRef}
       resultsId={resultsId}
       disabled={loading}
-      showKbd={showKbd}
       onOpen={openResult}
     />
   );
@@ -851,7 +930,7 @@ export function Settings(props: {
             </div>
           ) : (
             <div className="settings-grid-view">
-              <div className="settings-grid-search">{searchField(false)}</div>
+              <div className="settings-grid-search">{searchField()}</div>
               {showing ? (
                 <SettingsSearchResults
                   id={resultsId}
@@ -875,7 +954,7 @@ export function Settings(props: {
               active={showing || !activeSection ? "" : activeSection.id}
               onSelect={selectSection}
               placeholders={loading ? PLACEHOLDER_TABS : 0}
-              search={searchField(true)}
+              search={searchField()}
             />
             {/* The tab stays mounted under the results, hidden and deaf
                 (PaneHidden), so what is typed in it and which blocks are open

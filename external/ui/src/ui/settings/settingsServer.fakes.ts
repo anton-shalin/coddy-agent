@@ -334,15 +334,20 @@ export function resetPage(): void {
 export type MountOptions = PageOptions & {
   schema?: JsonSchema;
   config?: SettingsDoc;
-  /** The tab and the row the address names (`#/settings/<section>?id=<item>`). */
+  /**
+   * The tab, the row and the setting the address names
+   * (`#/settings/<section>?id=<item>&field=<anchor>`).
+   */
   section?: string | null;
   item?: string | null;
+  field?: string | null;
   onClose?: () => void;
   /**
    * The drawer follows the address as App makes it: `section` and `item` are
    * written to the hash first, and a change of the hash (the drawer's own
-   * writes included) is handed back to it as its `initialSection` and
-   * `initialItem`. Without it the two stay what they were mounted with.
+   * writes included) is handed back to it as its `initialSection`,
+   * `initialItem` and `initialField`. Without it the three stay what they were
+   * mounted with.
    */
   routed?: boolean;
   /** Rendered before the drawer, so it listens first (an OpenRailScreen). */
@@ -357,8 +362,8 @@ function RoutedSettings(props: {
   const read = () => {
     const route = parseAppHash();
     return route.branch === "settings"
-      ? { section: route.section, item: route.item }
-      : { section: null, item: null };
+      ? { section: route.section, item: route.item, field: route.field }
+      : { section: null, item: null, field: null };
   };
   const [route, setRoute] = useState(read);
   useEffect(() => {
@@ -370,6 +375,7 @@ function RoutedSettings(props: {
     onClose: props.onClose,
     initialSection: route.section,
     initialItem: route.item,
+    initialField: route.field,
     relay: props.relay,
   });
 }
@@ -387,7 +393,10 @@ function prepareDrawer(opts: MountOptions) {
   if (opts.routed) {
     // The address App would hold for this tab and row.
     if (opts.section) {
-      setSettingsSectionHash(opts.section, { item: opts.item ?? null });
+      setSettingsSectionHash(opts.section, {
+        item: opts.item ?? null,
+        field: opts.field ?? null,
+      });
     } else {
       window.location.hash = "#/settings";
     }
@@ -404,6 +413,7 @@ function prepareDrawer(opts: MountOptions) {
               onClose,
               initialSection: opts.section ?? null,
               initialItem: opts.item ?? null,
+              initialField: opts.field ?? null,
               relay,
             }),
       ),

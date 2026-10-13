@@ -57,18 +57,20 @@ function reducedMotionBlocks(source: string): string[] {
 }
 
 test("the setting the search opened is ringed as a state that reduced motion keeps", () => {
-  // The ring is the state itself, a box-shadow built from the accent, and the
-  // fade is only the animation on top of it.
+  // The ring is the state itself, an outline and an inset wash built from the
+  // accent, and the fade is only the animation on top of it.
   const ring = rules(css).find((r) =>
     r.selectors.includes(".is-search-target"),
   );
+  expect(ring?.body).toMatch(/outline: 2px solid [^;]*var\(--accent\)/);
   expect(ring?.body).toMatch(/box-shadow:[^;]*var\(--accent\)/);
   expect(ring?.body).toMatch(/animation: settings-search-target /);
-  // The animation it names ends on a ring that is gone.
+  // The animation it names ends on a ring that is gone, wash and outline both.
   const fade = css.slice(css.indexOf("@keyframes settings-search-target"));
-  expect(squash(fade.slice(0, fade.indexOf("}\n}") + 3))).toMatch(
-    /100% \{ box-shadow: [^;]*transparent[^;]*; \}/,
-  );
+  const frames = squash(fade.slice(0, fade.indexOf("}\n}") + 3));
+  const last = /100% \{([^}]*)\}/.exec(frames)?.[1] ?? "";
+  expect(last).toMatch(/outline-color: transparent;/);
+  expect(last).toMatch(/box-shadow: [^;]*transparent[^;]*;/);
 
   // Under reduced motion the animation goes and the ring holds still until the
   // script takes the class off. The rule joins the settings block: the swarm
@@ -122,4 +124,37 @@ test("the settings search field and its results share the documentation search's
       settings,
     );
   }
+});
+
+test("the ring stands off the box it marks, fades in and out, and a box scrolled to keeps room for it", () => {
+  const ring = rules(css).find((r) =>
+    r.selectors.includes(".is-search-target"),
+  );
+  // Clear of the box: the label and the switch of a field never touch it.
+  expect(ring?.body).toMatch(/outline-offset: 3px;/);
+  // It comes in over a moment before it holds, and goes out at the end.
+  const fade = css.slice(css.indexOf("@keyframes settings-search-target"));
+  const frames = squash(fade.slice(0, fade.indexOf("}\n}") + 3));
+  const first = /0% \{([^}]*)\}/.exec(frames)?.[1] ?? "";
+  expect(first).toMatch(/outline-color: transparent;/);
+  expect(first).toMatch(/box-shadow: [^;]*transparent[^;]*;/);
+  expect(frames).toMatch(/\d+(?:\.\d+)?% \{[^}]*var\(--accent\)/);
+  // A box scrolled to the top or the bottom of its area leaves the room the
+  // ring (3px of offset and 2px of line) needs inside the area's 8px padding.
+  const box = rules(css).find((r) =>
+    r.selectors.includes("[data-settings-anchor]"),
+  );
+  expect(box?.body).toMatch(/scroll-margin-block: 12px;/);
+});
+
+test("a box the reveal focused shows no browser focus ring of its own once its ring has gone", () => {
+  // The reveal focuses a group or a box by script and takes tabindex off again
+  // on blur, so it is no tab stop: the ring is its indicator. Without this
+  // rule the browser's blue auto ring appears the moment the accent ring ends.
+  const idle = rules(css).find((r) =>
+    r.selectors.includes(
+      "[data-settings-anchor]:focus-visible:not(.is-search-target)",
+    ),
+  );
+  expect(idle?.body).toBe("outline: none;");
 });

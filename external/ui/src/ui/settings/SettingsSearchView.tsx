@@ -20,6 +20,11 @@ import {
 } from "react";
 import { useT } from "../i18n/I18nProvider";
 import {
+  serverSnapshotTouchOnly,
+  snapshotTouchOnly,
+  subscribeTouchOnly,
+} from "../shellBreakpoint";
+import {
   descriptionLine,
   markWords,
   searchSettings,
@@ -172,13 +177,19 @@ export function SettingsSearchField(props: {
   inputRef: RefObject<HTMLInputElement | null>;
   resultsId: string;
   disabled: boolean;
-  /** The "/" hint beside an empty field: the wide drawer, where there is a keyboard. */
-  showKbd: boolean;
   onOpen: (entry: SettingsSearchEntry) => void;
 }) {
-  const { search, index, inputRef, resultsId, disabled, showKbd, onOpen } =
-    props;
+  const { search, index, inputRef, resultsId, disabled, onOpen } = props;
   const { t } = useT();
+  // The "/" badge advertises the key that puts the cursor here, so it shows
+  // while the cursor is elsewhere and the field is empty, on every width (a
+  // narrow desktop window has a keyboard), and never on a touch-only device.
+  const touchOnly = useSyncExternalStore(
+    subscribeTouchOnly,
+    snapshotTouchOnly,
+    serverSnapshotTouchOnly,
+  );
+  const [focused, setFocused] = useState(false);
   const state = useSettingsSearchState(search);
   const { hits } = search.answer(index);
   const showing = resultsShowing(state);
@@ -256,11 +267,15 @@ export function SettingsSearchField(props: {
           // is a cleared search, as Escape leaves it.
           e.target.value === "" ? search.clear() : search.type(e.target.value)
         }
-        onFocus={bringBack}
+        onFocus={() => {
+          setFocused(true);
+          bringBack();
+        }}
+        onBlur={() => setFocused(false)}
         onClick={bringBack}
         onKeyDown={onKeyDown}
       />
-      {showKbd && state.query === "" ? (
+      {!touchOnly && !focused && state.query === "" ? (
         <kbd className="settings-search-kbd" aria-hidden="true">
           /
         </kbd>

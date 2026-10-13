@@ -28,7 +28,10 @@ import {
 import {
   drawingDifferences,
   drawnBoxes,
+  drawnLegends,
+  legendsOutsideTheIndex,
   type DrawnBox,
+  type DrawnLegend,
 } from "./settingsDrawing.fakes";
 import {
   deriveSettingsSections,
@@ -1761,6 +1764,7 @@ describe("settings search index matches the drawing", () => {
     /** The entries of the index that stand for this page. */
     expected: SettingsSearchEntry[];
     drawn: DrawnBox[];
+    legends: DrawnLegend[];
   };
 
   const where = (sc: Scenario, page: Page) =>
@@ -1810,6 +1814,7 @@ describe("settings search index matches the drawing", () => {
       row,
       expected: entriesOf(index, section, row),
       drawn: drawnBoxes(document.body),
+      legends: drawnLegends(document.body),
     };
     expect(view.fetch.unexpected, "requests the stub refused").toEqual([]);
     view.unmount();
@@ -1935,6 +1940,100 @@ describe("settings search index matches the drawing", () => {
     ]);
     expect(discovery.names).toEqual([messagesEn["mcp.discovery.legend"]]);
   }, 240_000);
+
+  test("no legend and no section label a tab or a row form draws escapes the index: each is the heading of an indexed box", async () => {
+    let seen = 0;
+    for (const sc of SCENARIOS) {
+      for (const page of await pagesOf(sc)) {
+        expect(
+          legendsOutsideTheIndex(page.expected, page.legends),
+          where(sc, page),
+        ).toEqual([]);
+        seen += page.legends.length;
+      }
+    }
+    expect(seen).toBeGreaterThan(100);
+
+    // The kinds of heading the drawer has, each of them read: a block of the
+    // schema's layout (folded or not), the fieldset of a nested object and of
+    // a list, the fieldsets of a provider's and a model's form, a hand-drawn
+    // block and the labels of the Appearance sheet.
+    const agent = await pagesOf(AGENT_EN);
+    const legends = (section: string, row: string | null) =>
+      agent
+        .find((p) => p.section === section && p.row === row)!
+        .legends.map((l) => `${l.text} | ${l.anchor}`);
+    expect(legends("agent", null)).toContain(
+      `${messagesEn["settings.group.agent.turn"]} | group:agent:turn`,
+    );
+    expect(legends("providers", "openai")).toContain(
+      `${messagesEn["settings.providers.group.advanced"]} | group:providers:advanced`,
+    );
+    expect(legends("models", "demo/qwen3-27b")).toContain(
+      `${messagesEn["settings.models.group.generation"]} | group:models:generation`,
+    );
+    expect(legends("compaction", null)).toContain(
+      "Tool result eviction | compaction:result_eviction",
+    );
+    expect(legends("logger", null)).toContain(
+      "Component levels | logger:levels",
+    );
+    expect(legends("mcp_servers", null)).toContain(
+      `${messagesEn["mcp.discovery.legend"]} | ${landmarkAnchor("mcp_servers", "discovery")}`,
+    );
+    const labels = legends("appearance", null);
+    expect(labels).toContain(
+      `${messagesEn["appearance.themeLabel"]} | ${landmarkAnchor("appearance", "theme")}`,
+    );
+    expect(labels).toHaveLength(3);
+  }, 240_000);
+
+  test("the legend check fails a heading whose box lost its anchor and a box whose entry is gone", async () => {
+    const index = indexFor(AGENT_EN);
+    const open = async () => {
+      const view = await openSettings({
+        schema: AGENT_SCHEMA,
+        section: "agent",
+      });
+      await settled();
+      return view;
+    };
+    const turn = () => screen.getByTestId("settings-group-turn");
+    const check = () =>
+      legendsOutsideTheIndex(
+        entriesOf(index, "agent", null),
+        drawnLegends(document.body),
+      );
+
+    const view = await open();
+    expect(check()).toEqual([]);
+
+    // The group's fieldset loses its anchor: its legend stands in no box.
+    const anchor = turn().getAttribute("data-settings-anchor")!;
+    turn().removeAttribute("data-settings-anchor");
+    expect(check()).toEqual([
+      `the legend "${messagesEn["settings.group.agent.turn"]}" is drawn in no box`,
+    ]);
+    turn().setAttribute("data-settings-anchor", anchor);
+    expect(check()).toEqual([]);
+
+    // The index loses the group: the legend stands in a box with no entry.
+    const lost = legendsOutsideTheIndex(
+      entriesOf(index, "agent", null).filter((e) => e.anchor !== anchor),
+      drawnLegends(document.body),
+    );
+    expect(lost).toEqual([
+      `the legend "${messagesEn["settings.group.agent.turn"]}" stands in ${anchor}, which has no entry`,
+    ]);
+
+    // The group is renamed in the drawing only: its entry no longer names it.
+    turn().querySelector(
+      "legend .settings-legend-line",
+    )!.firstChild!.textContent = "Turns";
+    expect(check()).toHaveLength(1);
+    expect(check()[0]).toContain('the legend "Turns"');
+    view.unmount();
+  }, 120_000);
 
   test("an empty list, a list of two and a list edited after the index was built all agree with the index", async () => {
     const index = indexFor(AGENT_EN);

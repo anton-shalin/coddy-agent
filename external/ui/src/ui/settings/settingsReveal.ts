@@ -12,8 +12,9 @@ import type { SettingsSearchEntry } from "./settingsSearch";
 
 /**
  * Dispatched (bubbling) from a setting's box before it is scrolled to. A
- * folded block above the box opens on it, so what the operator was sent to is
- * not inside a hidden body.
+ * folded block above the box opens on it, and so does the box itself when it is
+ * a folded block, so what the operator was sent to is not inside a hidden body
+ * and a group that is the target is not left shut.
  */
 export const SETTINGS_REVEAL_EVENT = "coddy:settings-reveal";
 
@@ -85,6 +86,18 @@ function findPane(
       (pane) => pane.dataset["settingsTab"] === entry.section,
     ) ?? null
   );
+}
+
+/** A fold that is shut: its legend shows and its body is hidden under it. */
+const SHUT_FOLD = ".settings-fieldset--collapsible:not(.is-open)";
+
+/**
+ * Whether the box can be seen: no ancestor is hidden, and the box is not
+ * itself a fold that is shut (a group chosen by its name is the fold, and its
+ * body is hidden under it).
+ */
+function isShown(box: HTMLElement): boolean {
+  return box.closest("[hidden]") === null && !box.matches(SHUT_FOLD);
 }
 
 const CONTROLS =
@@ -179,13 +192,15 @@ function nameForFocus(box: HTMLElement, name: string): () => void {
 /**
  * Takes the operator to the setting of an entry once the page can show it:
  * waits (within REVEAL_WAIT_MS, with a MutationObserver) until the box is
- * drawn, asks a folded block above it to open and waits until nothing above it
- * is hidden, then, a frame later, scrolls it to the middle of its scroll area,
- * rings it for SEARCH_TARGET_MS and moves the focus. A field takes the control
- * named by its primary name on a fine pointer, and the box itself on a
- * touch-only device (no keyboard rises), as every tab, row, block and
- * landmark does. A tab has no box: the scroll area of the tab is taken to its
- * top and focused, with no ring. It gives up quietly when the budget runs out.
+ * drawn, asks a folded block above it (or the box itself, a group that folds)
+ * to open and waits until nothing above it is hidden, then, a frame later,
+ * scrolls it to the middle of its scroll area (by its top when it is taller
+ * than the area), rings it for SEARCH_TARGET_MS and moves the focus. A field
+ * takes the control named by its primary name on a fine pointer, and the box
+ * itself on a touch-only device (no keyboard rises), as every tab, row, block
+ * and landmark does. A tab has no box: the scroll area of the tab is taken to
+ * its top and focused, with no ring. It gives up quietly when the budget runs
+ * out.
  * Returns what cancels it, the ring included.
  */
 export function revealWhenReady(
@@ -221,11 +236,12 @@ export function revealWhenReady(
     if (target === null) {
       return;
     }
-    if (target.closest("[hidden]") !== null) {
+    if (!isShown(target)) {
       // A folded block opens on the event, and the hidden attribute going away
       // is the mutation that brings the next attempt. Asking again at every
       // mutation costs nothing: a fold that is open ignores it, and one that
-      // was not listening yet hears it.
+      // was not listening yet hears it. The box itself may be the fold: the
+      // event reaches it first.
       target.dispatchEvent(new Event(SETTINGS_REVEAL_EVENT, { bubbles: true }));
       return;
     }
@@ -236,7 +252,7 @@ export function revealWhenReady(
         return;
       }
       const again = locate();
-      if (again === null || again.closest("[hidden]") !== null) {
+      if (again === null || !isShown(again)) {
         attempt();
         return;
       }
@@ -254,7 +270,13 @@ export function revealWhenReady(
         target.scrollTop = 0;
       }
     } else {
-      target.scrollIntoView?.({ block: "center", behavior });
+      // The middle of the area, unless the box is taller than it: then its
+      // top, so its name and the first of its fields are what shows.
+      const area = target.closest<HTMLElement>(".settings-scroll");
+      const tall =
+        area !== null &&
+        target.getBoundingClientRect().height > area.clientHeight;
+      target.scrollIntoView?.({ block: tall ? "start" : "center", behavior });
       ring(target);
     }
     const name = entry.names[0] ?? "";

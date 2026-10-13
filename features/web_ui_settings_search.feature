@@ -34,3 +34,17 @@ Feature: Settings can be searched
 
   Scenario: A relay's own settings are searched
     Then a relay's settings are searched too
+
+  Scenario: A link to a highlighted setting opens it highlighted
+    Then choosing a result writes the setting into the address, next to its row, and a tab writes none
+    And an address that names a setting reveals it as a choice does: the tab, the ring, the scroll and the control
+    And an address that names a field of a row opens the row, unfolds its block and reveals the field
+
+  Scenario: A group of settings is found by its name
+    Then a folded group chosen from the results opens, is scrolled to whole and ringed, and takes the cursor as the named fieldset
+    And a block of a tab is found by its name and takes the ring, and so does a block of a model's row
+    And a nested object and a list are found by their legends, and the whole fieldset is scrolled to and ringed
+
+  Scenario: The slash shortcut is advertised in the empty field
+    Then the slash badge shows in an empty field that has no cursor, and goes while the field has the cursor or holds text
+    And a touch-only device has no key to press, so no badge is drawn on any width

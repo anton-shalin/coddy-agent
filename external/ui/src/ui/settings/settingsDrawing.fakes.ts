@@ -152,6 +152,62 @@ export function drawnBoxes(root: ParentNode): DrawnBox[] {
   });
 }
 
+/** A legend or a section label the page draws, and the box it stands in. */
+export type DrawnLegend = {
+  text: string;
+  /** The nearest box above it (or itself): null when it stands in none. */
+  anchor: string | null;
+};
+
+/** What a heading of a block is: a fieldset's legend, or a hand-drawn section label. */
+const HEADINGS = "legend, .appearance-section-label";
+
+/**
+ * Every legend and section label of the page with the box it belongs to, so
+ * that a heading drawn outside the index can be found whatever drew it.
+ */
+export function drawnLegends(root: ParentNode): DrawnLegend[] {
+  return [...root.querySelectorAll<HTMLElement>(HEADINGS)].map((heading) => ({
+    text: squash(heading.textContent),
+    anchor:
+      heading.closest(ANCHORED)?.getAttribute("data-settings-anchor") ?? null,
+  }));
+}
+
+/**
+ * The headings of the page that are not the heading of an indexed box: one
+ * that stands in no box, one whose box has no entry, and one its entry does not
+ * name. Every legend the drawer draws is a result in its own right, so none
+ * may escape.
+ */
+export function legendsOutsideTheIndex(
+  entries: readonly SettingsSearchEntry[],
+  legends: readonly DrawnLegend[],
+): string[] {
+  const byAnchor = new Map<string, SettingsSearchEntry>();
+  for (const e of entries) {
+    if (e.anchor !== null) {
+      byAnchor.set(e.anchor, e);
+    }
+  }
+  const out: string[] = [];
+  for (const { text, anchor } of legends) {
+    if (anchor === null) {
+      out.push(`the legend "${text}" is drawn in no box`);
+      continue;
+    }
+    const entry = byAnchor.get(anchor);
+    if (entry === undefined) {
+      out.push(`the legend "${text}" stands in ${anchor}, which has no entry`);
+    } else if (!entry.names.includes(text)) {
+      out.push(
+        `the legend "${text}" stands in ${anchor}, whose entry is named ${JSON.stringify(entry.names)}`,
+      );
+    }
+  }
+  return out;
+}
+
 const sorted = (texts: readonly string[]) => [...texts].sort();
 const same = (a: readonly string[], b: readonly string[]) =>
   JSON.stringify(sorted(a)) === JSON.stringify(sorted(b));
