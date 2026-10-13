@@ -1,4 +1,5 @@
 import {
+  useContext,
   useEffect,
   useId,
   useLayoutEffect,
@@ -6,9 +7,9 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { createPortal } from "react-dom";
 
 import { useT } from "../i18n/I18nProvider";
+import { PaneHidden, PanePortal } from "../components/PanePortal";
 import { useEscapeCloses } from "../components/useEscapeCloses";
 
 /** Space between the (i) and its tip, and the least the tip keeps from the
@@ -31,6 +32,10 @@ type TipPosition = { left: number; top: number; placement: "above" | "below" };
  * be clipped by it, or widen it and bring out a stray scrollbar. It exists
  * only while open, and the (i) names it through aria-describedby then, so a
  * screen reader hears the description when the control takes focus.
+ *
+ * While its pane is hidden (PaneHidden) the tip is not drawn and nothing the
+ * page does closes it: it stays open, and is placed against the (i) again
+ * when the pane is shown.
  */
 export function FieldHint(props: {
   text: ReactNode;
@@ -42,15 +47,21 @@ export function FieldHint(props: {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const tipRef = useRef<HTMLDivElement>(null);
   const tipId = useId();
+  const hidden = useContext(PaneHidden);
   // A tap opens the tip for good (until a tap elsewhere): the mouse events a
   // touch screen synthesizes around it must not close it again.
   const pinned = useRef(false);
 
   // Measure the tip once it is in the document, then place it: above the
-  // (i) when it fits, below otherwise, never past the viewport edges.
+  // (i) when it fits, below otherwise, never past the viewport edges. A tip
+  // not drawn because its pane is hidden is measured afresh when it is shown.
   useLayoutEffect(() => {
     if (!open) {
       pinned.current = false;
+      setPosition(null);
+      return;
+    }
+    if (hidden) {
       setPosition(null);
       return;
     }
@@ -80,13 +91,15 @@ export function FieldHint(props: {
         : Math.max(VIEWPORT_MARGIN, below),
       placement: above ? "above" : "below",
     });
-  }, [open]);
+  }, [open, hidden]);
 
   // Escape takes the tip down before the drawer under it hears the key.
   useEscapeCloses(open, () => setOpen(false));
 
+  // Only while the tip is open and its pane is shown: the scroll of what
+  // covers a hidden pane must not close a tip held for it.
   useEffect(() => {
-    if (!open) {
+    if (!open || hidden) {
       return;
     }
     const close = () => setOpen(false);
@@ -106,7 +119,7 @@ export function FieldHint(props: {
       document.removeEventListener("mousedown", onPointerDown);
       document.removeEventListener("touchstart", onPointerDown);
     };
-  }, [open]);
+  }, [open, hidden]);
 
   const aria = props.label
     ? t("settings.fieldHint.aria", { label: props.label })
@@ -168,25 +181,24 @@ export function FieldHint(props: {
           <circle cx="8" cy="4.9" r="0.85" fill="currentColor" />
         </svg>
       </button>
-      {open
-        ? createPortal(
-            <div
-              ref={tipRef}
-              id={tipId}
-              role="tooltip"
-              className={`field-hint-tip${position ? ` is-${position.placement}` : ""}`}
-              data-testid="field-hint-tip"
-              style={
-                position
-                  ? { left: position.left, top: position.top }
-                  : { left: 0, top: 0, visibility: "hidden" }
-              }
-            >
-              {props.text}
-            </div>,
-            document.body,
-          )
-        : null}
+      {open ? (
+        <PanePortal>
+          <div
+            ref={tipRef}
+            id={tipId}
+            role="tooltip"
+            className={`field-hint-tip${position ? ` is-${position.placement}` : ""}`}
+            data-testid="field-hint-tip"
+            style={
+              position
+                ? { left: position.left, top: position.top }
+                : { left: 0, top: 0, visibility: "hidden" }
+            }
+          >
+            {props.text}
+          </div>
+        </PanePortal>
+      ) : null}
     </>
   );
 }

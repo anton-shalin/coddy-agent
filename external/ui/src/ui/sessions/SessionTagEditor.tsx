@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { PanePortal } from "../components/PanePortal";
 import { useT } from "../i18n/I18nProvider";
 import {
   addTag,
@@ -19,7 +19,8 @@ import {
  * Every change is reported at once rather than behind a Save: there is nothing
  * here to review, and a dialog that has to be confirmed is a dialog that gets
  * left open. It is rendered into the document for the same reason the row menu
- * is: the drawer clips what overflows it.
+ * is: the drawer clips what overflows it. Under a hidden pane it is not drawn,
+ * and its draft and open state are kept for when the pane is shown.
  */
 export function SessionTagEditor(props: {
   open: boolean;
@@ -221,7 +222,9 @@ export function SessionTagEditor(props: {
     </>
   );
 
-  return typeof document === "undefined"
-    ? editor
-    : createPortal(editor, document.body);
+  return typeof document === "undefined" ? (
+    editor
+  ) : (
+    <PanePortal>{editor}</PanePortal>
+  );
 }
