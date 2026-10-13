@@ -112,7 +112,7 @@ Already on disk:
   список не попадают, а при **`tools.background.enable`**, равном false, раздел не пишется.
 
 Блок никогда не сохраняется. Он добавляется на границе отправки **`provider.Stream`**, рядом с
-проекцией вытеснения результатов read/grep, и рабочий срез сообщений, к которому цикл продолжает
+проекцией вытеснения результатов, и рабочий срез сообщений, к которому цикл продолжает
 добавлять сообщения, его никогда не видит. Поэтому некэшированными остаются только последние
 несколько сотен токенов запроса, а диалог перед ними попадает в кэш.
 
@@ -137,17 +137,23 @@ Already on disk:
 истории; его блок несёт два раздела, которые не печатает ни один шаблон, то есть отчёт памяти и
 выполняющиеся фоновые задачи, и не добавляется, если нет ни того, ни другого.
 
-### Вторая половина - вытеснение результатов read/grep
+### Вторая половина - вытеснение результатов
 
 Заморозка системного сообщения даёт только половину стабильного префикса. Вытеснение результатов
-read/grep (**`internal/agent/result_eviction.go`**) пишет заглушки **в середину** повторно
+чтений, поисков grep и просмотров `glob`, `print_tree`, `websearch` и `webfetch`
+(**`internal/agent/result_eviction.go`**) пишет заглушки **в середину** повторно
 отправляемой истории, и это так же надёжно сбрасывает кэш начиная с этого места. Со скользящим
 рабочим окном по умолчанию так раньше происходило почти на каждом шаге, и диалог обрабатывался
 заново каждый раз, даже при замороженном промпте. **`compaction.result_eviction.start_percent`** (по умолчанию 50)
 откладывает проекцию, пока оценка контекста не достигнет этой доли **`max_context_tokens`** модели;
 ниже порога история уходит ровно в том виде, в каком она уже есть у провайдера. Решение принимается
 по **необрезанным** сообщениям, поэтому обрезка не может вернуть оценку ниже отметки и заставить
-проекцию метаться между двумя формами. См.
+проекцию метаться между двумя формами. Запрос, который провайдер отклонил как слишком большой,
+открывает этот порог до конца хода (**`Agent.evictionForced`**): кэш, который порог защищает,
+теряет смысл, когда провайдер отказался читать префикс. Сворачивание внутри хода
+(**`compact_in_turn.go`**) устроено по тому же компромиссу: оно переписывает историю только на
+пороге сжатия, а строка сводки, которую оно пишет, начинается с промпта, поэтому переписанный
+префикс по-прежнему открывается тем, о чём модель спросили. См.
 [compaction.md](../features/compaction.md).
 
 ### Как прочитать попадание в кэш
@@ -282,18 +288,99 @@ messages: [
    - **Empty-assistant re-issue.** A step that returns neither answer text nor
      a tool call is replayed once as the identical request; the empty assistant
      turn is removed from the LLM-facing message slice (the transcript keeps
-     it, with signed thinking preserved). A reply stopped at `max_tokens` with
-     only whitespace content is terminal — recovery is not attempted. Consumes
-     one slot.
+     it, with signed thinking preserved). A reply stopped at `max_tokens` is
+     not replayed: the same request would hit the same cap, and the
+     output-limit recovery below handles it. Consumes one slot.
    - **Wording nudges.** If the re-issue also comes back empty, up to
      two nudges (**`maxEmptyAssistantContinuations`**) are sent, each consuming
      one slot and a normal **`max_turns`** iteration. The plain replay uses
      a normal iteration too; transport retries stay inside that iteration.
      The nudge projection also removes the empty assistant message from the
-     LLM-facing history. If auto-compaction rebuilds that history between
-     attempts, the pending recovery projection and its nudges are restored;
-     signed reasoning stays in the transcript. After the budget or nudge limit is exhausted the turn
+     LLM-facing history. If an auto-compaction rebuilds that history between
+     attempts, the pending recovery projection and the nudges that still stand
+     at its end are restored; a provider recovery rebuilds nothing, it runs the
+     request that failed again. Signed reasoning stays in the transcript. After the budget or nudge limit is exhausted the turn
      ends with **`StopReasonRefused`**.
+   - **Output-limit recovery.** A step that stops at `max_tokens`
+     (`finish_reason: "length"`) does not end the turn and is never replayed,
+     because the same request would hit the same cap. It is answered with a
+     message appended at the end of the history, local to the request and
+     never persisted, chosen by what the step left behind (output_limit.go):
+     - Nothing to act on (no visible text, no tool call - only thinking, or
+       nothing): **`outputLimitNudge`** - keep the reasoning short, split a
+       large file write or edit into several smaller tool calls. The empty step
+       stays in the transcript and is left out of every request of the turn.
+     - Visible text that stops partway: **`outputLimitContinueNudge`** -
+       continue exactly where it stopped without repeating, keep the step
+       short. The text stays in the transcript and in the history, because the
+       user read it. The continuation is the next assistant message, and the
+       cut one is stored marked `truncated` (`llm.Message.Truncated`), both
+       exactly as streamed, the whitespace at the join included
+       (`session.StripAssistantContent`); a truncated text takes no placement
+       markers of shared files, and the message that completes the answer
+       closes with them.
+       No event marks the seam: a live surface appends the chunks to the
+       message it is drawing. These readers of the transcript join the two
+       with nothing between, passing over a step that came back empty between
+       them (`session.FollowsTruncated`): every history built from the
+       transcript - the next turn's, and a rebuild within the turn after a
+       compaction (`foldSplitAnswers` in `buildMessages`); a reloaded
+       transcript in the
+       web UI (`transcriptFromMessages.ts`), which keeps them apart only where
+       the stream drew them apart - the continuation began with thinking of its
+       own, or a notice stands between them; and the answer a turn hands over - a subagent's report,
+       the reply of a non-streaming request, the Stop hook's
+       `last_assistant_message` (`session.ContinuedAnswer`, without the
+       placement markers). A paged read of the history never starts or ends a
+       page between them (`session.PageMessages`). A replay to the console, an
+       ACP client or a `--remote` console and an export show the parts as the
+       messages they are stored as. Telegram and Pachca read
+       nothing back: they stream the whole answer into one message. The goal
+       supervisor's digest of a turn (`goal_digest.go`) does not join them: it
+       reads each assistant message on its own, so the parts before the last
+       are steps of the turn and the last part alone is its closing claim.
+       Assistant messages that follow each other without that mark (the text
+       before a cut-off tool call and the step after it, an answer a provider
+       failure cut off and the step run again after it) are joined in the
+       history with a blank line, so a later turn never sends two assistant
+       messages in a row, which chat templates that insist on alternation
+       refuse; a step with signed reasoning keeps its message. An answer of its
+       own a provider failure cut off is not marked `truncated`: the stream
+       ended wherever the failure hit it, and the step run again starts the
+       answer over as often as it goes on from the last character. A part of a
+       continued answer a provider failure cut off is marked: the step run
+       again is asked to go on from it, so it stays one text with the rest.
+       The requests of the turn itself are not touched: the local message
+       stands between the two there.
+     - A last tool call the output limit cut off (**`cutOffToolCall`**): its
+       arguments are there and are not a whole JSON document. Empty arguments
+       are a call that takes none and runs. **`cutOffToolCallNudge`** names the tool (a
+       plain identifier only), says the call was cut off and not run, and asks
+       for several smaller calls. Only the last call can be cut; an earlier
+       call that does not parse is a model error and runs, and fails, as
+       before. The cut call never runs - no permission prompt, no hooks - and
+       is left out of the stored assistant message, so the tool-call pairing
+       stays whole and no provider is sent half a JSON document. Its pending
+       row closes as `failed` and its record in the tool-call store says why.
+       The calls before it were written whole and run in order; their results
+       come first, then the message.
+
+     The history only grows at its end, so the cached prefix is untouched. The
+     loop keeps one ordered list of the messages that stand at the end of the
+     working history (**`standing`**): every recovery appends the message it
+     sent, in the words it was sent in, and a step that leaves text or a tool
+     call in the history clears it, since what came before was answered. A
+     history rebuilt from the transcript between the attempts (an
+     auto-compaction, or the compaction after a refused request) puts that list
+     back (**`restoreRecoveries`**) and leaves the empty steps out again. At most
+     **`maxOutputLimitRecoveries`** (2) cut-off steps in a row. Each consumes
+     one slot and a normal **`max_turns`** iteration (on the last iteration the
+     turn ends on the output limit, not on the step limit), so
+     `llm_retry_max: 0` turns it off. A follow-up and a step that is not cut
+     off reset the count; a cut-off step that also ran whole calls does not,
+     though those calls restart the allowance. Subagents and scheduled runs
+     take the same path. When the retries are spent the turn ends with
+     **`StopReasonMaxTokens`** and a notice (**`outputLimitNotice`**).
    - **Provider recovery.** A call that failed because of the provider's lane
      (**`llm.IsTransientProviderError`**: 5xx, a cut or silent stream - an event
      cut inside its JSON included, a stream frame that is not JSON at all not -
@@ -303,19 +390,41 @@ messages: [
      calls, a **`notice`** row goes to the UI log, and after a pause
      (**`providerRecoveryDelay`**: 5x then 20x **`llm_retry_base_ms`**, or a
      longer **`Retry-After`**, capped at 2 minutes) the step runs again on a
-     fresh allowance, with an LLM-facing nudge to continue when text was kept.
-     At most **`maxProviderRecoveries`** (2) in a row; a successful call resets
+     fresh allowance as the request that failed, byte for byte, so the
+     provider's cached prefix holds (issue #520): the working history is not
+     rebuilt from the transcript, which would bring back the steps that came
+     back empty and drop the messages the recoveries sent. When text was kept,
+     the kept answer and an LLM-facing nudge to continue are appended to it.
+     The nudge stands at the end of the history like the messages of the other
+     recoveries (and like the loop guard's nudge), so a compaction before the
+     step runs again puts it back after the kept answer instead of ending the
+     request on that answer. At most **`maxProviderRecoveries`** (2) in a row; a successful call resets
      the count. Uses a normal **`max_turns`** iteration.
+   - **Overflow recovery.** A call the provider refused as larger than the
+     model's window (**`llm.IsContextOverflow`**) with nothing streamed yet
+     compacts the turn and runs the step again, once per step
+     (**`maxOverflowRecoveries`**; a successful call resets it): earlier turns
+     when a regular split fits the limit the refusal revealed, otherwise the
+     steps of the turn itself, behind the prompt (**`internal/agent/compact_in_turn.go`**).
+     It forces result eviction past its **`start_percent`** gate for the rest
+     of the turn (**`Agent.evictionForced`**), writes a **`notice`** row, and
+     uses a normal **`max_turns`** iteration. A second refusal of the same
+     step, a fold that fails or has nothing to fold, and
+     **`compaction.auto_enable: false`** end the turn with
+     **`contextOverflowError`**.
 
-   An explicit **`llm_retry_max: 0`** disables all of the above. The
+   An explicit **`llm_retry_max: 0`** disables all of the above except the
+   overflow recovery, which is a compaction and not a retry of the same
+   request. The
    `loop_guard`, Stop hooks, fallback models, and `wait_for_limit_reset` are
    independent policies, each governed by their own settings.
 
    At `logger.level: debug`, each LLM call completion logs
    `msg="llm call finished"` with `provider_attempts` (total inner adapter
    calls including transport-layer retries), `transport_retries`, `call_reason`
-   (one of `step`, `empty_reissue`, `empty_nudge`, `first_token_retry`,
-   `loop_guard`, `quota_reset_wait`, `stop_hook`, `queued_followup`), and
+   (one of `step`, `empty_reissue`, `empty_nudge`, `output_limit_nudge`,
+   `first_token_retry`, `provider_recovery`, `loop_guard`, `quota_reset_wait`,
+   `stop_hook`, `queued_followup`, `context_overflow_recovery`), and
    `retries_remaining` (budget slots left after this call).
 
    Two guards bound a streamed call that stops answering. The first-token guard
@@ -396,7 +505,7 @@ messages: [
 
 ## Обработка ошибок в цикле ReAct
 
-- Ошибка API LLM - попытки берутся из общего бюджета шага `agent.llm_retry_max` (по умолчанию 3, явный 0 отключает); повторы транспорта, повторная отправка после тайм-аута первого токена и восстановление после пустого ответа делят один пул; бюджет сбрасывается, когда инструменты продвигают работу, и не ограничивает все вызовы LLM за весь ход;
+- Ошибка API LLM - попытки берутся из общего бюджета шага `agent.llm_retry_max` (по умолчанию 3, явный 0 отключает); повторы транспорта, повторная отправка после тайм-аута первого токена, восстановление после пустого ответа и восстановление после упора в предел вывода делят один пул; бюджет сбрасывается, когда инструменты продвигают работу, и не ограничивает все вызовы LLM за весь ход;
 - Поток LLM завис (после первых байтов ничего не приходит в течение `llm_stream_idle_timeout_ms`) - частичный ответ сохраняется, ход завершается ошибкой с указанием зависания; повтор в пределах оставшегося общего бюджета выполняется, только если ничего не было доставлено;
 - Ошибка выполнения инструмента - ошибка возвращается как наблюдение, следующий шаг решает LLM;
 - Отказ в разрешении - возвращается наблюдение "permission denied";
@@ -404,4 +513,4 @@ messages: [
 - Слишком длинный контекст - старые сообщения сжимаются в сводку, работа продолжается со сводкой;
 - Отмена - все операции прерываются, возвращается причина остановки `cancelled`.
 
-<!-- docsgen:source sha256=264bd420422e9767 -->
+<!-- docsgen:source sha256=e3277e5cf58bb2b4 -->

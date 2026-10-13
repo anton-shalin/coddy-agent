@@ -238,7 +238,7 @@ agent:
                                # unset, interactive surfaces pick a model per session, while
                                # coddy -p / coddy acp / API calls without a model report "no model configured"
   max_turns: 165               # ReAct iterations per prompt, recoveries included; 0 explicitly disables the limit
-  llm_retry_max: 3             # shared per-step budget: transport retries + no-answer recoveries
+  llm_retry_max: 3             # shared per-step budget: transport retries + no-answer and output-limit recoveries
                                # (default 3; 0 disables these retries, not separately configured continuations)
   llm_retry_base_ms: 1000      # initial backoff between LLM retries; a server-provided
                                # pause (Retry-After-Ms / Retry-After headers, "Limit resets
@@ -755,4 +755,4 @@ models:
 ### Локальные OpenAI-совместимые серверы (Ollama, llama.cpp, LM Studio)
 Используйте **`type: openai`** и задайте в **`api_base`** OpenAI-совместимый базовый URL, который уже включает **`/v1`**, например **`http://localhost:11434/v1`** для Ollama.
 
-<!-- docsgen:source sha256=85f8af1122caf3aa -->
+<!-- docsgen:source sha256=9889d24a9dcc684e -->
