@@ -298,6 +298,23 @@ export const messagesRu: Record<string, string> = {
   "settings.nav.aria.sections": "Разделы настроек",
   "settings.tileGrid.aria": "Разделы настроек",
 
+  "settings.search.placeholder": "Поиск по настройкам",
+  "settings.search.results": "Найденные настройки",
+  "settings.search.empty":
+    "Подходящих настроек нет, попробуйте другие слова или меньше слов",
+  "settings.search.found.one": "Найдена {count} настройка",
+  "settings.search.found.few": "Найдены {count} настройки",
+  "settings.search.found.many": "Найдено {count} настроек",
+  "settings.search.found.other": "Найдено {count} настройки",
+  "settings.search.more.one":
+    "Ещё {count} совпадение — добавьте слово, чтобы сузить список",
+  "settings.search.more.few":
+    "Ещё {count} совпадения — добавьте слово, чтобы сузить список",
+  "settings.search.more.many":
+    "Ещё {count} совпадений — добавьте слово, чтобы сузить список",
+  "settings.search.more.other":
+    "Ещё {count} совпадения — добавьте слово, чтобы сузить список",
+
   "settings.array.add": "Добавить",
   "settings.array.removeTitle": "Удалить",
   "settings.array.removeAria": "Удалить",
@@ -315,8 +332,6 @@ export const messagesRu: Record<string, string> = {
   "settings.map.nameAria": "{label} {n}, имя",
   "settings.map.valueAria": "{label} {n}, значение",
 
-  "settings.field.apiBaseFallback": "Базовый URL API",
-  "settings.field.modelIdFallback": "Идентификатор модели",
   "settings.field.defaultModelFallback": "Модель по умолчанию",
   "settings.field.provider": "Провайдер",
   "settings.field.providerPlaceholder": "провайдер",
