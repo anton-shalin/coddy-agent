@@ -36,8 +36,10 @@ type GoalCheckResult struct {
 	Checklist []GoalItem
 	// Model is the model that answered.
 	Model string
-	// unverified is why the verifier could not confirm a met verdict.
+	// unverified is why the verifier could not confirm a met verdict;
+	// verifyRan says this check asked the verifier at all.
 	unverified string
+	verifyRan  bool
 }
 
 // GoalJudge checks a finished goal turn against the objective, without tools.
@@ -149,12 +151,14 @@ func (m *Manager) runSupervisedTurn(ctx context.Context, st *State, prompt []acp
 	var first *llm.GoalTurn
 	if topLevel {
 		if kickoff := opts.takeGoalKickoff(); kickoff != nil {
-			// The first turn of a session a goal chain opened: it works on
-			// that goal, and only while it is still the one to work on.
-			if !st.GetGoal().Active() || st.GetMode() != string(ModeAgent) {
+			// The first turn of a session a goal chain opened, decided again
+			// here under the turn lock: what happened while it waited for a
+			// retry - the goal replaced, a person's turn that ran there first
+			// - drops it.
+			if !m.chainKickoffPending(st, kickoff.goalID) || st.GetMode() != string(ModeAgent) {
 				return string(acp.StopReasonEndTurn), nil
 			}
-			first = kickoff
+			first = kickoff.marker
 		} else if cmd := goalCommandOf(prompt); cmd.Kind != GoalCommandNone {
 			var notice string
 			var err error
@@ -532,8 +536,9 @@ func (r *goalRun) check(ctx context.Context) (GoalCheckResult, error) {
 		return GoalCheckResult{}, err
 	}
 	result.Verdict = normalizeVerdict(result.Verdict)
-	verified := false
+	verified, verifyRan := false, false
 	if result.Verdict == GoalVerdictMet && r.persist && r.cfg.Supervisor.VerifyEnabled() && r.m.goalVerifier != nil {
+		verifyRan = true
 		vreq := req
 		vreq.Checklist = firstChecklist(result.Checklist, req.Checklist)
 		r.publishNotice("Goal verification: a read-only subagent is checking the workspace")
@@ -563,6 +568,7 @@ func (r *goalRun) check(ctx context.Context) (GoalCheckResult, error) {
 			}
 		}
 	}
+	result.verifyRan = verifyRan
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	r.update("", func(g *GoalState) bool {
 		g.Checks++
@@ -610,7 +616,7 @@ func (r *goalRun) complete(goal GoalState, result GoalCheckResult) {
 	if done.ID != r.goalID || done.Status != GoalComplete || strings.TrimSpace(done.ThenFile) == "" {
 		return
 	}
-	r.m.continueGoalChain(r.st, done, result.unverified)
+	r.m.continueGoalChain(r.st, done, result.verifyRan, result.unverified)
 }
 
 // completeNotice says the goal is done, and when the verifier could not

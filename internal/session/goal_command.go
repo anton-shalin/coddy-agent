@@ -93,6 +93,11 @@ func ParseGoalCommand(text string) GoalCommand {
 			cmd.Reasoning = value
 		default:
 			cmd.ThenFile = value
+			if strings.HasPrefix(value, `"`) || strings.HasPrefix(value, "'") {
+				// The value is one word: a quoted path with spaces would
+				// leave half of it in the objective.
+				cmd.Err = "--then-file takes a path without quotes or spaces"
+			}
 		}
 		if strings.TrimSpace(value) == "" {
 			cmd.Err = fmt.Sprintf("%s needs a value", name)

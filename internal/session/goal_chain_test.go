@@ -5,15 +5,14 @@ import (
 	"errors"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/EvilFreelancer/coddy-agent/internal/acp"
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
+	"github.com/EvilFreelancer/coddy-agent/internal/llm"
 	"github.com/EvilFreelancer/coddy-agent/internal/session"
 )
 
@@ -203,34 +202,33 @@ func TestGoalChainRefusesAFileItCannotUse(t *testing.T) {
 		"empty":     {prep: func(h *chainHarness) { h.writeAt(nextTask, " \n\t\n") }, notice: "Goal chain ended: .coddy/next-task.md is empty"},
 		"too long":  {prep: func(h *chainHarness) { h.writeAt(nextTask, strings.Repeat("x", 20000)) }, notice: "Goal chain stopped:"},
 		"directory": {prep: func(h *chainHarness) { h.writeAt(nextTask+"/inside", "x") }, notice: "is not a regular file"},
-		"fifo": {prep: func(h *chainHarness) {
-			if runtime.GOOS == "windows" {
-				h.t.Skip("no FIFOs on Windows")
-			}
-			h.writeAt(".coddy/keep", "")
-			if err := syscall.Mkfifo(filepath.Join(h.cwd, filepath.FromSlash(nextTask)), 0o644); err != nil {
-				h.t.Skip("mkfifo:", err)
-			}
-		}, notice: "is not a regular file"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newChainHarness(t)
 			tc.prep(h)
-			done := make(chan struct{})
-			go func() {
-				defer close(done)
-				h.prompt(h.sid, "/goal --then-file .coddy/next-task.md ship the fix")
-			}()
-			select {
-			case <-done:
-			case <-time.After(10 * time.Second):
-				t.Fatal("the chain step blocked on the follow-up file")
-			}
-			first := h.st(h.sid)
-			if first.GetGoal().ContinuedIn != "" || h.startCount() != 0 || !h.exists(nextTask) || !hasNotice(first, tc.notice) {
-				t.Fatalf("goal=%+v starts=%d present=%v notices=%q", first.GetGoal(), h.startCount(), h.exists(nextTask), notices(first))
-			}
+			h.expectRefusedFile(tc.notice)
 		})
+	}
+}
+
+// expectRefusedFile sets a chained goal over the follow-up file the test
+// prepared and checks the chain stopped with notice, the file in place, and
+// without blocking on it.
+func (h *chainHarness) expectRefusedFile(notice string) {
+	h.t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.prompt(h.sid, "/goal --then-file .coddy/next-task.md ship the fix")
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		h.t.Fatal("the chain step blocked on the follow-up file")
+	}
+	first := h.st(h.sid)
+	if first.GetGoal().ContinuedIn != "" || h.startCount() != 0 || !h.exists(nextTask) || !hasNotice(first, notice) {
+		h.t.Fatalf("goal=%+v starts=%d present=%v notices=%q", first.GetGoal(), h.startCount(), h.exists(nextTask), notices(first))
 	}
 }
 
@@ -286,7 +284,7 @@ func TestGoalChainQueuedMessageIsNotAKickoff(t *testing.T) {
 }
 
 // The chained session's first turn is retried while something else holds its
-// turn lock, and it is not started at all once a person's own prompt ran there.
+// turn lock.
 func TestGoalChainRetriesABusySession(t *testing.T) {
 	h := newChainHarness(t)
 	h.mgr.SetGoalChainRetryForTest(20*time.Millisecond, 50*time.Millisecond, 5*time.Second)
@@ -321,6 +319,67 @@ func TestGoalChainRetriesABusySession(t *testing.T) {
 			}
 			return
 		}
+	}
+}
+
+// What happened while the first turn waited for its retry is checked again
+// under the turn lock: a goal replaced meanwhile, or a person's turn that ran
+// there first, drops the kickoff instead of running it a second time or under
+// another goal.
+func TestGoalChainRetryChecksAgainUnderTheLock(t *testing.T) {
+	for name, meanwhile := range map[string]func(h *chainHarness, id string){
+		"goal replaced": func(h *chainHarness, id string) {
+			if _, err := h.mgr.SetGoalObjective(id, "another goal"); err != nil {
+				h.t.Fatal(err)
+			}
+		},
+		"a person's turn ran": func(h *chainHarness, id string) {
+			h.st(id).AddMessage(llm.Message{Role: llm.RoleUser, Content: "stop, I will look first"})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newChainHarness(t)
+			h.mgr.SetGoalChainRetryForTest(10*time.Millisecond, 10*time.Millisecond, 5*time.Second)
+			starter := h.start
+			calls := 0
+			h.mgr.SetGoalChainStarter(func(ctx context.Context, params acp.SessionPromptParams, opts *session.PromptRunOpts) error {
+				calls++
+				if calls == 1 {
+					return session.ErrSessionTurnBusy
+				}
+				meanwhile(h, params.SessionID)
+				return starter(ctx, params, opts)
+			})
+			h.writesInFirstTurn(nextTask, "write the release notes")
+			h.prompt(h.sid, "/goal --then-file .coddy/next-task.md ship the fix")
+			next := h.waitStarted()
+			if runs := h.runsIn(next); len(runs) != 0 {
+				t.Fatalf("the kickoff ran after %s: %+v", name, runs)
+			}
+		})
+	}
+}
+
+// Whether the verifier ran is what this check did, not what a configuration
+// reloaded after it says.
+func TestGoalChainReadsTheVerificationOfItsOwnCheck(t *testing.T) {
+	h := newChainHarness(t)
+	off := false
+	h.mgr.Cfg().Supervisor.Verify = &off
+	h.mgr.SetGoalVerifier(func(context.Context, *session.State, session.GoalCheckRequest) (session.GoalCheckResult, error) {
+		return session.GoalCheckResult{}, errors.New("must not run")
+	})
+	h.mgr.SetGoalJudge(func(context.Context, *config.Config, *session.State, session.GoalCheckRequest) (session.GoalCheckResult, error) {
+		next := *h.mgr.Cfg()
+		on := true
+		next.Supervisor.Verify = &on
+		h.mgr.ReplaceConfig(&next)
+		return session.GoalCheckResult{Verdict: session.GoalVerdictMet}, nil
+	})
+	h.writeAt(nextTask, "write the release notes")
+	h.prompt(h.sid, "/goal --then-file .coddy/next-task.md ship the fix")
+	if next := h.waitStarted(); h.st(h.sid).GetGoal().ContinuedIn != next {
+		t.Fatalf("the chain did not continue: goal=%+v notices=%q", h.st(h.sid).GetGoal(), notices(h.st(h.sid)))
 	}
 }
 

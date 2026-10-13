@@ -50,7 +50,7 @@ Long work often splits into packages that each deserve a fresh session: the cont
 /goal --then-file .coddy/next-task.md Implement the sub-plan named under current in state.md.
 ```
 
-The worker of a chained goal is told that the next task goes into that file and that it creates the file only when work remains. When the supervisor finds the goal met and the verifier confirms it, Coddy:
+The path is one word, without quotes or spaces. The worker of a chained goal is told that the next task goes into that file and that it creates the file only when work remains. When the supervisor finds the goal met and the verifier confirms it, Coddy:
 
 1. reads the file, relative to the workspace (an absolute path and a leading `~/` work too);
 2. renames it to `next-task.started-<UTC time>.md` next to it, so it never runs twice;

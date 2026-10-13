@@ -89,8 +89,9 @@ Out of scope (named in the pull request and the issue comment):
   new goal". `GoalUsage` and the `goal` hint in `commands.go` name it.
 - `GoalState` gains:
   - `ThenFile string json:"thenFile,omitempty"` - the path as typed;
-  - `ChainIndex int json:"chainIndex,omitempty"` - how many sessions the chain
-    opened before this one (0 for the goal the operator set);
+  - `ChainIndex int json:"chainIndex,omitempty"` - the goal's place in its
+    chain: 0 for the goal the operator set, N in the N-th session the chain
+    opened;
   - `ContinuedFrom string json:"continuedFrom,omitempty"` - the session whose
     met goal opened this one;
   - `ContinuedIn string json:"continuedIn,omitempty"` - the session this

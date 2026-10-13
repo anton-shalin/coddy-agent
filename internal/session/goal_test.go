@@ -79,6 +79,7 @@ func TestParseGoalCommand(t *testing.T) {
 		"/goal --then-file":                            {Kind: GoalCommandSet, Err: "--then-file needs a value"},
 		"/goal --then-file a.md resume":                {Kind: GoalCommandResume, ThenFile: "a.md", Err: "--then-file goes with a new goal"},
 		"/goal --then-file a.md clear":                 {Kind: GoalCommandClear, ThenFile: "a.md", Err: "--then-file goes with a new goal"},
+		`/goal --then-file "my next.md" ship it`:       {Kind: GoalCommandSet, Objective: `next.md" ship it`, ThenFile: `"my`, Err: "--then-file takes a path without quotes or spaces"},
 		"/goals":                                       {},
 		"/goal-x":                                      {},
 		"set a goal":                                   {},

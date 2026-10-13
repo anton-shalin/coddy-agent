@@ -1278,14 +1278,20 @@ type PromptRunOpts struct {
 	// is refused with ErrSubagentReadOnly (see RunSubagentTurn).
 	subagentTurn bool
 	// goalKickoff marks the first turn of a session a goal chain opened
-	// (goal_chain.go): the marker its first message is stored with. The
-	// supervisor takes it once (takeGoalKickoff), since the same options run
-	// the messages queued during that turn.
-	goalKickoff *llm.GoalTurn
+	// (goal_chain.go). The supervisor takes it once (takeGoalKickoff), since
+	// the same options run the messages queued during that turn.
+	goalKickoff *chainKickoff
 }
 
-// takeGoalKickoff returns the chain's kickoff marker, once.
-func (o *PromptRunOpts) takeGoalKickoff() *llm.GoalTurn {
+// chainKickoff is the first turn of a chained session: the marker its first
+// message is stored with, and the goal it was built for.
+type chainKickoff struct {
+	marker *llm.GoalTurn
+	goalID string
+}
+
+// takeGoalKickoff returns the chain's kickoff, once.
+func (o *PromptRunOpts) takeGoalKickoff() *chainKickoff {
 	if o == nil {
 		return nil
 	}

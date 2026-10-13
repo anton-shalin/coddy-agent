@@ -64,13 +64,13 @@ func (r goalChainRetry) withDefaults() goalChainRetry {
 }
 
 // continueGoalChain hands the next task of a met goal to a new session. done
-// is the goal as it closed; unverified is why the verifier could not confirm
-// it, empty when it did or did not run. Every way the chain stops leaves a
-// notice in the finished session; the file is consumed only for a session
-// that was created.
-func (m *Manager) continueGoalChain(st *State, done GoalState, unverified string) {
+// is the goal as it closed; verifyRan says its check asked the verifier (what
+// the configuration says now may differ from what the check did), and
+// unverified is why the verifier could not confirm it. Every way the chain
+// stops leaves a notice in the finished session; the file is consumed only for
+// a session that was created.
+func (m *Manager) continueGoalChain(st *State, done GoalState, verifyRan bool, unverified string) {
 	cfg := m.activeCfg()
-	verifyRan := cfg != nil && cfg.Supervisor.VerifyEnabled() && m.goalVerifier != nil
 	verified := done.LastCheck != nil && done.LastCheck.Verified
 	switch {
 	case verifyRan && !verified:
@@ -148,9 +148,9 @@ func (m *Manager) continueGoalChain(st *State, done GoalState, unverified string
 	m.log.Info("goal chain continued", "from", st.ID, "to", ns.ID, "link", next.ChainIndex, "file", consumed)
 
 	params := acp.SessionPromptParams{SessionID: ns.ID, Prompt: goalPrompt(goalKickoffText(next, cfg))}
-	opts := &PromptRunOpts{SkipUsagePublish: true, goalKickoff: &llm.GoalTurn{
+	opts := &PromptRunOpts{SkipUsagePublish: true, goalKickoff: &chainKickoff{goalID: next.ID, marker: &llm.GoalTurn{
 		Kind: acp.GoalTurnKickoff, Objective: next.Objective, Limit: cfg.Supervisor.ContinuationLimit(),
-	}}
+	}}}
 	go m.startChainedTurn(ns, next.ID, params, opts)
 }
 

@@ -85,8 +85,9 @@ export type SessionGoal = {
   checkModel: string;
   checkReasoning: string;
   /** The follow-up file of a goal chain (`/goal --then-file`): once the goal
-   * is met, its text becomes the goal of a new session. `chainIndex` counts
-   * the sessions the chain opened before this one; `continuedFrom` and
+   * is met, its text becomes the goal of a new session. `chainIndex` is its
+   * place in the chain: 0 for a goal the operator set, N in the N-th session
+   * the chain opened; `continuedFrom` and
    * `continuedIn` are the sessions on either side. Empty and 0 outside a
    * chain. */
   thenFile: string;

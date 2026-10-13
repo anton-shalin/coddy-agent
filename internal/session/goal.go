@@ -85,8 +85,8 @@ type GoalState struct {
 	// typed: once the goal is met, its text becomes the goal of a new session
 	// in the same workspace (goal_chain.go).
 	ThenFile string `json:"thenFile,omitempty"`
-	// ChainIndex counts the sessions the chain opened before this goal's: 0
-	// for a goal the operator set.
+	// ChainIndex is the goal's place in its chain: 0 for a goal the operator
+	// set, N in the N-th session the chain opened.
 	ChainIndex int `json:"chainIndex,omitempty"`
 	// ContinuedFrom is the session whose met goal opened this one;
 	// ContinuedIn the session this goal's chain continued in.
