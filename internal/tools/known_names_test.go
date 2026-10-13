@@ -38,14 +38,14 @@ func TestKnownToolNamesCoverTheBuiltIns(t *testing.T) {
 }
 
 // The config check learns the names from this package when cmd/coddy registers
-// them at start-up, so a model row naming a tool that does not exist is
+// them at start-up, so a toolset naming a tool that does not exist is
 // reported without config importing upward.
 func TestKnownToolNamesFeedTheConfigCheck(t *testing.T) {
 	config.RegisterToolCatalog(KnownToolNames)
 	t.Cleanup(func() { config.RegisterToolCatalog(nil) })
-	cfg := &config.Config{Models: []config.ModelEntry{{Model: "local/qwen", Tools: []string{"read", "gerp"}}}}
-	unknown := cfg.UnknownModelTools()
+	cfg := &config.Config{Toolsets: []config.Toolset{{Name: "coding", Tools: []string{"read", "gerp"}}}}
+	unknown := cfg.UnknownToolsetTools()
 	if len(unknown) != 1 || unknown[0].Name != "gerp" {
-		t.Fatalf("UnknownModelTools = %+v, want only gerp", unknown)
+		t.Fatalf("UnknownToolsetTools = %+v, want only gerp", unknown)
 	}
 }

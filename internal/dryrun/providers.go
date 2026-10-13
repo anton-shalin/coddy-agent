@@ -22,13 +22,13 @@ func (r *runner) unsentModelSettings() {
 	}
 }
 
-// unknownModelTools warns about an entry of models[].tools or
-// models[].disallowed_tools that matches no tool (config.UnknownModelTools),
+// unknownToolsetTools warns about an entry of toolsets[].tools or
+// toolsets[].disallowed_tools that matches no tool (config.UnknownToolsetTools),
 // on its own line: such an entry changes nothing, which is rarely the intent.
-func (r *runner) unknownModelTools() {
-	for _, u := range r.req.Cfg.UnknownModelTools() {
+func (r *runner) unknownToolsetTools() {
+	for _, u := range r.req.Cfg.UnknownToolsetTools() {
 		r.rep.add(r.check(StatusWarning, u.Path(), u.Path(), u.Message(),
-			"correct the spelling of "+strconv.Quote(u.Name)+", or remove it from this model"))
+			"correct the spelling of "+strconv.Quote(u.Name)+", or remove it from this toolset"))
 	}
 }
 

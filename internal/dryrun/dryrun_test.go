@@ -831,19 +831,20 @@ func TestCodexMaxTokensIsAWarningOnItsLine(t *testing.T) {
 	}
 }
 
-// A name in models[].tools or models[].disallowed_tools that matches no tool is
+// A name in toolsets[].tools or toolsets[].disallowed_tools that matches no tool is
 // a warning on the list's own line, with the fix; known names, patterns and MCP
 // tools stay quiet.
-func TestModelToolListNamesNoToolIsAWarningOnItsLine(t *testing.T) {
+func TestToolsetNamesNoToolIsAWarningOnItsLine(t *testing.T) {
 	config.RegisterToolCatalog(func() []string { return []string{"read", "write", "grep"} })
 	t.Cleanup(func() { config.RegisterToolCatalog(nil) })
 	body := "providers:\n  - name: local\n    type: openai\n    api_base: http://127.0.0.1:9/v1\n" +
-		"models:\n  - model: local/qwen\n    tools: [read, gerp, \"ctx__*\", \"wr*\"]\n    disallowed_tools: [write]\n" +
+		"models:\n  - model: local/qwen\n    toolset: coding\n" +
+		"toolsets:\n  - name: coding\n    tools: [read, gerp, \"ctx__*\", \"wr*\"]\n    disallowed_tools: [write]\n" +
 		"agent:\n  model: local/qwen\n"
 	rep := run(t, body, nil)
-	c := find(t, rep, "models[local/qwen].tools")
-	// Line 8: the fixture's line 7 below the modeline prepare writes first.
-	if c.Status != StatusWarning || !strings.Contains(c.Message, `"gerp"`) || c.Line != 8 || !strings.Contains(c.Fix, "gerp") {
+	c := find(t, rep, "toolsets[coding].tools")
+	// Line 11: the fixture's line 10 below the modeline prepare writes first.
+	if c.Status != StatusWarning || !strings.Contains(c.Message, `"gerp"`) || c.Line != 11 || !strings.Contains(c.Fix, "gerp") {
 		t.Errorf("unknown tool check %+v", c)
 	}
 	n := 0

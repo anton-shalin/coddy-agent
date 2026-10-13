@@ -85,7 +85,7 @@ func (r *serverRef) RequestQuestion(ctx context.Context, params acp.QuestionRequ
 }
 
 // wireToolCatalog tells the config check which tools this build can offer, so
-// a models[].tools or models[].disallowed_tools entry that names nothing is
+// a toolsets[].tools or toolsets[].disallowed_tools entry that names nothing is
 // reported by -t, --dry-run and the start-up log. config sits below
 // internal/tools and cannot import it, so the binary hands the catalog down
 // before any command reads a configuration.
@@ -366,7 +366,7 @@ func runACP(args []string) error {
 	llm.LogCodexAuthNotices(log, cfg)
 	llm.LogDevinAuthNotices(log, cfg)
 	cfg.LogUnsentModelSettings(log)
-	cfg.LogUnknownModelTools(log)
+	cfg.LogUnknownToolsetTools(log)
 	llm.LogNeuralDeepAuthNotices(log, cfg)
 
 	store, err := openSessionStore(*sessionsRoot, cfg)

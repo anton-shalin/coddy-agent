@@ -140,7 +140,7 @@ func BenchmarkContextOfThisRepositoryRules(b *testing.B) {
 	b.ReportMetric(float64(duplicates), "duplicate-rules")
 }
 
-// BenchmarkToolOfferOfAModelAllowlist measures what models[].tools spares a
+// BenchmarkToolOfferOfAModelAllowlist measures what a toolset spares a
 // small-context local model: the tools a request offers, what the context
 // meter counts for them (the list the system message prints plus the schemas)
 // the size of the tools array as an OpenAI-compatible request carries it and
@@ -153,7 +153,7 @@ func BenchmarkToolOfferOfAModelAllowlist(b *testing.B) {
 	var tools, meterTokens, jsonTokens, promptTokens [2]int
 	for i := 0; i < b.N; i++ {
 		ag, st, _ := modelToolsAgent(b, session.ModeAgent, "fake/full",
-			config.ModelEntry{Model: "fake/full"}, config.ModelEntry{Model: "fake/small", Tools: allow})
+			toolRow{Model: "fake/full"}, toolRow{Model: "fake/small", Tools: allow})
 		for k, model := range []string{"fake/full", "fake/small"} {
 			st.SetSelectedModelID(model)
 			defs := ag.currentToolDefinitions("agent")

@@ -903,6 +903,7 @@ func (m *Manager) loadSessionFromDisk(ctx context.Context, params acp.SessionLoa
 		mode = ModeAgent
 	}
 	st.RestoreMetaWithoutPersist(mode, snap.Meta.SelectedModelID, snap.Meta.SelectedReasoning, snap.Meta.AgentMemory)
+	st.RestoreToolsetWithoutPersist(snap.Meta.SelectedToolset)
 	if snap.Meta.Goal != nil {
 		st.RestoreGoalWithoutPersist(*snap.Meta.Goal)
 	}
@@ -1906,6 +1907,8 @@ func (m *Manager) SetConfigOptionFrom(ctx context.Context, params acp.SessionSet
 		ch.Model = &value
 	case "reasoning":
 		ch.Reasoning = &value
+	case "toolset":
+		ch.Toolset = &value
 	case "permission_mode":
 		ch.PermissionMode = &value
 	default:

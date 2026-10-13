@@ -292,28 +292,28 @@ func checkConfigBytes(data []byte, paths Paths) []Finding {
 		}
 	}
 	findings = append(findings, unsentSettingFindings(&cfg, body)...)
-	findings = append(findings, unknownModelToolFindings(&cfg, body)...)
+	findings = append(findings, unknownToolsetToolFindings(&cfg, body)...)
 	findings = append(findings, memoryAddendumFindings(&cfg, body)...)
 	return sortFindings(findings)
 }
 
-// unknownModelToolFindings warns about an entry of models[].tools or
-// models[].disallowed_tools that names no tool (Config.UnknownModelTools),
+// unknownToolsetToolFindings warns about an entry of toolsets[].tools or
+// toolsets[].disallowed_tools that names no tool (Config.UnknownToolsetTools),
 // each on the line of the entry.
-func unknownModelToolFindings(cfg *Config, body *yaml.Node) []Finding {
+func unknownToolsetToolFindings(cfg *Config, body *yaml.Node) []Finding {
 	var out []Finding
-	for _, u := range cfg.UnknownModelTools() {
+	for _, u := range cfg.UnknownToolsetTools() {
 		f := Finding{
 			Severity: SeverityWarning,
 			Message:  u.Message(),
-			Fix:      "correct the spelling, or remove it from this model; tool names are listed in docs/reference/tools.md, and a name containing __ addresses an MCP server's tool",
+			Fix:      "correct the spelling, or remove it from this toolset; tool names are listed in docs/reference/tools.md, and a name containing __ addresses an MCP server's tool",
 		}
-		if n := locateModelListEntry(body, u.Model, u.Key, u.Name); n != nil {
+		if n := locateListEntry(body, "toolsets["+u.Toolset+"]", u.Key, u.Name); n != nil {
 			f.Line, f.Column = n.Line, n.Column
 		}
 		f.Path = u.Path()
 		if root, err := loadSchema(); err == nil {
-			if s := root.lookup("models." + u.Key); s != nil {
+			if s := root.lookup("toolsets." + u.Key); s != nil {
 				f.Doc = s.doc()
 			}
 		}
@@ -322,10 +322,11 @@ func unknownModelToolFindings(cfg *Config, body *yaml.Node) []Finding {
 	return out
 }
 
-// locateModelListEntry finds the scalar naming a tool inside one list of one
-// models[] row, falling back to the list's key and then to the row.
-func locateModelListEntry(body *yaml.Node, model, key, name string) *yaml.Node {
-	row := locatePath(body, "models["+model+"]", false)
+// locateListEntry finds the scalar naming a tool inside one list of the
+// sequence entry at path (toolsets[coding]), falling back to the list's key
+// and then to the entry.
+func locateListEntry(body *yaml.Node, path, key, name string) *yaml.Node {
+	row := locatePath(body, path, false)
 	row = resolveAlias(row)
 	if row == nil || row.Kind != yaml.MappingNode {
 		return nil

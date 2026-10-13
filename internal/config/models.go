@@ -48,18 +48,12 @@ type ModelEntry struct {
 	// false makes the runtime issue one blocking completion request and deliver the
 	// finished answer in one piece, for servers and proxies that handle SSE badly.
 	Stream *bool `yaml:"stream,omitempty"`
-	// Tools narrows the tools a session offers while it runs on this model:
-	// an allowlist of tool names, the exact name, a bare * or a prefix*
-	// pattern (context7__* admits every tool of that MCP server), the syntax
-	// of a subagent definition's tools. Empty or absent offers everything the
-	// mode would. It never adds a tool: the mode, a subagent definition and
-	// the session's switches narrow the offer first. A small-window local
-	// model that uses a dozen tools is not sent the schemas of the other
-	// forty. See internal/agent/toolsets.go.
-	Tools []string `yaml:"tools,omitempty"`
-	// DisallowedTools removes tools from what this model is offered, after
-	// Tools, with the same pattern syntax. A name in both lists is out.
-	DisallowedTools []string `yaml:"disallowed_tools,omitempty"`
+	// Toolset names the toolsets[] preset a session on this model is offered
+	// its tools by unless the session picks another (/toolset, /model <id>
+	// --toolset): a small-window local model that uses a dozen tools is not
+	// sent the schemas of the other forty. Empty offers every tool the mode
+	// would. See toolsets.go and internal/agent/toolsets.go.
+	Toolset string `yaml:"toolset,omitempty"`
 }
 
 // SplitModelRef parses model into provider name and API model id.
@@ -78,24 +72,7 @@ func SplitModelRef(model string) (providerName, apiModel string, err error) {
 // Normalize trims string fields in place.
 func (m *ModelEntry) Normalize() {
 	m.Model = strings.TrimSpace(m.Model)
-	m.Tools = trimToolPatterns(m.Tools)
-	m.DisallowedTools = trimToolPatterns(m.DisallowedTools)
-}
-
-// trimToolPatterns trims each entry and drops the blank ones, keeping a nil
-// list nil. A list of blanks becomes empty, which reads as "no restriction",
-// the same as the key being absent.
-func trimToolPatterns(in []string) []string {
-	if len(in) == 0 {
-		return in
-	}
-	out := make([]string, 0, len(in))
-	for _, s := range in {
-		if s = strings.TrimSpace(s); s != "" {
-			out = append(out, s)
-		}
-	}
-	return out
+	m.Toolset = strings.TrimSpace(m.Toolset)
 }
 
 // Validate checks a single model entry after Normalize (provider existence checked separately).

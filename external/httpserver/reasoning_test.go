@@ -387,3 +387,53 @@ func TestReasoningLevelsHonoursUnsavedProviderType(t *testing.T) {
 		})
 	}
 }
+
+// PATCH /coddy/sessions/{id} sets the session's toolset like its reasoning:
+// validated against the presets, kept in session.json, mirrored in the
+// settings snapshot; a name the configuration does not have is a 400.
+func TestCoddySessionPatchSelectedToolset(t *testing.T) {
+	root := t.TempDir()
+	cfg := reasoningHTTPConfig()
+	cfg.Toolsets = []config.Toolset{{Name: "lean", Tools: []string{"read", "grep"}}}
+	cfg.Paths = config.Paths{Home: filepath.Join(root, "home"), CWD: "/tmp"}
+	runner := func(context.Context, *session.State, []acp.ContentBlock, acp.UpdateSender) (string, error) {
+		return "", nil
+	}
+	store := &session.FileStore{Root: filepath.Join(root, "sessions")}
+	mgr := session.NewManager(cfg, noopSender{}, runner, slog.Default(), "/tmp", store)
+	srv := New(cfg, mgr, slog.Default(), "/tmp")
+	t.Cleanup(srv.Drain)
+	res, err := mgr.HandleSessionNew(context.Background(), acp.SessionNewParams{CWD: "/tmp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	patch := func(body string) (int, map[string]interface{}) {
+		req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/coddy/sessions/"+url.PathEscape(res.SessionID), strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var out map[string]interface{}
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+	code, out := patch(`{"selectedToolset":"lean"}`)
+	if code != http.StatusOK || out["selectedToolset"] != "lean" {
+		t.Fatalf("PATCH lean = %d %v", code, out)
+	}
+	settings, _ := out["settings"].(map[string]interface{})
+	if settings["toolset"] != "lean" || !reflect.DeepEqual(settings["toolsetChoices"], []interface{}{"lean", "default"}) {
+		t.Fatalf("settings = %v", settings)
+	}
+	snap, err := store.ReadSnapshot(res.SessionID)
+	if err != nil || snap.Meta.SelectedToolset != "lean" {
+		t.Fatalf("persisted toolset = %q, %v", snap.Meta.SelectedToolset, err)
+	}
+	if code, out := patch(`{"selectedToolset":"nope"}`); code != http.StatusBadRequest {
+		t.Fatalf("PATCH an unknown toolset = %d %v", code, out)
+	}
+}

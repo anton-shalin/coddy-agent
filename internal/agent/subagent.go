@@ -704,9 +704,9 @@ func (a *Agent) subagentCatalogBlock() string {
 	if !a.canSpawn() {
 		return ""
 	}
-	// A model that is not offered spawn_agent (models[].tools,
-	// disallowed_tools) is not shown the roster it would delegate to.
-	if a.modelHidesTool(tools.ToolSpawnAgent) {
+	// A toolset that leaves spawn_agent out is not shown the roster it would
+	// delegate to.
+	if a.toolsetHidesTool(tools.ToolSpawnAgent) {
 		return ""
 	}
 	cwd := a.state.GetCWD()
@@ -932,15 +932,16 @@ func (a *Agent) spawnSubagentInMode(ctx context.Context, req tooling.SpawnReques
 		}
 	}
 
-	// The lists of the model the child runs on (models[].tools,
-	// disallowed_tools) narrow the set further, whichever model that is: the
-	// parent's own, the definition's, the call's. They apply while the child
-	// runs (currentToolDefinitions, toolCallRefused), so what is decided here is
-	// whether anything is left. They do not decide which MCP servers are
-	// dialed: a server no model needs is switched off in its declaration.
-	if len(narrowToolNamesForModel(effective, cfg.FindModelEntry(model))) == 0 {
-		return "", fmt.Errorf("subagent %q would have no tools at all on model %s: the model's tools and disallowed_tools lists leave nothing of its effective set %v; adjust models[].tools or choose another model",
-			def.Name, model, effective)
+	// The toolset the child's model names (models[].toolset) narrows the set
+	// further, whichever model that is: the parent's own, the definition's, the
+	// call's. The parent's own pick of a toolset stays with the parent. It
+	// applies while the child runs (currentToolDefinitions, toolCallRefused),
+	// so what is decided here is whether anything is left. It does not decide
+	// which MCP servers are dialed: a server no model needs is switched off in
+	// its declaration.
+	if ts := cfg.ResolveToolset(model, ""); len(narrowToolNamesByToolset(effective, ts)) == 0 {
+		return "", fmt.Errorf("subagent %q would have no tools at all on model %s: its toolset %q leaves nothing of its effective set %v; adjust the toolset or choose another model",
+			def.Name, model, ts.Name, effective)
 	}
 
 	parentID := a.state.GetID()

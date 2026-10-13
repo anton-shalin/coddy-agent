@@ -148,10 +148,10 @@ func (a *Agent) buildSystemPromptParts(mode string, activeSkills []*skills.Skill
 	if mode == "plan" {
 		discardedPlans = discardedPlansPromptBlock(a.state.DiscardedPlanSlugs())
 	}
-	// The hint to call load_skill is printed only to a model that is offered
-	// the tool (models[].tools, disallowed_tools).
+	// The hint to call load_skill is printed only when the toolset offers the
+	// tool.
 	skillsMD := buildSkillsPromptMarkdown(a.state.GetSkills(), activeSkills,
-		a.cfg.Skills.AutoDiscoveryEnabled() && !a.modelHidesTool(loadSkillToolName))
+		a.cfg.Skills.AutoDiscoveryEnabled() && !a.toolsetHidesTool(loadSkillToolName))
 	toolsMD := tools.FormatDefinitionsForPrompt(toolDefs)
 	standing := a.standingParts()
 	rulesMD := joinNonEmptyPromptBlocks(standing.Docs, standing.Rules)

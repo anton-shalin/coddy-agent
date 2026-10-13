@@ -45,6 +45,9 @@ type SessionState interface {
 	SetMode(mode string)
 	EffectiveModelID(cfg *config.Config) string
 	EffectiveReasoning(cfg *config.Config) string
+	// EffectiveToolset is the session's toolset choice for the next request:
+	// a preset by name, "default", or "" to follow the model.
+	EffectiveToolset() string
 	AddMessage(msg llm.Message)
 	GetMessages() []llm.Message
 	InsertCompactionSummary(idx int, msg llm.Message)
@@ -931,6 +934,7 @@ func (a *Agent) runReActLoop(
 		// step compares too: a change can land between the build and it.
 		switched := false
 		if rev := a.state.SettingsRevision(); rev != transport.rev {
+			hadToolset := a.activeToolset() != nil
 			if key := a.transportKey(); key == transport.key {
 				transport.rev = rev
 			} else if next, err := a.getProvider(mode); err != nil {
@@ -938,32 +942,31 @@ func (a *Agent) runReActLoop(
 				a.log.Warn("settings changed mid-turn but the new model is unavailable; keeping the current one", "error", err)
 			} else {
 				a.log.Info("model settings changed mid-turn", "from", transport.key, "to", next.key)
-				hadLists := a.modelToolEntry() != nil
 				transport, switched = next, true
-				// The requests from here on are offered their tools for the
-				// new model (models[].tools, disallowed_tools). A call is
-				// checked against the offer of the request that produced it,
-				// so the batch that asked for the switch was judged by the old
-				// offer and the next response is judged by this one. When
-				// either model carries lists the tool set is built again, and
-				// if it moved the request below carries it and the system
-				// message that lists it is rendered again. The switch itself
-				// changes neither between two models that carry no lists.
-				a.setOfferModel(transport.model)
-				if hadLists || a.modelToolEntry() != nil {
-					if defs := a.currentToolDefinitions(mode); !sameToolNames(defs, toolDefs) {
-						toolDefs = defs
-						sys = a.buildSystemPromptParts(mode, activeSkills, toolDefs)
-						if len(messages) > 0 && messages[0].Role == llm.RoleSystem {
-							messages[0].Content = sys.Content
-						}
-					}
-				}
 				// The request below measures its context against the new
 				// model's window, which its provider's listing may be the
 				// only one to know: read it now, bounded, rather than check
 				// the compaction threshold against the default (#362).
 				a.awaitContextWindow(ctx, transport.model)
+			}
+			// The requests from here on are offered their tools by the toolset
+			// the session's settings now resolve to for the transport's model:
+			// a switch of the model or of the toolset. A call is checked
+			// against the offer of the request that produced it, so the batch
+			// that asked for the switch was judged by the old offer and the
+			// next response is judged by this one. When either side has a
+			// toolset the tool set is built again, and if it moved the request
+			// below carries it and the system message that lists it is
+			// rendered again; without a toolset on either side nothing moves.
+			a.setOfferModel(transport.model)
+			if hadToolset || a.activeToolset() != nil {
+				if defs := a.currentToolDefinitions(mode); !sameToolNames(defs, toolDefs) {
+					toolDefs = defs
+					sys = a.buildSystemPromptParts(mode, activeSkills, toolDefs)
+					if len(messages) > 0 && messages[0].Role == llm.RoleSystem {
+						messages[0].Content = sys.Content
+					}
+				}
 			}
 		}
 
@@ -2156,9 +2159,8 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall, env *tools
 
 	// A restricted mode filters tool definitions before the LLM sees them, but a
 	// call replayed from history can still name a hidden tool; refuse it here so
-	// the mode boundary holds at execution time too. The lists of the session's
-	// model (models[].tools, disallowed_tools) are checked right after the
-	// mode's, before any hook or permission prompt.
+	// the mode boundary holds at execution time too. The session's toolset is
+	// checked right after the mode, before any hook or permission prompt.
 	if refusal, refused := a.toolCallRefused(mode, tc.Name); refused {
 		a.finishToolCall(sessionDir, sessionID, tc, refusal, nil, "cancelled")
 		return refusal, nil
@@ -2585,7 +2587,7 @@ func (a *Agent) callMCPTool(ctx context.Context, serverName, toolName, argsJSON 
 // models[] row the session runs on (toolsets.go). The row is read on every
 // call, so a switch of the model changes the set from the next request.
 func (a *Agent) currentToolDefinitions(mode string) []llm.ToolDefinition {
-	return filterToolDefsForModel(a.sessionToolDefinitions(mode), a.modelToolEntry())
+	return filterToolDefsByToolset(a.sessionToolDefinitions(mode), a.activeToolset())
 }
 
 // sessionToolDefinitions is the tool set of the session in a mode before the

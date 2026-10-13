@@ -156,16 +156,16 @@ func RunScheduledJob(ctx context.Context, cfg *config.Config, rt SubagentRuntime
 		}
 	}
 
-	// The run's tool set, decided once the MCP names are known. The lists of
-	// the model it runs on (models[].tools, disallowed_tools) apply while it
-	// runs, like a spawned child's (toolsets.go); a model that leaves the run
+	// The run's tool set, decided once the MCP names are known. The toolset
+	// the model it runs on names (models[].toolset) applies while it runs,
+	// like a spawned child's (toolsets.go); a toolset that leaves the run
 	// nothing is refused here, as a definition that does is.
 	registryNames := registryToolNamesForMode(cfg, mode)
-	runEntry := cfg.FindModelEntry(session.ResolveModelID(cfg, model))
+	runToolset := cfg.ResolveToolset(session.ResolveModelID(cfg, model), "")
 	resolve := func(mcpTools []string) []string {
 		all := append(append([]string(nil), registryNames...), mcpTools...)
 		effective := subagents.EffectiveTools(all, modeToolNames(mode, all), def, exclusions)
-		if len(narrowToolNamesForModel(effective, runEntry)) == 0 {
+		if len(narrowToolNamesByToolset(effective, runToolset)) == 0 {
 			return nil
 		}
 		return effective

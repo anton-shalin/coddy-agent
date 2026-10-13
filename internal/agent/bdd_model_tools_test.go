@@ -129,7 +129,7 @@ func splitToolList(list string) []string {
 	return out
 }
 
-func (s *modelToolsFeatureState) sessionOn(entry config.ModelEntry) error {
+func (s *modelToolsFeatureState) sessionOn(entry toolRow) error {
 	cwd, err := s.tempDir()
 	if err != nil {
 		return err
@@ -142,24 +142,26 @@ func (s *modelToolsFeatureState) sessionOn(entry config.ModelEntry) error {
 	s.st = &session.State{ID: "sess_bdd_model_tools", CWD: cwd, Mode: session.ModeAgent, SessionDir: sessionDir}
 	entry.Model = "fake/model"
 	entry.MaxTokens = 100
+	models, sets := toolRows(entry)
 	s.cfg = &config.Config{
 		Providers: []config.ProviderConfig{{Name: "fake", Type: "openai", APIKey: "test"}},
-		Models:    []config.ModelEntry{entry},
+		Models:    models,
+		Toolsets:  sets,
 		Agent:     config.Agent{Model: "fake/model", MaxTurns: 6},
 	}
 	return nil
 }
 
 func (s *modelToolsFeatureState) sessionWithTools(list string) error {
-	return s.sessionOn(config.ModelEntry{Tools: splitToolList(list)})
+	return s.sessionOn(toolRow{Tools: splitToolList(list)})
 }
 
 func (s *modelToolsFeatureState) sessionWithDisallowed(list string) error {
-	return s.sessionOn(config.ModelEntry{DisallowedTools: splitToolList(list)})
+	return s.sessionOn(toolRow{DisallowedTools: splitToolList(list)})
 }
 
 func (s *modelToolsFeatureState) sessionWithoutLists() error {
-	return s.sessionOn(config.ModelEntry{})
+	return s.sessionOn(toolRow{})
 }
 
 func (s *modelToolsFeatureState) buildAgent() error {
@@ -343,7 +345,7 @@ func (s *modelToolsFeatureState) callAnsweredWithModelRefusal() error {
 	if toolMsg == nil {
 		return fmt.Errorf("no tool result recorded for %s", bddModelToolsCallID)
 	}
-	for _, want := range []string{`tool "write" is not available on model fake/model`, "tools and disallowed_tools"} {
+	for _, want := range []string{`tool "write" is not offered`, `toolset "set-fake-model"`} {
 		if !strings.Contains(toolMsg.Content, want) {
 			return fmt.Errorf("tool result %q does not say %q", toolMsg.Content, want)
 		}
