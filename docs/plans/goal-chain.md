@@ -68,11 +68,14 @@ Out of scope (named in the pull request and the issue comment):
   writes the next `--then-file` when work remains, which is also what ends the
   chain cleanly; a template that never changes needs a separate stop rule.
 - `supervisor.chain_check: marker` (rule-based mode without a checking model).
-- A config key for the bound (`supervisor.max_chain_sessions`) and a minimum
-  interval between links: the bound is a backstop like `maxWakesPerSession`
-  (`internal/agent/background_notify.go`), and every link already costs a
-  turn, a check and a verification. A key would add the schema, the Settings
-  form, both dictionaries and a recaptured Settings screenshot.
+- A minimum interval between links: every link already costs a turn, a check
+  and a verification.
+- `[rev2]` The bound was first a constant, as a backstop like
+  `maxWakesPerSession` (`internal/agent/background_notify.go`). After the
+  implementation the operator asked for the key the issue proposed:
+  `supervisor.max_chain_sessions` (default 10, `0` turns goal chains off and
+  refuses `--then-file`), with its schema entry, the Settings field in
+  **Goal checks**, both dictionaries and the recaptured Settings screenshot.
 - Running a chain in a local console or a local `coddy acp`: the console shows
   one session and has no way to run another one's turn in the background.
 - A clickable link to the other session in the web UI, and the links in the
@@ -124,8 +127,10 @@ verifier could not confirm stops the chain with
 
 `continueGoalChain`, synchronous up to the first turn:
 
-1. `goal.ChainIndex >= goalChainSessionLimit` (10): notice
-   `Goal chain stopped: it opened 10 sessions`, nothing else.
+1. `goal.ChainIndex >= supervisor.max_chain_sessions` (10 by default; `0`
+   turns chains off) `[rev2]`: notice
+   `Goal chain stopped: it opened 10 sessions (supervisor.max_chain_sessions)`,
+   nothing else.
 2. No starter: notice `Goal chain stopped: this process cannot start a
    session on its own` (a goal set under `coddy serve`, reopened in a local
    console).

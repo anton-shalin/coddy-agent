@@ -770,3 +770,6 @@ supervisor.loop_repeat:
 supervisor.token_budget:
   en: "Uncached input plus output tokens one goal's turns may spend; 0 means no cap."
   ru: "Некэшированные входные плюс выходные токены, которые могут потратить ходы одной цели; 0 означает без ограничения."
+supervisor.max_chain_sessions:
+  en: "Sessions one goal chain (/goal --then-file) may open one after another; when the goal of the last one is met, the chain stops. 0 turns goal chains off."
+  ru: "Сколько сессий одна цепочка целей (/goal --then-file) может открыть одну за другой; когда цель последней из них выполнена, цепочка останавливается. 0 отключает цепочки целей."

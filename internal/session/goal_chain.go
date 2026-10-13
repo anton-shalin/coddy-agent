@@ -21,11 +21,6 @@ import (
 // to write the next task there (goalChainBlock), so the chain goes on for as
 // long as work remains and ends when no file is left.
 
-// goalChainSessionLimit bounds how many sessions one chain opens. It is a
-// backstop, like the cap on background wakes: what ends a chain is a
-// follow-up file nobody wrote.
-const goalChainSessionLimit = 10
-
 // goalChainReadLimit bounds what is read of a follow-up file: enough for the
 // longest objective in any encoding, plus one byte to tell it was longer.
 const goalChainReadLimit = MaxGoalObjectiveRunes*4 + 1
@@ -77,8 +72,12 @@ func (m *Manager) continueGoalChain(st *State, done GoalState, verifyRan bool, u
 		why := firstNonEmpty(unverified, "the verifier did not confirm it")
 		m.goalChainNotice(st, fmt.Sprintf("Goal chain stopped: the goal was not verified (%s)", why))
 		return
-	case done.ChainIndex >= goalChainSessionLimit:
-		m.goalChainNotice(st, fmt.Sprintf("Goal chain stopped: it opened %d sessions", goalChainSessionLimit))
+	case cfg.Supervisor.ChainSessionLimit() == 0:
+		m.goalChainNotice(st, "Goal chain stopped: goal chains are off (supervisor.max_chain_sessions: 0)")
+		return
+	case done.ChainIndex >= cfg.Supervisor.ChainSessionLimit():
+		// A backstop: what ends a chain is a follow-up file nobody wrote.
+		m.goalChainNotice(st, fmt.Sprintf("Goal chain stopped: it opened %d sessions (supervisor.max_chain_sessions)", cfg.Supervisor.ChainSessionLimit()))
 		return
 	case m.goalChainStart == nil:
 		m.goalChainNotice(st, "Goal chain stopped: this process cannot start a session on its own; the chain continues under coddy serve")
@@ -134,7 +133,7 @@ func (m *Manager) continueGoalChain(st *State, done GoalState, verifyRan bool, u
 	ns.SetSelectedReasoning(st.GetSelectedReasoning())
 	ns.SetPermissionMode(st.GetPermissionMode())
 	ns.SetGoal(next)
-	ns.AppendUILogNotice(0, fmt.Sprintf("Goal chain: continued from session %s (link %d of %d)", st.ID, next.ChainIndex, goalChainSessionLimit))
+	ns.AppendUILogNotice(0, fmt.Sprintf("Goal chain: continued from session %s (link %d of %d)", st.ID, next.ChainIndex, cfg.Supervisor.ChainSessionLimit()))
 
 	link := "Goal chain: continued in session " + ns.ID
 	st.UpdateGoal(link, func(g *GoalState) bool {

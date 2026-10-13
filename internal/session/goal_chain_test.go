@@ -3,6 +3,7 @@ package session_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"runtime"
@@ -25,6 +26,27 @@ func TestGoalChainIsRefusedWithoutAStarter(t *testing.T) {
 	res := h.prompt("/goal --then-file .coddy/next-task.md ship it")
 	if len(h.prompts) != 0 || h.st().GetGoal().Set() || !strings.Contains(res.SettingsNotice, "--then-file needs coddy serve") {
 		t.Fatalf("runs=%d goal=%+v notice=%q", len(h.prompts), h.st().GetGoal(), res.SettingsNotice)
+	}
+}
+
+// supervisor.max_chain_sessions: 0 turns goal chains off: --then-file is
+// refused when the goal is set, and a chained goal already stored ends its
+// chain when it is met.
+func TestGoalChainsTurnedOff(t *testing.T) {
+	h := newChainHarness(t)
+	h.mgr.Cfg().Supervisor.MaxChainSessions = intp(0)
+	res := h.prompt(h.sid, "/goal --then-file .coddy/next-task.md ship the fix")
+	if h.st(h.sid).GetGoal().Set() || !strings.Contains(res.SettingsNotice, "goal chains are off (supervisor.max_chain_sessions: 0)") {
+		t.Fatalf("goal=%+v notice=%q", h.st(h.sid).GetGoal(), res.SettingsNotice)
+	}
+	g := mustGoal(t, "ship the fix")
+	g.ThenFile, g.Status = nextTask, session.GoalPaused
+	h.st(h.sid).SetGoal(g)
+	h.writeAt(nextTask, "write the release notes")
+	h.prompt(h.sid, "/goal resume")
+	first := h.st(h.sid)
+	if first.GetGoal().ContinuedIn != "" || h.startCount() != 0 || !h.exists(nextTask) || !hasNotice(first, "Goal chain stopped: goal chains are off") {
+		t.Fatalf("goal=%+v starts=%d notices=%q", first.GetGoal(), h.startCount(), notices(first))
 	}
 }
 
@@ -166,13 +188,18 @@ func TestGoalChainStopsWhenTheGoalChangedDuringTheCheck(t *testing.T) {
 }
 
 // /goal resume keeps the follow-up file, and a chain stops once it has opened
-// its tenth session.
+// supervisor.max_chain_sessions sessions (10 by default).
 func TestGoalChainResumeAndBound(t *testing.T) {
 	for _, tc := range []struct {
-		index int
-		chain bool
-	}{{index: 3, chain: true}, {index: 10, chain: false}} {
+		index, limit int
+		chain        bool
+	}{{index: 3, chain: true}, {index: 10, chain: false}, {index: 2, limit: 3, chain: true}, {index: 3, limit: 3, chain: false}} {
 		h := newChainHarness(t)
+		want := 10
+		if tc.limit > 0 {
+			want = tc.limit
+			h.mgr.Cfg().Supervisor.MaxChainSessions = intp(tc.limit)
+		}
 		g := mustGoal(t, "ship the fix")
 		g.ThenFile, g.ChainIndex, g.Status = nextTask, tc.index, session.GoalPaused
 		h.st(h.sid).SetGoal(g)
@@ -180,7 +207,7 @@ func TestGoalChainResumeAndBound(t *testing.T) {
 		h.prompt(h.sid, "/goal resume")
 		first := h.st(h.sid)
 		if !tc.chain {
-			if first.GetGoal().ContinuedIn != "" || h.startCount() != 0 || !h.exists(nextTask) || !hasNotice(first, "Goal chain stopped: it opened 10 sessions") {
+			if first.GetGoal().ContinuedIn != "" || h.startCount() != 0 || !h.exists(nextTask) || !hasNotice(first, fmt.Sprintf("Goal chain stopped: it opened %d sessions", want)) {
 				t.Fatalf("index %d: goal=%+v starts=%d notices=%q", tc.index, first.GetGoal(), h.startCount(), notices(first))
 			}
 			continue

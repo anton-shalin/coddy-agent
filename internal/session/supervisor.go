@@ -242,9 +242,14 @@ func (m *Manager) applyGoalCommand(st *State, cmd GoalCommand, opts *PromptRunOp
 		if err != nil {
 			return nil, nil, "", err
 		}
-		if goal.ThenFile = strings.TrimSpace(cmd.ThenFile); goal.ThenFile != "" && m.goalChainStart == nil {
-			return nil, nil, "", fmt.Errorf("--then-file needs coddy serve: the next session of the chain starts on the server " +
-				"(the web UI, a messenger bot, or a console or an editor attached with --remote)")
+		if goal.ThenFile = strings.TrimSpace(cmd.ThenFile); goal.ThenFile != "" {
+			switch {
+			case cfg.Supervisor.ChainSessionLimit() == 0:
+				return nil, nil, "", fmt.Errorf("--then-file is refused: goal chains are off (supervisor.max_chain_sessions: 0)")
+			case m.goalChainStart == nil:
+				return nil, nil, "", fmt.Errorf("--then-file needs coddy serve: the next session of the chain starts on the server " +
+					"(the web UI, a messenger bot, or a console or an editor attached with --remote)")
+			}
 		}
 		if goal.Model, goal.Reasoning, err = resolveGoalChecker(cfg, st, cmd, GoalState{}); err != nil {
 			return nil, nil, "", fmt.Errorf("%v. %s", err, GoalUsage)

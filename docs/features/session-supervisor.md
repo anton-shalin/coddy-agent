@@ -64,7 +64,7 @@ The chain stops, with a row that says why, when:
 - the follow-up file does not exist or is empty, which is how a chain ends once the work is done;
 - the goal ends in any status but `complete`, or is paused or cleared; a goal is checked only in agent mode, so a plan or ask turn never moves a chain;
 - the verifier could not confirm a met verdict (with `supervisor.verify: false` the check alone is enough);
-- the chain has already opened 10 sessions;
+- the chain has already opened `supervisor.max_chain_sessions` sessions (10 by default; `0` turns goal chains off, and `--then-file` is then refused);
 - the file is longer than an objective may be or is not a regular file; it stays where it is.
 
 The new session runs with nobody watching it: a permission prompt gets the answer the permission mode gives, and whatever the mode would ask about is refused. An unattended chain needs the permission mode `bypass`, which the new session inherits and keeps across a restart of the server. The file is read whoever wrote it, so name a file you and the agent control: a checkout that already holds it starts its text as the next goal.
@@ -100,6 +100,7 @@ supervisor:
   verify: true               # confirm a met verdict against the workspace
   max_continuations: 10      # automatic turns per goal, then a wrap-up turn
   token_budget: 0            # uncached input + output tokens per goal; 0 = no cap
+  max_chain_sessions: 10     # sessions a goal chain (--then-file) opens; 0 = chains off
   stall_seconds: 300         # 0 turns the stall timer off
   max_nudges: 2              # recovery turns after a stall, a loop or a failed turn
   loop_repeat: 3             # 0 turns loop detection off
