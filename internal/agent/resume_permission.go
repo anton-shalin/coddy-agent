@@ -125,11 +125,11 @@ func (a *Agent) ResumeAfterPermission(ctx context.Context, toolCallID string, pe
 	// The same holds for a tool the session's model is no longer offered (a
 	// pending approval answered after a switch to a model whose tools lists
 	// leave it out).
-	_, refusedByMode := a.toolCallRefused(mode, tc.Name)
-	if st := sessionStatePtr(a.state); st != nil && !refusedByMode && !askAgain {
+	_, refused := a.toolCallRefused(mode, tc.Name)
+	if st := sessionStatePtr(a.state); st != nil && !refused && !askAgain {
 		permission.RecordAllowAlways(st, tc.Name, tc.InputJSON, toolEnv.CWD, perm)
 	}
-	if !refusedByMode && !askAgain {
+	if !refused && !askAgain {
 		a.switchPermissionModeFromDialog(ctx, toolEnv, perm)
 	}
 	if sd != "" {
