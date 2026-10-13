@@ -1,5 +1,5 @@
 import type { ChangeEvent, ReactNode } from "react";
-import { Fragment, useId, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useRef, useState } from "react";
 
 import { Chevron } from "../components/Chevron";
 
@@ -11,6 +11,7 @@ import {
   schemaFieldLabel,
   schemaFieldPlaceholder,
 } from "./schemaI18n";
+import { SETTINGS_REVEAL_EVENT } from "./settingsReveal";
 import { SwitchField } from "./SwitchField";
 import { useT } from "../i18n/I18nProvider";
 
@@ -241,6 +242,22 @@ function SchemaField(props: {
   const t = schema.type;
   const { t: tr, tp } = useT();
 
+  // Every field stands in a box of its own that carries its anchor, so a
+  // search can ring it and scroll to it. The frame of one entry of a list of
+  // objects is no field of its own: it is drawn with the list's path, and a
+  // box there would carry the list's anchor a second time.
+  const box = (node: ReactNode) =>
+    entryLabel === undefined ? (
+      <div
+        className="settings-field"
+        data-settings-anchor={fieldAnchor(i18nDomain, path)}
+      >
+        {node}
+      </div>
+    ) : (
+      node
+    );
+
   if (fieldOverride) {
     const override = fieldOverride({
       path,
@@ -249,8 +266,12 @@ function SchemaField(props: {
       onChange,
       parentObj,
     });
+    // false: the override draws nothing for this field, and nothing is a box.
+    if (override === false) {
+      return null;
+    }
     if (override != null) {
-      return <>{override}</>;
+      return box(<>{override}</>);
     }
   }
   let ph =
@@ -297,22 +318,22 @@ function SchemaField(props: {
         </fieldset>
       );
     }
-    return (
+    return box(
       <fieldset className="settings-fieldset">
         <LegendWithHint label={label} description={desc} />
         <div className="settings-nested">{fields}</div>
-      </fieldset>
+      </fieldset>,
     );
   }
 
   if (isStringMapSchema(schema)) {
-    return (
+    return box(
       <StringMapField
         label={label}
         description={desc}
         value={value}
         onChange={onChange}
-      />
+      />,
     );
   }
 
@@ -321,7 +342,7 @@ function SchemaField(props: {
     const itemSchema = schema.items;
     const scalarItems = isScalarItem(itemSchema);
     const setCount = schema.writeOnly ? configuredCount(schema, parentObj) : 0;
-    return (
+    return box(
       <fieldset className="settings-fieldset">
         <LegendWithHint label={label} description={desc} />
         {setCount > 0 ? (
@@ -399,7 +420,7 @@ function SchemaField(props: {
         >
           {tr("settings.array.add")}
         </button>
-      </fieldset>
+      </fieldset>,
     );
   }
 
@@ -411,13 +432,13 @@ function SchemaField(props: {
       value === undefined || value === null
         ? Boolean(schema.default)
         : Boolean(value);
-    return (
+    return box(
       <SwitchField
         checked={checked}
         onChange={(next) => onChange(next)}
         label={label}
         description={desc || undefined}
-      />
+      />,
     );
   }
 
@@ -429,7 +450,7 @@ function SchemaField(props: {
           ? ""
           : String(fallback)
         : String(value);
-    return (
+    return box(
       <div className="settings-row">
         <FieldLabel label={label} description={desc} />
         <Combobox
@@ -441,7 +462,7 @@ function SchemaField(props: {
             onChange(match !== undefined ? match : raw);
           }}
         />
-      </div>
+      </div>,
     );
   }
 
@@ -458,7 +479,7 @@ function SchemaField(props: {
       const parsed = Number(value);
       n = Number.isFinite(parsed) ? parsed : 0;
     }
-    return (
+    return box(
       <div className="settings-row">
         <FieldLabel label={label} description={desc} />
         <input
@@ -474,7 +495,7 @@ function SchemaField(props: {
             onChange(Number.isFinite(x) ? x : 0);
           }}
         />
-      </div>
+      </div>,
     );
   }
 
@@ -488,7 +509,7 @@ function SchemaField(props: {
     // The document serves it empty; empty keeps what is set, a value replaces
     // it. The placeholder is what says which of the two an empty field means.
     const set = configuredCount(schema, parentObj) > 0;
-    return (
+    return box(
       <div className="settings-row">
         <FieldLabel label={label} description={desc} />
         <input
@@ -505,10 +526,10 @@ function SchemaField(props: {
             onChange(e.target.value)
           }
         />
-      </div>
+      </div>,
     );
   }
-  return (
+  return box(
     <div className="settings-row">
       <FieldLabel label={label} description={desc} />
       <input
@@ -522,7 +543,7 @@ function SchemaField(props: {
           onChange(e.target.value)
         }
       />
-    </div>
+    </div>,
   );
 }
 
@@ -763,13 +784,29 @@ export function CollapsibleFieldset(props: {
   children: ReactNode;
   testid?: string | undefined;
   defaultOpen?: boolean | undefined;
+  /** The anchor of the fieldset (data-settings-anchor). */
+  anchor?: string | undefined;
 }) {
   const [open, setOpen] = useState(props.defaultOpen === true);
   const bodyId = useId();
+  const fieldsetRef = useRef<HTMLFieldSetElement>(null);
+  // Something inside is being revealed (a search took the operator to it): a
+  // fold above it opens, so the setting is not left in a hidden body.
+  useEffect(() => {
+    const fieldset = fieldsetRef.current;
+    if (!fieldset) {
+      return;
+    }
+    const reveal = () => setOpen(true);
+    fieldset.addEventListener(SETTINGS_REVEAL_EVENT, reveal);
+    return () => fieldset.removeEventListener(SETTINGS_REVEAL_EVENT, reveal);
+  }, []);
   return (
     <fieldset
+      ref={fieldsetRef}
       className={`settings-fieldset settings-fieldset--collapsible${open ? " is-open" : ""}`}
       data-testid={props.testid}
+      data-settings-anchor={props.anchor}
     >
       <legend>
         <button
@@ -914,6 +951,7 @@ export function SchemaForm(props: {
         key={`group:${g.id}`}
         legend={g.legend}
         testid={testid}
+        anchor={groupAnchor(i18nDomain, g.id)}
       >
         {fields.map(renderEntry)}
       </CollapsibleFieldset>
@@ -922,6 +960,7 @@ export function SchemaForm(props: {
         key={`group:${g.id}`}
         className="settings-fieldset settings-form-group"
         data-testid={testid}
+        data-settings-anchor={groupAnchor(i18nDomain, g.id)}
       >
         <LegendWithHint label={g.legend} description={g.description} />
         <div className="settings-form-group-body">
