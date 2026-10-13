@@ -1,11 +1,6 @@
 # Settings search design
 
-**Date:** 2026-10-13. The design was revised five times after review:
-- a technical and a UX review on 2026-10-12;
-- a cross-review on 2026-10-13;
-- its second, third and final rounds, also on 2026-10-13.
-
-Appendix A logs every finding.
+**Date:** 2026-10-13, after a technical and a UX review and four rounds of cross-review.
 
 **Status:** implemented in the pull request that adds this record. Section 17 lists where the implementation departs from the text above and why; the rest is the design as it was decided.
 
@@ -601,80 +596,17 @@ The three veto points (decisions 2, 9 and 11) are recorded as decisions. The mai
 
 ## 17. Implementation notes
 
-What the implementation does differently from the text above, and why. Each point is covered by the tests named in `DESIGN.md` (**Settings drawer**, **Search**).
+Where the implementation departs from the text above:
 
-1. **The component file is `settings/SettingsSearchView.tsx`.** `SettingsSearch.tsx` next to `settingsSearch.ts` resolves to the `.ts` module on a case-insensitive file system (macOS, Windows), so `tsc` fails there and the wrong module loads.
-2. **`landmarkAnchor` is a plain string builder in `settingsTexts.ts`**, beside `SETTINGS_TEXTS`, and does not throw. In `settingsSearch.ts` it made every landmark component import the index, which imports `SettingsSection`, which imports those components: a cycle. A drawn anchor the index does not declare still fails the drawing comparison. `SETTINGS_LANDMARKS` stays in `settingsSearch.ts`. For the same reason the `BoxTexts` types live in `settingsTexts.ts`, and `SkillsSection.tsx` exports the name of its hand-drawn field (`SKILLS_HAND_DRAWN_FIELD`) for `overrideTexts`.
-3. **Only what another file reads is exported.** `USAGE_PANEL_PROVIDER_TYPES` and `isBlockField` (8.1) stay private: the index reaches them through `overrideTexts` and `layoutSchemaForm`.
-4. **A tab result has no box.** The reveal takes the tab's scroll area (`.settings-scroll[data-settings-tab]`) to its top and focuses it, named by the tab while it holds the focus, with no ring. Its option carries `data-settings-target="tab:<section>"`.
-5. **A fold listens in a layout effect, and the reveal asks again.** In a real browser the reveal asked the fold to open in the mutation that mounted the box, before the fold's passive effect had attached its listener, so the fold never opened (jsdom did not show it). `CollapsibleFieldset` now listens in a layout effect, and the reveal dispatches the event again at every mutation while something above the box is hidden, then waits a frame before it scrolls and focuses.
-6. **The theme landmark has a wrapper of its own.** The Appearance sheet's root also holds the Language and Notifications blocks, so the theme label and swatches are wrapped in a plain `div` that carries the anchor; the layout does not change.
-7. **Small choices the design left open:** `/` also does nothing with the focus in a `<select>`; the polite status announces the shown results plus the counted rest; the ring's wash is an inset box-shadow of the same accent mix, so it fades with the ring; emptying the field (the native clear button of a search field included) clears the search like Escape; a click or focus in the field while the results show keeps the highlighted result; the highlight follows the pointer only when the pointer moves to another spot, because a browser reports a move at the same spot when new results come in under a resting pointer (the browser check found the highlight taken that way after a pasted query); on the narrow shell the results are put away when a tab opens under them (a deep link).
-8. **Two dictionary keys went away.** Once the overrides draw their names from one descriptor, `settings.field.apiBaseFallback` and `settings.field.modelIdFallback` were read by nothing: `schemaFieldLabel` never returns an empty name.
-9. **Test helpers are split by job.** `settingsServer.fakes.ts` holds the stub server (which fails a test on any route it does not serve), the schema copies, `configFromSchema` and the mount helpers; `settingsDrawing.fakes.ts` holds `drawnBoxes` and the comparison; `pinnedTip.fakes.ts` the pinned-tip helpers that `FieldHint.test.tsx` and the hidden-layer test share. `FieldHint` and `SessionTagEditor` also got unit tests of their own under a hidden pane, so their change was tested before the drawer existed.
-10. **The browser checks.** The relay asks for a client token even on loopback, so the search check takes it from `CODDY_RELAY_TOKEN`. The Telegram check's stand had stopped opening the Mini App on `origin/main` (the bot answers `/app` only for its admins), so its configuration now names the stand's chat as an admin. At the maintainer's request the search check also runs in CI: with `CODDY_BIN` set it starts its own agent and relay, and the Tests on PR workflow runs it in Chromium. WebKit and the Telegram `settings` scenario stay manual. The search check also asserts the kept query, the order of the tiers, a reveal into a model row, the Escape order, the touch focus and the scroll position of the hidden tab.
-11. **`revealWhenReady(root, entry, {touchOnly, reducedMotion})` returns its cancel and takes no `done` callback**; nothing needed one.
-12. **The address names the setting the operator was taken to.** Section 3 lists "a query in the address" as a non-goal, and section 9 says the address names only tabs and rows. After the first demo the maintainer asked for an address that names the highlighted setting, so a link can be sent at once. The Settings address gains `field=<anchor>` beside `id=<row>`: `#/settings/<tab>?id=<row>&field=<anchor>`, with `id=` only for a row of LLM providers or Logical models, the anchor URL-encoded (a colon as `%3A`) and `history=1` kept last. It is written with `replaceState`, so it adds no history entry, and `appNavHrefSettingsSection` takes one `SettingsAddress` (`{item, field, historySidebar}`) instead of three positional options.
-    - **Writing:** a choice that has a box (a field, a group, a block, a row) writes it; a tab result writes none.
-    - **Dropping:** the address loses the setting when the operator goes elsewhere (a rail click or a tile tap, the head's back arrow, another row, closing the drawer), and a new choice replaces it.
-    - **Opening:** an address that names a setting (a pasted link, a reload, a relay's own Settings, the Telegram Mini App, whose launch capture keeps it) opens the tab and the row through the route, and the drawer takes the operator to the setting as a choice does. The drawer finds the entry in the index by anchor, tab and row, and asks again when the index changes, because the first read may still be on its way. The address read back after a choice is not a second trip. An anchor the index does not know (a link written by another version) only opens the tab and the row.
-    - **The non-goal still holds in its own words:** the address names the setting, never the query. To share a setting, choose its result and copy the address.
-13. **A block of fields is a result that opens like a setting.** Section 5.1 already indexed groups for their legends. Choosing one now opens the tab and the row, unfolds the block when it is itself folded (a provider's Advanced settings), scrolls to it, rings the whole block and focuses the named block. The reveal treats a shut collapsible box like a hidden ancestor: a group chosen by its name is the fold, with its body hidden under it, and the event reaches it first. The comparison of the drawing with the index also checks that every legend, and every Appearance label, drawn in a tab is the heading of an indexed box; a mutation that drops a block's entry must fail it.
-14. **The `/` badge shows on every width, while it is useful.** Section 11 says the hint shows on the wide drawer only. It now shows inside the field while the field is empty and does not have the focus, on every width (a narrow desktop window has a keyboard); it hides while the field has the focus or holds text, and a touch-only device never shows it. After a jump the focus sits in the revealed setting, so the badge advertises the way back to the field. The documentation reader and the swarm screen keep their own rules for their badges.
-15. **The look of the reveal changed after the demo.** The ring replaces the box-shadow ring and wash of note 7. It is a 2px accent outline, 3px off the box so the switch and the label of a field never touch it, over a light accent wash (an inset shadow, so no ground of the box is painted over). Both come in over the first 8% of the 1.6 s, hold, and fade over the last 0.6 s, and under reduced motion they hold still. A box taller than its scroll area is aligned by its top instead of centred, so its name and its first fields show. Every box keeps a 12px scroll margin, so the ring is never cut at the edge of the scroll area. A box the reveal focused from the keyboard shows no second, browser focus ring once the ring has faded.
-16. **The spec and the browser check grew with these.** `features/web_ui_settings_search.feature` has 12 scenarios; it adds a link, a group and the badge. The browser check additionally asserts the address with `field=`, opening a link, a search for a group and the badge.
-
-17. **A result's config key has a line of its own.** Inline after the path (7.5), the key wrapped or not by the length of the path beside it, so the rows of one list had different shapes; on a line of its own every row looks the same.
-
-## Appendix A. Review log
-
-**Key:** T = technical review (2026-10-12), U = UX review (2026-10-12), C = cross-review (2026-10-13), X = its second round (2026-10-13), Y = its third round (2026-10-13), Z = its final round (2026-10-13).
-
-| # | Finding | What changed | Status |
-|---|---|---|---|
-| T1 | Escape reaches the hidden tab's listeners | `PaneHidden` stops `useEscapeCloses`; results showing is the first Escape step (7.3, 7.4) | resolved |
-| T2 | The narrow shell has its own rule; the row title shows over the results | 7.4, and a plain head (7.8) | resolved |
-| T3 | The wrong control is focused | The control named like the primary name, else the box (7.6) | resolved |
-| T4 | A move leaves contract text stale | No move (8.1) | resolved |
-| T5 | Holes in the single source | Superseded by C2, C3, X1, X2 and X6 | resolved |
-| T6 | `flushSync` in an effect | An ordinary state update, and a wait until visible (7.6) | resolved |
-| T7 | A selector built from user text | `dataset` comparison (7.6) | resolved |
-| T8 | Re-renders, normalization, test time, stub routes | A store, normalization at build, measured and reported, the stub route list | resolved |
-| T9 | Site publication; where the reduced-motion rule goes | Plan Task 11; section 11 | resolved |
-| T10 | The diff size | No move. The checks and the description line stay (C8). | resolved |
-| U1 | Keep the query | 7.2 | resolved |
-| U2 | Three tiers | 6.3 | resolved |
-| U3 | Touch focus | 7.6 | resolved |
-| U4 | Why the content column | 7.1 | resolved |
-| U5 | Status debounce; option names; description | 7.10, 7.5 | resolved |
-| U6 | Strings | 7.11, plan section 5 | resolved |
-| U7 | Hidden drafts | Kept while searching; a jump loses them as today; separate issue | resolved |
-| U8 | Docs assets | Plan section 6 | resolved |
-| U9 | One acceptance list | Plan sections 0.1 and 8 | resolved |
-| U10 | A duplicate row name | Superseded by C5 | resolved |
-| C1 | Real boxes, named fallbacks, browser verification | Real `.settings-field` boxes (8.2); named focus targets (7.6); browser assertions of the ring, the bounds and the focus (13). Finished with X1 (no box for an entry frame) and X4 (executable recipes). Completed by Y1 and Y6. Completed by Z2. | resolved |
-| C2 | The coverage guarantees; rows | An exact multiset of boxes, names and descriptions per box, with the mutation trio (8.3); rows named by `aria-label`. Finished with X1 and X2. Completed by Y2 and Y3. | resolved |
-| C3 | Drawn text diverges from the index | `overrideTexts` resolved and consumed by the drawing (X6); `settingsTexts.ts`; `notificationsShown()`; a Telegram run | resolved |
-| C4 | Portals outlive the pause | A full sweep table of portals and listeners (7.4), with `FieldHint` and `SessionTagEditor` handled (X3). Completed by Y4: one chokepoint per kind (`PanePortal`, `useEscapeCloses`) and a behavioural test over every layer, replacing the static test and FieldHint's own close. Completed by Z1. | resolved |
-| C5 | Duplicate-row navigation | Rows sharing a name are not indexed (5.4) | resolved |
-| C6 | Choosing the same result again; narrow `/` | A choice sequence; focus after commit (7.2, 7.3) | resolved |
-| C7 | End-to-end surfaces; the URL | The relay, a Telegram touch scenario, the chat edge, WebKit and Chromium, `/?lang=` (13). Recipes made executable by X4. Completed by Y5. | resolved |
-| C8 | Cut duplication, not acceptance | Existing scripts extended, one shared helper, measured | resolved |
-| C9 | Qualify the cache claim | Section 12, corrected by X7 | resolved |
-| X1 | Entry frames collide with the list's anchor | An entry frame gets no box; repeated child boxes; multiset comparison; empty and two-entry cases (5.1, 8.2, 8.3, 9). Completed by Y1 (the first box in document order, unfolded before the wait) and Y2 (counts read from the drawing, not stored). | resolved |
-| X2 | Landmark collection takes in operational controls | A landmark is its heading plus the heading's (i), and nothing below (5.1, 8.3); stale-entry and changed-label mutations added | resolved |
-| X3 | `SessionTagEditor` escapes the pause | Handled, with a full sweep table of portals and listeners in Settings' import closure (7.4). Completed by Y4: the static test is replaced by the chokepoints and a behavioural test. Completed by Z1. | resolved |
-| X4 | Browser recipes cannot run as written | Focus moved out before `/`; a Telegram touch context with the media query asserted; results reopened before Back; tab-to-tiles Back as its own step; manual runs with prerequisites, since CI does not run these scripts (13, plan Task 9) Completed by Y5 and Y6. Completed by Z2. | resolved |
-| X5 | Structural tests and test placement | `blocks()` unwraps `.settings-field`; drawer cases in `Settings.test.tsx`, comparison in `SettingsSection.test.tsx`, a shared fake extracted from `Settings.test.tsx` (13) | resolved |
-| X6 | Who owns the override texts | The drawing consumes the resolved descriptor (8.1). The primary name is the title and the focus name (7.5, 7.6). The Proxy URL focus requirement is kept. | resolved |
-| X7 | When an edited rule reaches a session | Rewritten: a rules generation rediscovers the catalog, and a scoped rule reaches history on activation (12) | resolved |
-| Y1 | A folded target could deadlock the reveal | The mounted box is found first, its folds open, then the drawer waits for visibility (7.6). A folded entry is not an empty list. | resolved |
-| Y2 | Expected box counts go stale when a list is edited | The index carries no count. The comparison reads each list's count from the drawing, per actual parent entry (8.3). An edit-after-index regression is added. | resolved |
-| Y3 | Primary-first comparison conflicts with the markup's order | Names and descriptions are compared as multisets. The primary title and the focused control are asserted separately. The markup keeps its order (8.3). | resolved |
-| Y4 | The static sweep test did not establish its guarantee | Replaced by two chokepoints, `PanePortal` and `useEscapeCloses`, plus a behavioural test over every layer in the sweep table. The narrower guarantee is stated (7.4). The sweep now lists FieldHint's `touchstart` (`:102`). Completed by Z1. | resolved |
-| Y5 | Browser recipes are still non-executable | Queries are config keys; results are picked by anchor; expected names are read from the page. On a narrow shell, the script goes back to the tiles before reopening (13). | resolved |
-| Y6 | The shared helper's contract | It polls for the class and the computed ring, checks the viewport and scroll area intersection, and checks exact focus identity (13). Completed by Z2. | resolved |
-| Y7 | The Russian empty state asks for shorter words | It now asks for fewer words (plan section 5). | resolved |
-| Z1 | A hidden pinned tip was closed by scrolling the results | `FieldHint` pauses its close listeners while its pane is hidden and is placed again when shown; the behavioural test scrolls the results and checks the tip is still pinned and placed (7.4) | resolved |
-| Z2 | The helper read bounds before a smooth scroll finished | The ring, the bounds and the focus identity are polled together until all hold, within the deadline (13) | resolved |
-| Z3 | The Russian greps cannot be empty | The plan requires no new matches: the greps list only the policy and check files `origin/main` already has, and the diff adds none (plan Task 7) | resolved |
+1. The component file is `settings/SettingsSearchView.tsx`: `SettingsSearch.tsx` resolves to `settingsSearch.ts` on a case-insensitive file system.
+2. `overrideTexts(domain, path, parent, schema)` returns the resolved strings (`OverrideTexts`); the overrides draw from it and the index reads it, so there is no descriptor of dictionary keys between them. `landmarkAnchor` is a plain builder in `settingsTexts.ts`, so a component never imports the index (an import cycle otherwise); a drawn anchor the index lacks still fails the comparison.
+3. Only what another file reads is exported: `USAGE_PANEL_PROVIDER_TYPES` and `isBlockField` stay private.
+4. A tab result has no box: its scroll area is taken to the top and focused, with no ring.
+5. A fold listens for the reveal in a layout effect, and the reveal asks again on every mutation while something above the box is hidden: in a real browser the first ask came before a passive effect had attached the listener.
+6. The highlight follows the pointer only when it moves to another spot; a browser reports a move at the same spot when new results come in under a resting pointer.
+7. Choosing a result writes `field=<anchor>` beside `id=<row>` (`#/settings/<tab>?id=<row>&field=<anchor>`); opening such an address reveals the setting, and leaving it drops `field=`. This narrows the non-goal of section 3: the address names a setting, never a query.
+8. Groups are results in their own right, and a folded group that is itself the target unfolds; the comparison also checks that every drawn legend is the heading of an indexed box.
+9. The `/` badge shows in the empty, unfocused field on every width and never on a touch-only device.
+10. The ring is a 2px accent outline 3px off the box over a light wash; a box taller than its scroll area is aligned by its top; every box keeps a 12px scroll margin; a result's config key has a line of its own.
+11. Smaller choices: `/` is also ignored in a `<select>`; the status counts the shown and the counted results; emptying the field clears the search; the theme landmark has a wrapper of its own; two dictionary keys nothing read any more were removed.
+12. The browser checks: the relay stand needs `CODDY_RELAY_TOKEN`; the Telegram stand names its chat as an admin, since `/app` opens only for a bot's admins; the search check runs in CI in Chromium, starting its own agent and relay from `CODDY_BIN`.
