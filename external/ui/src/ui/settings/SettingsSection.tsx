@@ -757,11 +757,19 @@ function objectSectionGroups(key: string): SchemaFormGroup[] | undefined {
     ];
   }
   if (key === "compaction") {
+    // The section's own switch turns compaction off altogether; the automatic
+    // one only the trigger, so it stands in a group with the threshold it
+    // fires at, under the master switch rather than beside it.
     return [
+      {
+        id: "auto",
+        legend: translate("settings.group.compaction.auto"),
+        paths: ["auto_enable", "threshold_percent"],
+      },
       {
         id: "summary",
         legend: translate("settings.group.compaction.summary"),
-        paths: ["threshold_percent", "keep_recent_turns", "model"],
+        paths: ["keep_recent_turns", "model"],
       },
     ];
   }
@@ -776,15 +784,6 @@ function objectSectionGroups(key: string): SchemaFormGroup[] | undefined {
         id: "watchdog",
         legend: translate("settings.group.supervisor.watchdog"),
         paths: ["stall_seconds", "max_nudges", "loop_repeat"],
-      },
-    ];
-  }
-  if (key === "tools") {
-    return [
-      {
-        id: "permissions",
-        legend: translate("settings.group.tools.permissions"),
-        paths: ["permission_mode"],
       },
     ];
   }
@@ -815,6 +814,18 @@ function objectSectionGroups(key: string): SchemaFormGroup[] | undefined {
           "max_search_hits",
           "max_note_chars",
         ],
+      },
+    ];
+  }
+  if (key === "decisions") {
+    // The switch opens the tab on its own; the two knobs of the verdict sit
+    // together, what they mean behind the (i).
+    return [
+      {
+        id: "verdict",
+        legend: translate("settings.group.decisions.verdict"),
+        description: translate("settings.group.decisions.verdictDesc"),
+        paths: ["model", "threshold"],
       },
     ];
   }

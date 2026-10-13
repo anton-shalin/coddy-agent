@@ -14,6 +14,26 @@ export const messagesRu: Record<string, string> = {
   "appearance.theme.monokai": "Monokai",
   "appearance.theme.nord": "Nord",
   "appearance.theme.rosePine": "Rosé Pine",
+  "appearance.notificationsLabel": "Уведомления",
+  "appearance.notifications.toggle": "Системные уведомления",
+  "appearance.notifications.hint":
+    "Пока Coddy в фоне, браузер сообщает, что агент закончил ход, просит разрешение или задал вопрос в чате, который вы открыли или куда писали в этой вкладке. Нажатие на уведомление открывает чат. Настройка хранится в этом браузере.",
+  "appearance.notifications.denied":
+    "Браузер запретил уведомления для этого сайта. Разрешите их в настройках сайта в браузере и включите переключатель.",
+  "appearance.notifications.insecure":
+    "Уведомлениям нужно защищённое соединение. Откройте Coddy по https или на localhost.",
+  "appearance.notifications.unsupported":
+    "Этот браузер не показывает уведомления веб-страниц.",
+
+  "notify.untitled": "Coddy",
+  "notify.turnFinished": "Агент закончил ход.",
+  "notify.turnFailed": "Ход завершился ошибкой: {error}",
+  "notify.permission": "Нужно разрешение: {tool}",
+  "notify.toolUnnamed": "инструмент",
+  "notify.question": "Агент задал вам вопрос.",
+  "notify.questionWithText": "Агент спрашивает: {question}",
+  "notify.subagentPermission": "{agent} просит разрешение: {tool}",
+  "notify.subagentUnnamed": "Субагент",
 
   "auth.signIn.logoAlt": "Coddy агент",
   "auth.signIn.title": "Вход",
@@ -96,6 +116,7 @@ export const messagesRu: Record<string, string> = {
   "settings.section.mcp_servers.label": "MCP-серверы",
   "settings.section.skills.label": "Навыки",
   "settings.section.memory.label": "Память",
+  "settings.section.decisions.label": "Безопасность команд (decisions)",
   "settings.section.system.label": "Промпты",
   "settings.section.compaction.label": "Сжатие контекста",
   "settings.section.subagents.label": "Субагенты",
@@ -110,6 +131,7 @@ export const messagesRu: Record<string, string> = {
   "settings.section.mcp_servers.desc": "Внешние MCP-инструменты",
   "settings.section.skills.desc": "Установленные скилы (slash)",
   "settings.section.memory.desc": "Параметры субагента памяти",
+  "settings.section.decisions.desc": "Проверка небезопасных команд",
   "settings.section.system.desc": "Шаблоны и файлы инструкций",
   "settings.section.compaction.desc": "Сжатие истории диалога",
   "settings.section.subagents.desc": "Пул делегирования и доверие",
@@ -254,14 +276,17 @@ export const messagesRu: Record<string, string> = {
   "settings.group.hooks.main": "Настройки хуков",
   "settings.group.hooks.mainDesc":
     "Как выполняются хуки, то есть можно ли запускать файлы, пришедшие с чекаутом, сколько может длиться один процесс хука без своего таймаута, сколько раз хук Stop может вернуть агента к работе и сколько текста может передать один хук.",
+  "settings.group.compaction.auto": "Автоматическое сжатие",
   "settings.group.compaction.summary": "Суммаризация",
   "settings.group.supervisor.checks": "Проверки цели",
   "settings.group.supervisor.watchdog": "Сторож",
-  "settings.group.tools.permissions": "Разрешения",
   "settings.group.memory.model": "Модель и хранилище",
   "settings.group.memory.runs": "Запуски",
   "settings.group.memory.limits": "Ограничения",
   "settings.group.memory.instructions": "Инструкции",
+  "settings.group.decisions.verdict": "Модель и порог",
+  "settings.group.decisions.verdictDesc":
+    "Модель decisions получает каждую команду оболочки, локальную или через SSH, которую вы не разрешили явно, и команда считается небезопасной, когда вероятность небезопасного варианта достигает порога. Команда длиннее того, что читает модель, тоже считается небезопасной, frida-decisions читает 512 токенов, clef-flash 8192. Для проверки нужны учётные данные NeuralDeep в строке провайдера neuraldeep.",
   "settings.group.scheduler.jobs": "Задания",
   "settings.group.logger.main": "Настройки логирования",
   "settings.group.sessions.storage": "Хранилище",
@@ -457,7 +482,7 @@ export const messagesRu: Record<string, string> = {
     "Предел итераций ReAct, включая вызовы LLM и раунды инструментов, на один запрос пользователя. По умолчанию 165, а 0 явно снимает предел.",
   "settings.schema.agent.llm_retry_max.label": "Максимум повторов LLM",
   "settings.schema.agent.llm_retry_max.desc":
-    "Общий лимит повторов после ошибок соединения, пустых ответов и тайм-аута первого токена. Сбрасывается после вызова инструмента или нового сообщения. 0 отключает эти повторы. Защита от циклов, Stop-хуки, резервные модели и ожидание квоты имеют отдельные лимиты.",
+    "Общий лимит повторов после ошибок соединения, пустых ответов, тайм-аута первого токена и упора в предел вывода (шаг оборвался по max_tokens). Сбрасывается после вызова инструмента или нового сообщения. 0 отключает эти повторы. Защита от циклов, Stop-хуки, резервные модели и ожидание квоты имеют отдельные лимиты.",
   "settings.schema.agent.llm_retry_base_ms.label": "База повтора LLM, мс",
   "settings.schema.agent.llm_retry_base_ms.desc":
     "Начальная пауза между повторами LLM в миллисекундах; серверная пауза (Retry-After) имеет приоритет.",
@@ -487,9 +512,6 @@ export const messagesRu: Record<string, string> = {
   "settings.schema.agent.loop_nudge_max.desc":
     "Сколько раз за один шаг модель можно вернуть на путь, прежде чем защита от зацикливания остановит его.",
 
-  "settings.schema.tools.permission_mode.label": "Режим разрешений",
-  "settings.schema.tools.permission_mode.desc":
-    "Определяет, когда агент запрашивает одобрение перед запуском инструментов. «ask» — подтверждать команды и запись файлов. «accept_edits» — автоматически принимать правки, подтверждать команды. «bypass» — не спрашивать вовсе. Сессия может сменить свой режим до перезапуска процесса (/permissions, чип в композере, диалог разрешений), сюда эта смена не записывается.",
   "settings.schema.tools.command_allowlist.label": "Белый список команд",
   "settings.schema.tools.command_allowlist.desc":
     "Если не пуст, без дополнительной политики могут запускаться только команды с этими префиксами.",
@@ -626,6 +648,15 @@ export const messagesRu: Record<string, string> = {
   "settings.schema.memory.model.label": "Модель памяти",
   "settings.schema.memory.model.desc":
     "Модель, на которой работает субагент памяти; пусто - модель сессии.",
+  "settings.schema.decisions.enable.label": "Включено",
+  "settings.schema.decisions.enable.desc":
+    "Спрашивать NeuralDeep decisions API, безопасна ли команда оболочки, локальная или через SSH, до того как решает шлюз разрешений. Безопасная команда выполняется без запроса. О небезопасной в режимах ask и accept_edits спрашивают, а в режиме bypass её отклоняют, и отказ попадает в чат как результат команды. Список разрешённых команд, гранты сессии, allow-хук и команды, одобренные в запросе разрешения, не проверяются.",
+  "settings.schema.decisions.model.label": "Модель decisions",
+  "settings.schema.decisions.model.desc":
+    "frida-decisions: проход энкодера, до 512 токенов текста команды, ~20 мс на запрос, 1 единица квоты. clef-flash: до 8192 токенов, ~150 мс, 4 единицы квоты.",
+  "settings.schema.decisions.threshold.label": "Порог небезопасности",
+  "settings.schema.decisions.threshold.desc":
+    'Вероятность опции "небезопасно", начиная с которой команда считается небезопасной. 0 - значение по умолчанию (0,5); ниже - строже, выше - допускает пограничные команды.',
   "settings.schema.memory.fallback_models.label": "Резервные модели памяти",
   "settings.schema.memory.fallback_models.desc":
     "Пробуются по порядку, когда предыдущая модель отказала до ответа; модель сессии остаётся последним вариантом.",
@@ -673,10 +704,10 @@ export const messagesRu: Record<string, string> = {
   "settings.schema.compaction.enable.label": "Включено",
   "settings.schema.compaction.enable.desc":
     "Главный выключатель сжатия (ручная команда и автоматический триггер). По умолчанию включено.",
-  "settings.schema.compaction.auto_enable.label": "Автоматическое сжатие",
+  "settings.schema.compaction.auto_enable.label": "Включено",
   "settings.schema.compaction.auto_enable.desc":
-    "Включает сжатие по порогу. При выключении ручное сжатие остаётся доступным. По умолчанию включено.",
-  "settings.schema.compaction.threshold_percent.label": "Порог авто-сжатия (%)",
+    "Сжимать самостоятельно: сворачивать старые ходы на пороге, а если их нет, более ранние шаги длинного хода, и один раз сжать и повторить запрос, который провайдер отклонил как слишком большой для окна контекста. При выключении ручное сжатие остаётся доступным. По умолчанию включено.",
+  "settings.schema.compaction.threshold_percent.label": "Порог (%)",
   "settings.schema.compaction.threshold_percent.desc":
     "Авто-сжатие, когда оценка контекста достигает этой доли от окна контекста модели (1..100, по умолчанию 80): её max_context_tokens, иначе окно, которое сообщает провайдер, иначе 128000.",
   "settings.schema.compaction.keep_recent_turns.label":
@@ -687,20 +718,28 @@ export const messagesRu: Record<string, string> = {
   "settings.schema.compaction.model.desc":
     "Необязательный models[].model для вызова суммаризации; пусто — модель сессии.",
   "settings.schema.compaction.result_eviction.label":
-    "Вытеснение результатов read/grep",
+    "Вытеснение результатов инструментов",
   "settings.schema.compaction.result_eviction.desc":
-    "Свёртывает устаревшие результаты read/grep в плейсхолдеры при сборке запроса LLM; сохранённый транскрипт не меняется. Выживают только помеченные (keep_result / keep:true) или самые свежие результаты.",
+    "Свёртывает устаревшие результаты инструментов (страницы read, выдачи grep и просмотры glob, print_tree, websearch и webfetch) в плейсхолдеры при сборке запроса LLM; сохранённый транскрипт не меняется. Результаты read и grep выживают, если помечены (keep_result / keep:true) или входят в число самых свежих; просмотры выживают в трёх последних шагах.",
   "settings.schema.compaction.result_eviction.enable.label": "Включено",
   "settings.schema.compaction.result_eviction.enable.desc":
-    "Главный выключатель вытеснения результатов read/grep. По умолчанию включено.",
+    "Главный выключатель вытеснения результатов инструментов. По умолчанию включено.",
   "settings.schema.compaction.result_eviction.keep_recent.label":
     "Сохранять последние результаты",
   "settings.schema.compaction.result_eviction.keep_recent.desc":
-    "Сколько самых свежих вытесняемых результатов остаются целыми как рабочее окно (по умолчанию 2 — достаточно для одновременных read и grep; 0 — не сохранять ничего).",
+    "Сколько самых свежих результатов read и grep остаются целыми как рабочее окно (по умолчанию 2 - достаточно для одновременных read и grep; 0 - не сохранять ничего).",
   "settings.schema.compaction.result_eviction.min_result_bytes.label":
     "Мин. размер результата, байт",
   "settings.schema.compaction.result_eviction.min_result_bytes.desc":
     "Результаты этого размера и меньше никогда не вытесняются (по умолчанию 2000; 0 — кандидат любой результат).",
+  "settings.schema.compaction.fallback_models.label":
+    "Резервные модели суммаризации",
+  "settings.schema.compaction.fallback_models.desc":
+    "Модели суммаризации, которые пробуются по порядку, если предыдущая не сработала. Собственная модель сессии - последний вариант, указана она здесь или нет.",
+  "settings.schema.compaction.result_eviction.start_percent.label":
+    "Начинать с (%)",
+  "settings.schema.compaction.result_eviction.start_percent.desc":
+    "Вытеснять, только когда оценка контекста достигла этого процента окна контекста модели (по умолчанию 50; 0 - с первого результата). Ниже порога история отправляется без изменений, и кэш промптов провайдера сохраняется. Результаты read и grep модели без max_context_tokens вытесняются с первого результата.",
 
   "settings.schema.scheduler.label": "Планировщик",
   "settings.schema.scheduler.enable.label": "Включено",
@@ -1448,7 +1487,7 @@ export const messagesRu: Record<string, string> = {
   "composer.modePlan": "План",
   "composer.permission": "Разрешения",
   "composer.permissionTitle":
-    "Когда инструменты спрашивают одобрение в этой сессии (режим конфигурации: {configured})",
+    "Когда инструменты спрашивают одобрение в этой сессии (режим новых сессий: {configured})",
   "composer.permissionAsk": "Спрашивать",
   "composer.permissionAcceptEdits": "Правки без вопросов",
   "composer.permissionBypass": "Без вопросов",
@@ -1843,6 +1882,8 @@ export const messagesRu: Record<string, string> = {
   "tasks.estimate": "оценка {value}",
   "tasks.exitCode": "код {code}",
   "tasks.overdue": "просрочена",
+  "tasks.startedTitle": "Запущена {time}",
+  "tasks.finishedTitle": "Завершена {time}",
   "tasks.status.queued": "В очереди",
   "tasks.status.running": "Выполняется",
   "tasks.status.succeeded": "Успешно",

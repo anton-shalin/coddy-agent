@@ -64,7 +64,7 @@ func TestUISchemaRootPropertyOrder(t *testing.T) {
 	// the process last.
 	want := []interface{}{
 		"providers", "models",
-		"agent", "supervisor", "compaction", "memory",
+		"agent", "supervisor", "compaction", "memory", "decisions",
 		"tools", "skills", "subagents", "hooks",
 		"scheduler", "gateways",
 		"logger", "sessions", "prompts", "instructions",
@@ -302,6 +302,39 @@ func TestRulesUIAndFallbackModelsSurviveTheJSONDTO(t *testing.T) {
 	}
 	if len(back.Memory.FallbackModels) != 1 || back.Memory.FallbackModels[0] != "codex/gpt-5.5" {
 		t.Fatalf("memory.fallback_models lost: %v", back.Memory.FallbackModels)
+	}
+}
+
+// The Settings form is drawn from UISchemaMap: compaction has no in_turn
+// section (the fold of the turn and the recovery are part of auto_enable), and
+// result_eviction offers only the read/grep knobs (the listing tools and their
+// step window are fixed in the agent, so the form has no control for them).
+func TestUISchemaCompactionOffersNoInTurnSection(t *testing.T) {
+	doc := config.UISchemaMap()
+	compaction := doc["properties"].(map[string]interface{})["compaction"].(map[string]interface{})
+	props := compaction["properties"].(map[string]interface{})
+
+	order := func(node map[string]interface{}) []string {
+		var got []string
+		raw, _ := node["x-coddy-property-order"].([]interface{})
+		for _, v := range raw {
+			got = append(got, v.(string))
+		}
+		return got
+	}
+
+	if _, ok := props["in_turn"]; ok {
+		t.Fatalf("compaction.in_turn = %#v, want no such section", props["in_turn"])
+	}
+	if got, want := order(compaction), []string{"enable", "auto_enable", "threshold_percent", "keep_recent_turns", "model", "result_eviction"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("compaction field order %v, want %v", got, want)
+	}
+
+	re := props["result_eviction"].(map[string]interface{})
+	reFields := re["properties"].(map[string]interface{})
+	want := []string{"enable", "keep_recent", "min_result_bytes", "start_percent"}
+	if got := order(re); !reflect.DeepEqual(got, want) || len(reFields) != len(want) {
+		t.Fatalf("result_eviction fields %v (order %v), want %v", reFields, got, want)
 	}
 }
 

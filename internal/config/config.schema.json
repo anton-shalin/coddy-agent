@@ -158,7 +158,7 @@
             "integer",
             "null"
           ],
-          "description": "Extra attempts shared by transport retries, empty-answer recovery and first-token re-issues until tool progress or a new follow-up. 0 disables these retries. Loop guards, Stop hooks, fallback models and quota-reset waits have separate limits.",
+          "description": "Extra attempts shared by transport retries, empty-answer recovery, first-token re-issues and output-limit recovery (a step cut off at max_tokens) until tool progress or a new follow-up. 0 disables these retries. Loop guards, Stop hooks, fallback models and quota-reset waits have separate limits.",
           "default": 3,
           "minimum": 0
         },
@@ -396,16 +396,6 @@
       "description": "Filesystem and shell policy for built-in tools.",
       "additionalProperties": false,
       "properties": {
-        "permission_mode": {
-          "type": "string",
-          "description": "When the agent asks for user approval: \"ask\" prompts for commands and file writes; \"accept_edits\" auto-approves writes but prompts for commands; \"bypass\" never asks (trusted environments only). A session may switch its own mode until the process restarts (/permissions, the composer chip, the permission dialog); the switch is never written here.",
-          "default": "ask",
-          "enum": [
-            "ask",
-            "accept_edits",
-            "bypass"
-          ]
-        },
         "command_allowlist": {
           "type": "array",
           "description": "Commands that never require permission. Exact or prefix match (prefix + space + any args). \"*\" allows all commands.",
@@ -633,7 +623,7 @@
         "http_request": {
           "type": "object",
           "title": "HTTP requests",
-          "description": "Policy of the http_request tool, the agent's curl: the destinations it reaches without asking and the headers every request sends. Under permission_mode ask or accept_edits a request asks the operator unless its destination is allowed here or was approved in the session; bypass never asks. See https://coddy.dev/docs/features/http-requests.",
+          "description": "Policy of the http_request tool, the agent's curl: the destinations it reaches without asking and the headers every request sends. Under the ask and accept_edits permission modes a request asks the operator unless its destination is allowed here or was approved in the session; bypass never asks. See https://coddy.dev/docs/features/http-requests.",
           "additionalProperties": false,
           "properties": {
             "allowlist": {
@@ -896,7 +886,7 @@
             "boolean",
             "null"
           ],
-          "description": "Enable automatic compaction at threshold_percent. Set false to keep manual /compact and the Context popover action available without automatic compaction. Defaults to true.",
+          "description": "Compact automatically: at threshold_percent, older turns are folded into a summary, or, when the window holds no earlier turn, the earlier steps of the turn being answered (the summary row then starts with the prompt itself, verbatim, and at most the four latest steps stay); and a request the provider refuses as larger than its context window is compacted once and asked again. Set false to keep manual /compact and the Context popover action available without any of this. Defaults to true.",
           "default": true
         },
         "threshold_percent": {
@@ -929,8 +919,8 @@
         },
         "result_eviction": {
           "type": "object",
-          "title": "Read/grep result eviction",
-          "description": "Collapses superseded read/grep tool results to short placeholders when building the LLM request (the persisted transcript is never rewritten), so paging a large file or a wide search cannot pin dead lines in every later turn. Only results the model marks (keep_result, or keep:true) or the most recent working window survive; a write to a file invalidates earlier reads/greps that covered it.",
+          "title": "Tool result eviction",
+          "description": "Collapses superseded tool results to short placeholders when building the LLM request (the persisted transcript is never rewritten), so paging a large file, a wide search or a fan-out of directory listings cannot pin dead lines in every later turn. Read and grep results survive while the model marks them (keep_result, or keep:true) or they are among the most recent; the listings of glob, print_tree, websearch and webfetch survive within the latest three steps that hold one (a step is one assistant message with every result of its tool calls). A write invalidates earlier reads, greps and file listings that covered what it changed.",
           "additionalProperties": false,
           "properties": {
             "enable": {
@@ -938,7 +928,7 @@
                 "boolean",
                 "null"
               ],
-              "description": "Master switch for read/grep result eviction. Defaults to true.",
+              "description": "Master switch for tool result eviction (read, grep and the listing tools). Defaults to true.",
               "default": true
             },
             "keep_recent": {
@@ -946,7 +936,7 @@
                 "integer",
                 "null"
               ],
-              "description": "How many most recent evictable results (read pages, grep dumps) stay intact as a working window. 0 keeps none. The default of 2 keeps a read and a grep live at the same time; with 1, a model comparing two results keeps re-fetching whichever the other evicted.",
+              "description": "How many most recent evictable read and grep results (read pages, grep dumps) stay intact as a working window. 0 keeps none. Listing results do not count toward it. The default of 2 keeps a read and a grep live at the same time; with 1, a model comparing two results keeps re-fetching whichever the other evicted.",
               "default": 2,
               "minimum": 0
             },
@@ -964,7 +954,7 @@
                 "integer",
                 "null"
               ],
-              "description": "Evict only once the estimated context reaches this percent of the effective model's max_context_tokens. Below it the replayed history is sent untouched, so the provider's prompt cache keeps it; a placeholder appearing mid-history invalidates every cached token behind it. 0 evicts from the first result; a model without max_context_tokens always does.",
+              "description": "Evict only once the estimated context reaches this percent of the model's context window. Below it the replayed history is sent untouched, so the provider's prompt cache keeps it; a placeholder appearing mid-history invalidates every cached token behind it. 0 evicts from the first result. Read and grep results of a model without max_context_tokens are evicted from the first result; listing results measure against the window its provider reports, or the default 128000.",
               "default": 50,
               "minimum": 0,
               "maximum": 100
@@ -1059,6 +1049,35 @@
           "type": "integer",
           "description": "Cap on additional_prompt in characters; a longer text is cut there, the agent log says so and coddy -t reports it. 0 means no cap.",
           "default": 0
+        }
+      }
+    },
+    "decisions": {
+      "type": "object",
+      "title": "Command safety decisions",
+      "description": "Ask the NeuralDeep decisions API whether a shell command is safe before the permission gate decides: a safe command runs without a prompt, an unsafe one is asked about, or rejected in bypass mode. See https://coddy.dev/docs/features/decisions.",
+      "additionalProperties": false,
+      "properties": {
+        "enable": {
+          "type": "boolean",
+          "description": "Check run_command and ssh_run_command calls the operator did not allow explicitly against the decisions endpoint before the permission gate decides. A safe command runs without a prompt; an unsafe one, or one the check gave no verdict on, is asked about in ask and accept_edits with the verdict in the prompt, and rejected in bypass mode, the rejection returned as the tool result so the session records it. Commands the allowlist, a session grant or a hook's allow approves are not checked, and neither are commands the operator approved in a prompt. Needs a NeuralDeep credential on the first provider row of type neuraldeep: its api_key or api_key_command, its NAME_API_KEY environment variable (NEURALDEEP_API_KEY for a row named neuraldeep or when there is no row) or its stored hub sign-in.",
+          "default": false
+        },
+        "model": {
+          "type": "string",
+          "description": "Decisions model to ask: frida-decisions (encoder pass, up to 512 tokens of command text, ~20 ms per request) or clef-flash (up to 8192 tokens, ~150 ms).",
+          "enum": [
+            "frida-decisions",
+            "clef-flash"
+          ],
+          "default": "frida-decisions"
+        },
+        "threshold": {
+          "type": "number",
+          "description": "Probability of the unsafe option at or above which a command counts as unsafe. 0 uses the default (0.5); lower is stricter, higher lets borderline commands through. A bare unsafe answer counts as 1.",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.5
         }
       }
     },

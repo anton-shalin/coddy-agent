@@ -38,6 +38,14 @@ func numProp(title, description string) map[string]interface{} {
 	}
 }
 
+// withNumberBounds adds the range the settings form offers a number field
+// (minimum and maximum of its input); the loader's Validate stays the rule.
+func withNumberBounds(prop map[string]interface{}, minimum, maximum float64) map[string]interface{} {
+	prop["minimum"] = minimum
+	prop["maximum"] = maximum
+	return prop
+}
+
 func boolProp(title, description string) map[string]interface{} {
 	return map[string]interface{}{
 		"type":        "boolean",
@@ -405,7 +413,7 @@ func UISchemaMap() map[string]interface{} {
 				"max_turns": intProp("Max turns",
 					"Cap on ReAct iterations (LLM calls plus tool rounds) for one user request; 0 means no limit."),
 				"llm_retry_max": intProp("LLM retry max",
-					"Extra attempts shared by transport retries, empty-answer recovery and first-token re-issues until tool progress or a new follow-up. 0 disables these retries. Loop guards, Stop hooks, fallback models and quota-reset waits have separate limits."),
+					"Extra attempts shared by transport retries, empty-answer recovery, first-token re-issues and output-limit recovery (a step cut off at max_tokens) until tool progress or a new follow-up. 0 disables these retries. Loop guards, Stop hooks, fallback models and quota-reset waits have separate limits."),
 				"llm_retry_base_ms": intProp("LLM retry base ms",
 					"Initial backoff between LLM retries in milliseconds; a server-provided pause (Retry-After) overrides it."),
 				"llm_min_interval_ms": intProp("LLM min interval ms",
@@ -435,12 +443,6 @@ func UISchemaMap() map[string]interface{} {
 			nil),
 		"tools": objectSchema("Tools and permissions", "Filesystem and shell policy for built-in tools.",
 			map[string]interface{}{
-				"permission_mode": map[string]interface{}{
-					"type":        "string",
-					"title":       "Permission mode",
-					"description": "Controls when the agent asks for user approval before running tools. \"ask\": approve commands and writes. \"accept_edits\": auto-approve writes, approve commands. \"bypass\": skip all prompts.",
-					"enum":        []string{PermModeAsk, PermModeAcceptEdits, PermModeBypass},
-				},
 				"command_allowlist": map[string]interface{}{
 					"type":        "array",
 					"title":       "Command allowlist",
@@ -536,7 +538,7 @@ func UISchemaMap() map[string]interface{} {
 					[]string{"allowlist", "default_headers"},
 					nil),
 			},
-			[]string{"permission_mode", "command_allowlist", "output_limits", "background", "preview_server", "websearch", "http_request"},
+			[]string{"command_allowlist", "output_limits", "background", "preview_server", "websearch", "http_request"},
 			nil),
 		"subagents": objectSchema("Subagents",
 			"User-defined child agents the model can delegate to with spawn_agent. Definitions are markdown files with YAML frontmatter; each run is a background task of the parent session with its own child session and transcript.",
@@ -641,6 +643,20 @@ func UISchemaMap() map[string]interface{} {
 			},
 			[]string{"enable", "model", "dir", "fallback_models", "additional_prompt", "additional_prompt_max_chars", "wait_seconds", "timeout_seconds", "keep_runs", "recall_max_turns", "persist_max_turns", "copilot_max_tokens", "max_search_hits", "max_note_chars"},
 			nil),
+		"decisions": objectSchema("Command safety (decisions)", "Ask the NeuralDeep decisions API whether a shell command is safe before the permission gate decides: a safe command runs without a prompt, an unsafe one is asked about, or rejected in bypass mode.",
+			map[string]interface{}{
+				"enable": boolProp("Enabled", "Check run_command and ssh_run_command calls you did not allow explicitly before the permission gate decides: a safe command runs without a prompt, an unsafe one is asked about in ask and accept_edits and rejected in bypass. The allowlist, session grants, a hook's allow and commands you approved in a prompt are not checked."),
+				"model": map[string]interface{}{
+					"type":        "string",
+					"title":       "Decisions model",
+					"description": "frida-decisions: encoder pass, up to 512 tokens of command text, ~20 ms per request. clef-flash: up to 8192 tokens, ~150 ms.",
+					"enum":        []string{DecisionsModelFRIDA, DecisionsModelClef},
+				},
+				"threshold": withNumberBounds(numProp("Unsafe threshold",
+					"The probability of the unsafe option at or above which a command counts as unsafe. 0 uses the default (0.5); lower is stricter, higher lets borderline commands through."), 0, 1),
+			},
+			[]string{"enable", "model", "threshold"},
+			nil),
 		"scheduler": objectSchema("Scheduler", "Cron-style scheduled jobs (requires scheduler build tag). A run is a background agent task under the job's own session, the job's run history.",
 			map[string]interface{}{
 				"enable":          boolProp("Enabled", "When true, this process may run the scheduler daemon and REST."),
@@ -741,8 +757,8 @@ func UISchemaMap() map[string]interface{} {
 		"compaction": objectSchema("Context compaction", "Summarize older conversation history so long sessions keep fitting the model context window.",
 			map[string]interface{}{
 				"enable":            boolProp("Enabled", "Master switch for compaction (manual command and automatic trigger). Defaults to true."),
-				"auto_enable":       boolProp("Automatic compaction", "Enable the threshold trigger while keeping manual compaction available when off. Defaults to true."),
-				"threshold_percent": intProp("Auto threshold (%)", "Auto-compact when the estimated context reaches this percent of the model's context window (1..100, default 80): its max_context_tokens, else the window its provider reports, else 128000."),
+				"auto_enable":       boolProp("Enabled", "Compact on its own: fold older turns at the threshold, or the earlier steps of a long turn when there is no earlier turn, and compact and ask again once when the provider refuses a request as larger than its context window. Off keeps manual compaction available. Defaults to true."),
+				"threshold_percent": intProp("Threshold (%)", "Compact when the estimated context reaches this percent of the model's context window (1..100, default 80): its max_context_tokens, else the window its provider reports, else 128000."),
 				"keep_recent_turns": intProp("Keep recent turns", "How many most recent user turns stay verbatim after compaction (default 2; 0 summarizes everything). With no more turns than that, automatic compaction still folds the older ones and keeps the prompt being answered."),
 				"model":             strProp("Summarizer model", "Optional models[].model for the summarization call; empty uses the session model."),
 				"fallback_models": map[string]interface{}{
@@ -751,13 +767,13 @@ func UISchemaMap() map[string]interface{} {
 					"title":       "Fallback summarizer models",
 					"description": "Summarizer models tried in order when the one before them fails. The session's own model is the last resort whether or not it is listed here.",
 				},
-				"result_eviction": objectSchema("Read/grep result eviction",
-					"Collapse superseded read/grep results to placeholders when building the LLM request; the persisted transcript is untouched. Only marked (keep_result / keep:true) or most-recent results survive.",
+				"result_eviction": objectSchema("Tool result eviction",
+					"Collapse superseded tool results (read pages, grep dumps, and the listings of glob, print_tree, websearch and webfetch) to placeholders when building the LLM request; the persisted transcript is untouched. Read and grep results survive when marked (keep_result / keep:true) or among the most recent; listings survive within the latest three steps.",
 					map[string]interface{}{
-						"enable":           boolProp("Enabled", "Master switch for read/grep result eviction. Defaults to true."),
-						"keep_recent":      intProp("Keep recent results", "How many most recent evictable results stay intact as a working window (default 2 — enough to hold a read and a grep at once; 0 keeps none)."),
+						"enable":           boolProp("Enabled", "Master switch for tool result eviction. Defaults to true."),
+						"keep_recent":      intProp("Keep recent results", "How many most recent read and grep results stay intact as a working window (default 2 - enough to hold a read and a grep at once; 0 keeps none)."),
 						"min_result_bytes": intProp("Min result bytes", "Results at or below this size are never evicted (default 2000; 0 makes every result a candidate)."),
-						"start_percent":    intProp("Start at (%)", "Evict only once the estimated context reaches this percent of the model's max_context_tokens (default 50; 0 evicts from the first result). Below it the history is sent untouched so the provider's prompt cache holds."),
+						"start_percent":    intProp("Start at (%)", "Evict only once the estimated context reaches this percent of the model's context window (default 50; 0 evicts from the first result). Below it the history is sent untouched so the provider's prompt cache holds. Read and grep results of a model without max_context_tokens are evicted from the first result."),
 					},
 					[]string{"enable", "keep_recent", "min_result_bytes", "start_percent"},
 					nil),
@@ -787,7 +803,7 @@ func UISchemaMap() map[string]interface{} {
 	// folds into one System tab). The sessions key belongs to the Sessions tab.
 	rootOrder := []string{
 		"providers", "models",
-		"agent", "supervisor", "compaction", "memory",
+		"agent", "supervisor", "compaction", "memory", "decisions",
 		"tools", "skills", "subagents", "hooks",
 		"scheduler", "gateways",
 		"logger", "sessions", "prompts", "instructions",

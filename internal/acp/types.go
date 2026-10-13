@@ -578,7 +578,7 @@ type ToolCallUpdate struct {
 	SessionUpdate string `json:"sessionUpdate"` // "tool_call"
 	ToolCallID    string `json:"toolCallId"`
 	Title         string `json:"title,omitempty"`
-	Kind          string `json:"kind,omitempty"` // "read", "write", "run_command", "other", "switch_mode"
+	Kind          string `json:"kind,omitempty"` // the agent's kind ("read", "write", "run_command", "other"); the ACP server sends WireToolKind of it
 	Status        string `json:"status"`         // "pending"
 }
 
@@ -944,7 +944,26 @@ type QuestionPrompt struct {
 	Question string           `json:"question"`
 	Options  []QuestionOption `json:"options"`
 	Multiple bool             `json:"multiple,omitempty"`
-	Custom   bool             `json:"custom,omitempty"`
+	// Custom asks the client to offer a free-text answer beside the options.
+	// It is on unless the question turns it off (issue #257): a document that
+	// leaves the key out decodes as true, and the key is always written, so a
+	// client can tell a question that turned it off from one that said nothing.
+	// Only decoding applies that default: a Go literal that leaves the field
+	// out builds a question with the answer turned off.
+	Custom bool `json:"custom"`
+}
+
+// UnmarshalJSON reads a question whose custom key is missing as one that
+// offers the user's own answer: the model, an older server and a hand-written
+// client all leave it out when they mean the default.
+func (q *QuestionPrompt) UnmarshalJSON(data []byte) error {
+	type plain QuestionPrompt
+	p := plain{Custom: true}
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	*q = QuestionPrompt(p)
+	return nil
 }
 
 // QuestionRequestParams are the parameters for session/request_question.
