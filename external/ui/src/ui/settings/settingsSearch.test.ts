@@ -46,20 +46,11 @@ afterEach(() => {
   resetTelegramLaunchForTests();
 });
 
-let serial = 0;
-
 /** One entry of a hand-made index, built the way the index builds its own. */
-function entry(
+const entry = (
   over: Partial<Parameters<typeof makeSearchEntry>[0]> & { names: string[] },
-): SettingsSearchEntry {
-  serial += 1;
-  return makeSearchEntry({
-    id: `entry-${serial}`,
-    kind: "field",
-    section: "tools",
-    ...over,
-  });
-}
+): SettingsSearchEntry =>
+  makeSearchEntry({ kind: "field", section: "tools", ...over });
 
 /** What a search found, as the primary names in the order it shows them. */
 function found(
@@ -68,6 +59,17 @@ function found(
   limit?: number,
 ): string[] {
   return searchSettings(index, query, limit).hits.map((h) => h.entry.names[0]!);
+}
+
+/** Every query finds exactly these primary names. */
+function expectFound(
+  index: readonly SettingsSearchEntry[],
+  queries: string[],
+  names: string[],
+) {
+  for (const query of queries) {
+    expect(found(index, query), query).toEqual(names);
+  }
 }
 
 function indexOf(
@@ -81,12 +83,12 @@ function indexOf(
   });
 }
 
-function entriesAt(
-  index: readonly SettingsSearchEntry[],
-  anchor: string,
-): SettingsSearchEntry[] {
-  return index.filter((e) => e.anchor === anchor);
-}
+type Entries = readonly SettingsSearchEntry[];
+const entriesAt = (index: Entries, anchor: string) =>
+  index.filter((e) => e.anchor === anchor);
+const inTab = (index: Entries, id: string) =>
+  index.filter((e) => e.section === id);
+const anchors = (entries: Entries) => entries.map((e) => e.anchor);
 
 function only(
   index: readonly SettingsSearchEntry[],
@@ -98,33 +100,45 @@ function only(
   return matches[0]!;
 }
 
+/** The rows of the default document's provider list. */
+const PROVIDER_ROWS = ["openai", "anthropic", "neuraldeep", "codex", "devin"];
+
+/** The label the page draws for a field of a section or list item, English by default. */
+function schemaLabel(domain: string, key: string): string {
+  const node = AGENT_SCHEMA.properties![domain]!;
+  const props = (node.properties ?? node.items!.properties)!;
+  return schemaFieldLabel(domain, key, props[key]!.title, key);
+}
+
 // ---- matching, on hand-made entries
 
 test("every word of the query has to occur in the own names, the config key, the surrounding names or the descriptions", () => {
-  const proxy = entry({
-    names: ["Proxy URL"],
-    keyPath: "providers[].proxy",
-    where: ["LLM providers", "openai", "Advanced settings"],
-    descriptions: ["Route requests through this proxy server"],
-  });
-  const index = [proxy];
-
-  expect(found(index, "proxy")).toEqual(["Proxy URL"]);
-  // the config key
-  expect(found(index, "providers[]")).toEqual(["Proxy URL"]);
-  // the names around it
-  expect(found(index, "openai")).toEqual(["Proxy URL"]);
-  expect(found(index, "advanced openai")).toEqual(["Proxy URL"]);
-  // the descriptions
-  expect(found(index, "route")).toEqual(["Proxy URL"]);
-  // a word is a substring, and words may come from different places
-  expect(found(index, "prox")).toEqual(["Proxy URL"]);
-  expect(found(index, "proxy openai route")).toEqual(["Proxy URL"]);
+  const index = [
+    entry({
+      names: ["Proxy URL"],
+      keyPath: "providers[].proxy",
+      where: ["LLM providers", "openai", "Advanced settings"],
+      descriptions: ["Route requests through this proxy server"],
+    }),
+  ];
+  // the name, the config key, the names around it, the descriptions; a word is
+  // a substring, words may come from different places, in any order
+  expectFound(
+    index,
+    [
+      "proxy",
+      "providers[]",
+      "openai",
+      "advanced openai",
+      "route",
+      "prox",
+      "proxy openai route",
+      "route proxy",
+    ],
+    ["Proxy URL"],
+  );
   // every word has to occur somewhere
-  expect(found(index, "proxy nowhere")).toEqual([]);
-  expect(found(index, "nowhere")).toEqual([]);
-  // the word order of the query is free
-  expect(found(index, "route proxy")).toEqual(["Proxy URL"]);
+  expectFound(index, ["proxy nowhere", "nowhere"], []);
   // words do not join across the borders between two names
   expect(found([entry({ names: ["Max", "turns"] })], "maxturns")).toEqual([]);
 });
@@ -132,10 +146,7 @@ test("every word of the query has to occur in the own names, the config key, the
 test("own names and config keys come first with tabs and blocks ahead, then matches needing the surrounding names, then the descriptions", () => {
   const index = [
     entry({ names: ["Dir"], where: ["Memory"] }),
-    entry({
-      names: ["Wait"],
-      descriptions: ["How long a memory run is waited for"],
-    }),
+    entry({ names: ["Wait"], descriptions: ["Waits for a memory run"] }),
     entry({ names: ["Memory model"] }),
     entry({ kind: "section", names: ["Memory"], anchor: null }),
     entry({ kind: "group", names: ["Memory runs"], anchor: "group:m:runs" }),
@@ -144,10 +155,10 @@ test("own names and config keys come first with tabs and blocks ahead, then matc
     entry({ kind: "row", names: ["memory"], row: "memory" }),
     entry({ names: ["Needs both"], where: ["Memory"], descriptions: ["x"] }),
   ];
-
   // tier 1: tabs, blocks and landmarks in the drawer's order, then the rest in
   // the drawer's order; tier 2: the surrounding names; tier 3: descriptions
-  expect(found(index, "memory")).toEqual([
+  const hits = searchSettings(index, "memory").hits;
+  expect(hits.map((h) => h.entry.names[0])).toEqual([
     "Memory",
     "Memory runs",
     "Memory tools",
@@ -158,14 +169,14 @@ test("own names and config keys come first with tabs and blocks ahead, then matc
     "Needs both",
     "Wait",
   ]);
-  const tiers = searchSettings(index, "memory").hits.map((h) => h.tier);
-  expect(tiers).toEqual([1, 1, 1, 1, 1, 1, 2, 2, 3]);
-
+  expect(hits.map((h) => h.tier)).toEqual([1, 1, 1, 1, 1, 1, 2, 2, 3]);
   // a word needing the descriptions makes the whole match tier 3
-  const both = searchSettings(index, "memory x").hits;
-  expect(both.map((h) => [h.entry.names[0], h.tier])).toEqual([
-    ["Needs both", 3],
-  ]);
+  expect(
+    searchSettings(index, "memory x").hits.map((h) => [
+      h.entry.names[0],
+      h.tier,
+    ]),
+  ).toEqual([["Needs both", 3]]);
 });
 
 test("case and ё do not matter, and nothing fuzzy matches", () => {
@@ -176,17 +187,12 @@ test("case and ё do not matter, and nothing fuzzy matches", () => {
     entry({ names: ["Café"] }),
   ];
 
-  expect(found(index, "ёЛКА")).toEqual(["Ёлка и Ежик"]);
-  expect(found(index, "елка")).toEqual(["Ёлка и Ежик"]);
-  expect(found(index, "ЕЖИК")).toEqual(["Ёлка и Ежик"]);
-  expect(found(index, "MAX turns")).toEqual(["Max Turns"]);
+  expectFound(index, ["ёЛКА", "елка", "ЕЖИК"], ["Ёлка и Ежик"]);
+  expectFound(index, ["MAX turns"], ["Max Turns"]);
   // no folding of anything else: not accents, not transposed or missing letters
-  expect(found(index, "cafe")).toEqual([]);
-  expect(found(index, "mxa")).toEqual([]);
-  expect(found(index, "trns")).toEqual([]);
-  expect(found(index, "ёлки")).toEqual([]);
+  expectFound(index, ["cafe", "mxa", "trns", "ёлки"], []);
   // the Latin e is not the Cyrillic е
-  expect(found([entry({ names: ["Елка"] })], "elka")).toEqual([]);
+  expectFound([entry({ names: ["Елка"] })], ["elka"], []);
 });
 
 test("a query of spaces searches nothing", () => {
@@ -207,17 +213,15 @@ test("past the limit the matches are counted, not shown", () => {
 
   expect(SETTINGS_SEARCH_LIMIT).toBe(50);
   const shown = searchSettings(index, "field");
-  expect(shown.hits).toHaveLength(50);
   expect(shown.more).toBe(70);
   // the ones shown are the first of the drawer's order
-  expect(shown.hits[0]!.entry.names[0]).toBe("Field 0");
-  expect(shown.hits[49]!.entry.names[0]).toBe("Field 49");
-
+  expect(found(index, "field")).toEqual(
+    Array.from({ length: 50 }, (_, i) => `Field ${i}`),
+  );
   expect(searchSettings(index, "field", 10)).toMatchObject({ more: 110 });
   expect(searchSettings(index, "field 119", 10).more).toBe(0);
   expect(searchSettings(index, "field", 200)).toMatchObject({ more: 0 });
-  expect(searchSettings(index, "field", 200).hits).toHaveLength(120);
-
+  expect(found(index, "field", 200)).toHaveLength(120);
   // the limit cuts the sorted list: a better tier is never pushed out
   const late = [
     ...Array.from({ length: 60 }, (_, i) =>
@@ -229,31 +233,26 @@ test("past the limit the matches are counted, not shown", () => {
 });
 
 test("the marked parts of a text are exactly the words of the query", () => {
-  const parts = (text: string, words: string[]) =>
-    markWords(text, words).map((p) => [p.text, p.hit]);
+  /** The parts of the text with the marked ones in brackets. */
+  const marked = (text: string, words: string[]) =>
+    markWords(text, words)
+      .map((p) => (p.hit ? `[${p.text}]` : p.text))
+      .join("");
+  const cases: [text: string, words: string[], marked: string][] = [
+    ["Ignore system proxy", ["proxy", "ign"], "[Ign]ore system [proxy]"],
+    // the text keeps its own case, the match does not depend on it
+    ["PROXY url", ["proxy"], "[PROXY] url"],
+    // overlapping and repeated words make one mark
+    ["proxy proxy", ["pro", "proxy", "prox"], "[proxy] [proxy]"],
+    ["Ёлка", ["елка"], "[Ёлка]"],
+    ["nothing to mark", ["zzz"], "nothing to mark"],
+    ["nothing", [], "nothing"],
+  ];
 
-  expect(parts("Ignore system proxy", ["proxy", "ign"])).toEqual([
-    ["Ign", true],
-    ["ore system ", false],
-    ["proxy", true],
-  ]);
-  // the text keeps its own case, the match does not depend on it
-  expect(parts("PROXY url", ["proxy"])).toEqual([
-    ["PROXY", true],
-    [" url", false],
-  ]);
-  // overlapping and repeated words make one mark
-  expect(parts("proxy proxy", ["pro", "proxy", "prox"])).toEqual([
-    ["proxy", true],
-    [" ", false],
-    ["proxy", true],
-  ]);
-  expect(parts("Ёлка", ["елка"])).toEqual([["Ёлка", true]]);
-  expect(parts("nothing to mark", ["zzz"])).toEqual([
-    ["nothing to mark", false],
-  ]);
-  expect(parts("nothing", [])).toEqual([["nothing", false]]);
-  expect(parts("", ["a"])).toEqual([]);
+  for (const [text, words, expected] of cases) {
+    expect(marked(text, words), text).toBe(expected);
+  }
+  expect(markWords("", ["a"])).toEqual([]);
   // whatever the words, the parts are the text
   for (const text of ["Max turns (i)", "İstanbul İ", "a.b.c", "ёЁёе"]) {
     expect(
@@ -278,11 +277,10 @@ test("a description-only match shows its description from shortly before the wor
   expect(lead).toBeGreaterThan(0);
   expect(lead).toBeLessThanOrEqual(40);
   expect(text[text.length - rest.length - 1]).toBe(" ");
-
   // a word near the start needs no cut, and a text without one is shown whole
-  expect(descriptionLine(text, ["sends"])).toBe(text);
-  expect(descriptionLine(text, ["zzz"])).toBe(text);
-  expect(descriptionLine(text, [])).toBe(text);
+  for (const words of [["sends"], ["zzz"], []]) {
+    expect(descriptionLine(text, words), words.join()).toBe(text);
+  }
   // the first of the words that occur decides
   expect(descriptionLine(text, ["rest", "egress"])).toBe(line);
   // a word that is later than a space-less stretch is still shown
@@ -296,21 +294,26 @@ test("a word found only in a second name is shown beside the primary name", () =
     keyPath: "providers[].proxy",
     descriptions: ["Route requests through this proxy server"],
   });
-  const second = (query: string) =>
-    searchSettings([proxy], query).hits[0]?.secondMatched;
+  const second = (query: string, e = proxy) =>
+    searchSettings([e], query).hits[0]?.secondMatched;
+  const ignore = "Ignore system proxy";
+  const cases: [string, string | null][] = [
+    ["ignore", ignore],
+    ["ignore proxy", ignore],
+    ["url ignore", ignore],
+    // found in the primary name, or in the key, the second name stays out
+    ["proxy", null],
+    ["url", null],
+    ["providers", null],
+    // not found in a name at all
+    ["route", null],
+  ];
 
-  expect(second("ignore")).toBe("Ignore system proxy");
-  expect(second("ignore proxy")).toBe("Ignore system proxy");
-  // found in the primary name, or in the key, the second name stays out
-  expect(second("proxy")).toBeNull();
-  expect(second("url")).toBeNull();
-  expect(second("providers")).toBeNull();
-  expect(second("url ignore")).toBe("Ignore system proxy");
-  // not found in a name at all
-  expect(second("route")).toBeNull();
+  for (const [query, expected] of cases) {
+    expect(second(query), query).toBe(expected);
+  }
   // an entry with one name never has one
-  const single = entry({ names: ["Max turns"] });
-  expect(searchSettings([single], "turns").hits[0]!.secondMatched).toBeNull();
+  expect(second("turns", entry({ names: ["Max turns"] }))).toBeNull();
 });
 
 // ---- the index, on the served schemas
@@ -319,31 +322,31 @@ test("the index lists the tabs, their blocks and their fields in the drawer's or
   const index = indexOf(AGENT_SCHEMA);
   const sections = deriveSettingsSections(AGENT_SCHEMA);
   const label = (id: string) => sections.find((s) => s.id === id)!.label;
-
   // the tabs, in the rail's order, each followed by what it holds
   const tabs = index.filter((e) => e.kind === "section");
   expect(tabs.map((e) => e.section)).toEqual(sections.map((s) => s.id));
   expect(tabs.map((e) => e.names[0])).toEqual(sections.map((s) => s.label));
   expect(tabs.every((e) => e.anchor === null && e.row === null)).toBe(true);
-  const firstOf = (id: string) => index.findIndex((e) => e.section === id);
-  const starts = sections.map((s) => firstOf(s.id));
-  expect(starts).toEqual([...starts].sort((a, b) => a - b));
   for (const s of sections) {
-    const own = index.filter((e) => e.section === s.id);
+    const own = inTab(index, s.id);
     expect(own[0]!.kind).toBe("section");
     const at = index.indexOf(own[0]!);
     expect(index.slice(at, at + own.length)).toEqual(own);
   }
-
   // an object tab with blocks: the blocks stand in the order the tab declares
   // them, and each field of a block after it and before the next one
-  const agent = index.filter((e) => e.section === "agent");
+  const agent = inTab(index, "agent");
   const declared = objectSectionGroups("agent")!;
   const blocks = agent.filter((e) => e.kind === "group");
-  expect(blocks.map((e) => e.anchor)).toEqual(
+  expect(anchors(blocks)).toEqual(
     declared.map((g) => groupAnchor("agent", g.id)),
   );
   expect(blocks.map((e) => e.names)).toEqual(declared.map((g) => [g.legend]));
+  const agentSchema = AGENT_SCHEMA.properties!["agent"]!;
+  const schemaKeys = entriesInSchemaOrder(
+    agentSchema.properties!,
+    agentSchema["x-coddy-property-order"],
+  ).map(([k]) => k);
   declared.forEach((g, i) => {
     const from = agent.indexOf(blocks[i]!);
     const to =
@@ -355,95 +358,69 @@ test("the index lists the tabs, their blocks and their fields in the drawer's or
       expect(field.where, path).toEqual([label("agent"), g.legend]);
     }
     // inside a block the fields keep the schema's order
-    const agentSchema = AGENT_SCHEMA.properties!["agent"]!;
     expect(
       agent.slice(from + 1, to).map((e) => e.keyPath),
       g.id,
     ).toEqual(
-      entriesInSchemaOrder(
-        agentSchema.properties!,
-        agentSchema["x-coddy-property-order"],
-      )
-        .map(([k]) => k)
-        .filter((k) => g.paths!.includes(k))
-        .map((k) => `agent.${k}`),
+      schemaKeys.filter((k) => g.paths!.includes(k)).map((k) => `agent.${k}`),
     );
   });
   const turns = only(index, "agent:max_turns");
-  expect(turns.keyPath).toBe("agent.max_turns");
-  expect(turns.kind).toBe("field");
-  expect(turns.names).toEqual([
-    schemaFieldLabel(
-      "agent",
-      "max_turns",
-      AGENT_SCHEMA.properties!["agent"]!.properties!["max_turns"]!.title,
-      "max_turns",
-    ),
-  ]);
-
+  expect(turns).toMatchObject({
+    keyPath: "agent.max_turns",
+    kind: "field",
+    names: [schemaLabel("agent", "max_turns")],
+  });
   // a section's own switch opens its form, outside every block
-  const supervisor = index.filter((e) => e.section === "supervisor");
-  expect(supervisor.slice(0, 3).map((e) => e.anchor)).toEqual([
+  expect(anchors(inTab(index, "supervisor").slice(0, 3))).toEqual([
     null,
     "supervisor:enable",
     "group:supervisor:checks",
   ]);
-
   // an object field is an entry of its own, followed by its children
   const limits = only(index, "tools:output_limits");
   const read = only(index, "tools:output_limits.read");
   expect(index.indexOf(read)).toBe(index.indexOf(limits) + 1);
-  expect(read.where).toEqual([...limits.where, limits.names[0]]);
-  expect(read.keyPath).toBe("tools.output_limits.read");
-  expect(read.list).toBeNull();
-
-  // a list of plain values is one entry; a map is one entry
-  expect(entriesAt(index, "tools:command_allowlist")).toHaveLength(1);
-  expect(entriesAt(index, "tools:http_request.default_headers")).toHaveLength(
-    1,
-  );
-
-  // a tab with a list of objects: the list, then its children, which carry the
-  // list and no count; the entry frame is no entry
+  expect(read).toMatchObject({
+    where: [...limits.where, limits.names[0]],
+    keyPath: "tools.output_limits.read",
+    list: null,
+  });
+  // a list of plain values, a map and a list of objects are one entry each
   const groupsList = only(index, "gateways:telegram.user_groups");
-  const groupName = only(index, "gateways:telegram.user_groups.name");
-  expect(groupName).toMatchObject({
+  for (const anchor of [
+    "tools:command_allowlist",
+    "tools:http_request.default_headers",
+    groupsList.anchor!,
+  ]) {
+    expect(entriesAt(index, anchor), anchor).toHaveLength(1);
+  }
+  // its children carry the list and no count; the entry frame is no entry
+  expect(groupsList.list).toBeNull();
+  expect(only(index, "gateways:telegram.user_groups.name")).toMatchObject({
     list: groupsList.anchor,
     fallbackAnchor: groupsList.anchor,
     keyPath: "gateways.telegram.user_groups[].name",
+    where: [...groupsList.where, groupsList.names[0]],
   });
-  expect(groupName.where).toEqual([...groupsList.where, groupsList.names[0]]);
-  expect(groupsList.list).toBeNull();
-  expect(index.filter((e) => e.anchor === groupsList.anchor).length).toBe(1);
   // a nested object inside an entry keeps the list
-  const relay = indexOf(RELAY_SCHEMA);
-  expect(only(relay, "swarm:upstreams.dial.proxy")).toMatchObject({
+  expect(
+    only(indexOf(RELAY_SCHEMA), "swarm:upstreams.dial.proxy"),
+  ).toMatchObject({
     list: "swarm:upstreams",
     keyPath: "swarm.upstreams[].dial.proxy",
   });
-
   // a list tab: each row that can be opened is an entry, then its own fields,
   // row after row
-  const providers = index.filter((e) => e.section === "providers");
+  const providers = inTab(index, "providers");
   const rows = providers.filter((e) => e.kind === "row");
-  expect(rows.map((e) => e.row)).toEqual([
-    "openai",
-    "anthropic",
-    "neuraldeep",
-    "codex",
-    "devin",
-  ]);
+  expect(rows.map((e) => e.row)).toEqual(PROVIDER_ROWS);
   for (const row of rows) {
     const own = providers.filter((e) => e.row === row.row);
+    const at = providers.indexOf(row);
     expect(own[0]).toBe(row);
-    expect(
-      providers.slice(
-        providers.indexOf(row),
-        providers.indexOf(row) + own.length,
-      ),
-    ).toEqual(own);
+    expect(providers.slice(at, at + own.length)).toEqual(own);
   }
-
   // the blocks a tab draws by hand are landmarks, in the order they are
   // declared: those above the tab's forms come first, those below come last
   for (const id of [
@@ -456,21 +433,15 @@ test("the index lists the tabs, their blocks and their fields in the drawer's or
       SETTINGS_LANDMARKS.filter(
         (l) => l.section === id && l.row === undefined && l.place === place,
       ).map((l) => landmarkAnchor(l.section, l.id));
-    const entries = index.filter((e) => e.section === id).slice(1);
-    const above = marks("before");
-    const below = marks("after");
+    const entries = inTab(index, id).slice(1);
+    const [above, below] = [marks("before"), marks("after")];
+    const middle = entries.slice(above.length, entries.length - below.length);
+    expect(anchors(entries.slice(0, above.length)), id).toEqual(above);
+    expect(anchors(entries.slice(entries.length - below.length)), id).toEqual(
+      below,
+    );
     expect(
-      entries.slice(0, above.length).map((e) => e.anchor),
-      id,
-    ).toEqual(above);
-    expect(
-      entries.slice(entries.length - below.length).map((e) => e.anchor),
-      id,
-    ).toEqual(below);
-    expect(
-      entries
-        .slice(above.length, entries.length - below.length)
-        .some((e) => e.kind === "landmark"),
+      middle.some((e) => e.kind === "landmark"),
       id,
     ).toBe(false);
   }
@@ -482,32 +453,26 @@ test("the index lists the tabs, their blocks and their fields in the drawer's or
   expect(only(index, "landmark:mcp_servers:discovery").keyPath).toBe(
     "mcp.project_trust",
   );
-
   // a folded block carries no description; the Prompts tab nests its children
   expect(
     only(index, "group:providers:advanced", "openai").descriptions,
   ).toEqual([]);
-  expect(
-    index.filter((e) => e.section === "system").map((e) => e.anchor),
-  ).toEqual(
+  expect(anchors(inTab(index, "system"))).toEqual(
     expect.arrayContaining([
       "group:system.prompts:prompts",
       "system.prompts:dir",
     ]),
   );
-
   // nothing is indexed twice
   expect(new Set(index.map((e) => e.id)).size).toBe(index.length);
-  const places = index.map((e) => `${e.section}|${e.row ?? ""}|${e.anchor}`);
-  expect(new Set(places.filter((p) => !p.endsWith("|null"))).size).toBe(
-    places.filter((p) => !p.endsWith("|null")).length,
-  );
-
+  const places = index
+    .map((e) => `${e.section}|${e.row ?? ""}|${e.anchor}`)
+    .filter((p) => !p.endsWith("|null"));
+  expect(new Set(places).size).toBe(places.length);
   // text is folded once, when the index is built
   expect(turns.hay.own).toBe(
     normalizeSearchText(`${turns.names[0]}\nagent.max_turns`),
   );
-
   // a relay has its own tabs and no Sessions
   expect(
     indexOf(RELAY_SCHEMA)
@@ -531,74 +496,54 @@ test("the index lists the tabs, their blocks and their fields in the drawer's or
 
 test("a field of a provider or model row is indexed once per row, under that row's name", () => {
   const index = indexOf(AGENT_SCHEMA);
-  const rows = ["openai", "anthropic", "neuraldeep", "codex", "devin"];
+  const providersLabel = translate("settings.section.providers.label");
+  const ignoreSystem = translate("settings.providerProxy.ignoreSystem");
+  const rowsOf = (anchor: string) => entriesAt(index, anchor).map((e) => e.row);
 
   expect(
     index
       .filter((e) => e.kind === "row" && e.section === "providers")
       .map((e) => [e.row, e.names, e.anchor, e.where]),
   ).toEqual(
-    rows.map((name) => [
+    PROVIDER_ROWS.map((name) => [
       name,
       [name],
       "row:providers",
-      [translate("settings.section.providers.label")],
+      [providersLabel],
     ]),
   );
-  for (const name of rows) {
-    const proxy = only(index, "providers:proxy", name);
-    expect(proxy.where.slice(0, 2)).toEqual([
-      translate("settings.section.providers.label"),
-      name,
-    ]);
-    // the row's own fields come after the row, before the next row
-    const own = index.filter(
-      (e) => e.section === "providers" && e.row === name,
-    );
-    expect(own[0]!.kind).toBe("row");
-    expect(own.every((e) => e.row === name)).toBe(true);
-  }
+  // the row's name leads the names around each of its fields
   expect(
-    index.filter((e) => e.anchor === "providers:proxy").map((e) => e.row),
-  ).toEqual(rows);
-
+    PROVIDER_ROWS.map((name) =>
+      only(index, "providers:proxy", name).where.slice(0, 2),
+    ),
+  ).toEqual(PROVIDER_ROWS.map((name) => [providersLabel, name]));
+  expect(rowsOf("providers:proxy")).toEqual(PROVIDER_ROWS);
   // models: one row each, the id's two names, no description
   const models = ["demo/qwen3-27b", "demo/llama-3"];
   expect(
-    index
-      .filter((e) => e.anchor === "models:model")
-      .map((e) => [e.row, e.names, e.descriptions]),
+    entriesAt(index, "models:model").map((e) => [
+      e.row,
+      e.names,
+      e.descriptions,
+    ]),
   ).toEqual(
     models.map((m) => [
       m,
-      [
-        schemaFieldLabel(
-          "models",
-          "model",
-          AGENT_SCHEMA.properties!["models"]!.items!.properties!["model"]!
-            .title,
-          "model",
-        ),
-        translate("settings.field.provider"),
-      ],
+      [schemaLabel("models", "model"), translate("settings.field.provider")],
       [],
     ]),
   );
   expect(only(index, "models:model", "demo/llama-3").keyPath).toBe(
     "models[].model",
   );
-
   // what an override declares is what is indexed
-  expect(only(index, "providers:proxy", "openai").names).toEqual([
-    schemaFieldLabel(
-      "providers",
-      "proxy",
-      AGENT_SCHEMA.properties!["providers"]!.items!.properties!["proxy"]!.title,
-      "proxy",
-    ),
-    translate("settings.providerProxy.ignoreSystem"),
+  const proxy = only(index, "providers:proxy", "openai");
+  expect(proxy.names).toEqual([
+    schemaLabel("providers", "proxy"),
+    ignoreSystem,
   ]);
-  expect(only(index, "providers:proxy", "openai").descriptions).toHaveLength(2);
+  expect(proxy.descriptions).toHaveLength(2);
   expect(only(index, "providers:api_base", "codex")).toMatchObject({
     names: [translate("codexAuth.fieldLabel")],
     descriptions: [translate("codexAuth.description")],
@@ -612,72 +557,53 @@ test("a field of a provider or model row is indexed once per row, under that row
   });
   expect(only(index, "providers:api_base", "openai").names).toHaveLength(1);
   expect(only(index, "gateways:telegram.proxy")).toMatchObject({
-    names: [
-      expect.any(String),
-      translate("settings.providerProxy.ignoreSystem"),
-    ],
+    names: [expect.any(String), ignoreSystem],
     descriptions: [
       expect.any(String),
       translate("settings.gatewayProxy.ignoreSystemDesc"),
     ],
   });
   expect(entriesAt(index, "gateways:pachca.proxy")).toHaveLength(1);
-
-  // a field the row does not draw is not indexed for it
-  const has = (anchor: string, row: string) =>
-    entriesAt(index, anchor).some((e) => e.row === row);
-  expect(has("providers:api_key", "openai")).toBe(true);
-  expect(has("providers:api_key", "codex")).toBe(false);
-  expect(has("providers:api_key_command", "codex")).toBe(false);
-  expect(has("providers:api_key_command", "devin")).toBe(true);
-  expect(has("providers:usage_limits_panel", "openai")).toBe(false);
-  expect(has("providers:usage_limits_panel", "anthropic")).toBe(false);
-  for (const name of ["neuraldeep", "codex", "devin"]) {
-    expect(has("providers:usage_limits_panel", name)).toBe(true);
-  }
-
-  // the Models block of the provider form is a landmark of every row
-  expect(
-    index
-      .filter((e) => e.anchor === "landmark:providers:models")
-      .map((e) => e.row),
-  ).toEqual(rows);
-
-  // the rows are the form's own: a type edited in the document is the type
-  // the index reads
-  const doc = configFromSchema(AGENT_SCHEMA);
-  (doc["providers"] as Record<string, unknown>[])[0]!["type"] = "codex";
-  const edited = indexOf(AGENT_SCHEMA, doc);
-  expect(
-    entriesAt(edited, "providers:api_key").some((e) => e.row === "openai"),
-  ).toBe(false);
-});
-
-test("a row without a name and rows that share a name are left out, so no result opens the wrong row", () => {
-  const rowsOf = (index: readonly SettingsSearchEntry[], section: string) => [
-    ...new Set(
-      index
-        .filter((e) => e.section === section && e.row !== null)
-        .map((e) => e.row),
-    ),
-  ];
-  const defaults = indexOf(AGENT_SCHEMA);
-
-  // the document has an unnamed provider and two called "shared"
-  expect(rowsOf(defaults, "providers")).toEqual([
-    "openai",
-    "anthropic",
+  // which rows a field is indexed for: only the ones whose form draws it
+  expect(rowsOf("providers:api_key")).toContain("openai");
+  expect(rowsOf("providers:api_key")).not.toContain("codex");
+  expect(rowsOf("providers:api_key_command")).toContain("devin");
+  expect(rowsOf("providers:api_key_command")).not.toContain("codex");
+  expect(rowsOf("providers:usage_limits_panel")).toEqual([
     "neuraldeep",
     "codex",
     "devin",
   ]);
+  // the Models block of the provider form is a landmark of every row
+  expect(rowsOf("landmark:providers:models")).toEqual(PROVIDER_ROWS);
+  // the rows are the form's own: a type edited in the document is the type
+  // the index reads
+  const doc = configFromSchema(AGENT_SCHEMA);
+  (doc["providers"] as Record<string, unknown>[])[0]!["type"] = "codex";
+  expect(
+    entriesAt(indexOf(AGENT_SCHEMA, doc), "providers:api_key").map(
+      (e) => e.row,
+    ),
+  ).not.toContain("openai");
+});
+
+test("a row without a name and rows that share a name are left out, so no result opens the wrong row", () => {
+  const rowsOf = (index: Entries, section: string) => [
+    ...new Set(
+      inTab(index, section)
+        .filter((e) => e.row !== null)
+        .map((e) => e.row),
+    ),
+  ];
+  const defaults = indexOf(AGENT_SCHEMA);
+  // the document has an unnamed provider and two called "shared"
+  expect(rowsOf(defaults, "providers")).toEqual(PROVIDER_ROWS);
   expect(defaults.some((e) => e.row === "" || e.row === "shared")).toBe(false);
   expect(
     defaults.some(
       (e) => e.where.includes("shared") || e.names.includes("shared"),
     ),
   ).toBe(false);
-
   // a name is the row's trimmed label, as the list trims it
   const doc = configFromSchema(AGENT_SCHEMA);
   const providers = doc["providers"] as Record<string, unknown>[];
@@ -685,16 +611,8 @@ test("a row without a name and rows that share a name are left out, so no result
   providers[6]!["name"] = "twin";
   providers[7]!["name"] = " twin ";
   const trimmed = indexOf(AGENT_SCHEMA, doc);
-  expect(rowsOf(trimmed, "providers")).toEqual([
-    "openai",
-    "anthropic",
-    "neuraldeep",
-    "codex",
-    "devin",
-    "padded",
-  ]);
+  expect(rowsOf(trimmed, "providers")).toEqual([...PROVIDER_ROWS, "padded"]);
   expect(only(trimmed, "providers:proxy", "padded").where[1]).toBe("padded");
-
   // the same holds for logical models
   const models = doc["models"] as Record<string, unknown>[];
   models[1]!["model"] = "demo/qwen3-27b";
@@ -703,51 +621,47 @@ test("a row without a name and rows that share a name are left out, so no result
   expect(rowsOf(indexOf(AGENT_SCHEMA, doc), "models")).toEqual([
     "demo/qwen3-27b",
   ]);
-
   // a document without a list has no rows, and no field of one
   const bare = indexOf(AGENT_SCHEMA, {});
-  expect(
-    bare.some((e) => e.section === "providers" && e.kind !== "section"),
-  ).toBe(false);
+  expect(inTab(bare, "providers").every((e) => e.kind === "section")).toBe(
+    true,
+  );
   expect(entriesAt(bare, "agent:max_turns")).toHaveLength(1);
 });
 
 test("the rows key changes with the names and types of the rows and with nothing else", () => {
   const doc = configFromSchema(AGENT_SCHEMA);
   const key = settingsIndexRowsKey(doc);
-  const edit = (change: (d: SettingsDoc) => void) => {
+  const row = (d: SettingsDoc, list: string, i: number) =>
+    (d[list] as Record<string, unknown>[])[i]!;
+  /** Whether the edit changes the key. */
+  const changes = (edit: (d: SettingsDoc) => void) => {
     const copy = structuredClone(doc);
-    change(copy);
-    return settingsIndexRowsKey(copy);
+    edit(copy);
+    return settingsIndexRowsKey(copy) !== key;
   };
-  const providers = (d: SettingsDoc) =>
-    d["providers"] as Record<string, unknown>[];
 
   expect(key).toBe(settingsIndexRowsKey(structuredClone(doc)));
-  expect(edit((d) => (providers(d)[0]!["name"] = "renamed"))).not.toBe(key);
-  expect(edit((d) => (providers(d)[0]!["type"] = "codex"))).not.toBe(key);
-  expect(edit((d) => (providers(d)[1]!["api_key"] = "other"))).toBe(key);
+  expect(changes((d) => (row(d, "providers", 0)["name"] = "renamed"))).toBe(
+    true,
+  );
+  expect(changes((d) => (row(d, "providers", 0)["type"] = "codex"))).toBe(true);
+  expect(changes((d) => (row(d, "models", 0)["model"] = "x/y"))).toBe(true);
+  expect(changes((d) => (row(d, "providers", 1)["api_key"] = "other"))).toBe(
+    false,
+  );
   expect(
-    edit(
-      (d) => ((d["models"] as Record<string, unknown>[])[0]!["model"] = "x/y"),
-    ),
-  ).not.toBe(key);
-  expect(
-    edit((d) => {
-      (d["agent"] as Record<string, unknown>)["max_turns"] = 1;
-    }),
-  ).toBe(key);
+    changes((d) => ((d["agent"] as Record<string, unknown>)["max_turns"] = 1)),
+  ).toBe(false);
   expect(settingsIndexRowsKey({})).toBe(settingsIndexRowsKey({ agent: {} }));
 });
 
 test("values are never indexed: a key, a token or a URL of the document finds nothing", () => {
-  const doc = configFromSchema(AGENT_SCHEMA);
-  const index = indexOf(AGENT_SCHEMA, doc);
+  const index = indexOf(AGENT_SCHEMA);
   const relay = indexOf(RELAY_SCHEMA);
 
   for (const [name, value] of Object.entries(SECRET_VALUES)) {
-    const pieces = [value, value.slice(0, 14), value.split("//").pop()!];
-    for (const piece of pieces) {
+    for (const piece of [value, value.slice(0, 14), value.split("//").pop()!]) {
       expect(found(index, piece), `${name}: ${piece}`).toEqual([]);
       expect(found(relay, piece), `${name}: ${piece}`).toEqual([]);
     }
@@ -760,7 +674,6 @@ test("values are never indexed: a key, a token or a URL of the document finds no
   // the names of the secrets are there
   expect(only(index, "tools:websearch.brave_api_key").names[0]).toBeTruthy();
   expect(found(index, "brave").length).toBeGreaterThan(0);
-
   // the one value that is read: a row's name
   expect(found(index, "qwen3-27b")).toContain("demo/qwen3-27b");
   expect(found(index, "anthropic")).toContain("anthropic");
@@ -768,14 +681,13 @@ test("values are never indexed: a key, a token or a URL of the document finds no
 
 test("the index speaks the page's language and keeps the config key as YAML spells it", () => {
   setLocale("ru");
-  const agentSchema = AGENT_SCHEMA.properties!["agent"]!;
-  expect(messagesRu["settings.schema.agent.max_turns.label"]).toBeTruthy();
+  const russian = messagesRu["settings.schema.agent.max_turns.label"]!;
+  const english = messagesEn["settings.schema.agent.max_turns.label"]!;
+  expect(russian).toBeTruthy();
+  expect(russian).not.toBe(english);
   const index = indexOf(AGENT_SCHEMA);
   const sections = deriveSettingsSections(AGENT_SCHEMA);
 
-  const russian = messagesRu["settings.schema.agent.max_turns.label"]!;
-  const english = messagesEn["settings.schema.agent.max_turns.label"]!;
-  expect(russian).not.toBe(english);
   const turns = only(index, "agent:max_turns");
   expect(turns.names).toEqual([russian]);
   expect(turns.keyPath).toBe("agent.max_turns");
@@ -785,8 +697,6 @@ test("the index speaks the page's language and keeps the config key as YAML spel
   expect(only(index, "logger:levels.component").keyPath).toBe(
     "logger.levels[].component",
   );
-  expect(agentSchema.properties!["max_turns"]).toBeTruthy();
-
   // found by the Russian name and by the key, not by the English name
   expect(found(index, russian)).toContain(russian);
   expect(found(index, "agent.max_turns")).toContain(russian);
@@ -803,7 +713,6 @@ test("the index speaks the page's language and keeps the config key as YAML spel
     ).hits.map((h) => h.entry.id),
   ).not.toContain(memoryRoot.id);
   expect(found(index, english)).toContain(russian);
-
   // the landmarks speak it too
   expect(only(index, "landmark:appearance:language").names).toEqual([
     messagesRu["appearance.languageLabel"],
@@ -839,14 +748,12 @@ test("every landmark heading and every drawn text is a key of the default dictio
   // The builder is only a string: a drawn anchor the index lacks is caught by
   // the comparison with the drawing, not by a throw in the component.
   expect(landmarkAnchor("nope", "theme")).toBe("landmark:nope:theme");
-
   // the headings are drawn from the constants: label and the heading's (i)
   const index = indexOf(AGENT_SCHEMA);
-  const discovery = only(index, "landmark:mcp_servers:discovery");
-  expect(discovery.names).toEqual([translate("mcp.discovery.legend")]);
-  expect(discovery.descriptions).toEqual([
-    translate("mcp.discovery.description"),
-  ]);
+  expect(only(index, "landmark:mcp_servers:discovery")).toMatchObject({
+    names: [translate("mcp.discovery.legend")],
+    descriptions: [translate("mcp.discovery.description")],
+  });
   expect(only(index, "landmark:appearance:theme").descriptions).toEqual([]);
   expect(only(index, "landmark:skills:installed").descriptions).toEqual([
     translate("skills.install.cliHint"),
@@ -854,13 +761,12 @@ test("every landmark heading and every drawn text is a key of the default dictio
 });
 
 test("the Notifications landmark is left out where the tab draws none", () => {
-  expect(
-    entriesAt(indexOf(AGENT_SCHEMA), "landmark:appearance:notifications"),
-  ).toHaveLength(1);
+  const notifications = "landmark:appearance:notifications";
+  expect(entriesAt(indexOf(AGENT_SCHEMA), notifications)).toHaveLength(1);
 
   launchAsTelegram();
   const telegram = indexOf(AGENT_SCHEMA);
-  expect(entriesAt(telegram, "landmark:appearance:notifications")).toEqual([]);
+  expect(entriesAt(telegram, notifications)).toEqual([]);
   expect(
     telegram.filter((e) => e.section === "appearance").map((e) => e.anchor),
   ).toEqual([
@@ -876,11 +782,10 @@ test("a large document builds its index and answers a query in a measured time",
   const doc = configFromSchema(AGENT_SCHEMA);
   const providerRow = (doc["providers"] as Record<string, unknown>[])[0]!;
   const modelRow = (doc["models"] as Record<string, unknown>[])[0]!;
-  const types = ["openai", "anthropic", "neuraldeep", "codex", "devin"];
   doc["providers"] = Array.from({ length: 40 }, (_, i) => ({
     ...providerRow,
     name: `provider-${i}`,
-    type: types[i % types.length],
+    type: PROVIDER_ROWS[i % PROVIDER_ROWS.length],
   }));
   doc["models"] = Array.from({ length: 200 }, (_, i) => ({
     ...modelRow,
@@ -907,7 +812,6 @@ test("a large document builds its index and answers a query in a measured time",
     `settings search: ${index.length} entries built in ${built.toFixed(1)} ms`,
     JSON.stringify(timings),
   );
-
   // sanity only; the suite asserts no timing
   expect(index.length).toBeGreaterThan(40 * 8 + 200 * 9);
   expect(timings[0]!.shown).toBeGreaterThan(0);

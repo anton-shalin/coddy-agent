@@ -44,10 +44,8 @@ import {
   type ServerState,
 } from "./settingsServer.fakes";
 
-// Settings calls settingsIndexRowsKey once per render, which makes the calls a
-// count of the renders of the drawer and the tab under it.
+// settingsIndexRowsKey runs once per render of the drawer and the tab under it, buildSettingsSearchIndex once per index made.
 const rowsKeyCalls = vi.hoisted(() => ({ count: 0 }));
-// and buildSettingsSearchIndex once per index made.
 const indexBuilds = vi.hoisted(() => ({ count: 0 }));
 vi.mock("./settingsSearch", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./settingsSearch")>();
@@ -702,25 +700,19 @@ test("a copy taken while a save runs does not keep the button from turning green
 
 // ---- the settings search
 
-/**
- * The page's animation frames, run by hand. A reveal waits a frame after the
- * page can show a setting, and jsdom's own frames fire late and in a burst when
- * they are asked for under act.
- */
+/** The page's animation frames, run by hand: a reveal waits one, and jsdom's own fire late under act. */
 function frameClock() {
   const queue = new Map<number, FrameRequestCallback>();
   let next = 0;
-  const request = vi
-    .spyOn(window, "requestAnimationFrame")
-    .mockImplementation((callback) => {
+  const spies = [
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
       queue.set(++next, callback);
       return next;
-    });
-  const cancel = vi
-    .spyOn(window, "cancelAnimationFrame")
-    .mockImplementation((id) => {
+    }),
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => {
       queue.delete(id);
-    });
+    }),
+  ];
   return {
     /** Lets the observers see what changed and runs the frames asked for, until the page is quiet. */
     async settle() {
@@ -738,28 +730,26 @@ function frameClock() {
         }
       }
     },
-    restore() {
-      request.mockRestore();
-      cancel.mockRestore();
-    },
+    restore: () => spies.forEach((spy) => spy.mockRestore()),
   };
 }
 
 /** The drawer, open on a page that follows its address the way App's does. */
-function drawer(opts: MountOptions = {}) {
-  return openSettings({ routed: true, ...opts });
-}
+const drawer = (opts: MountOptions = {}) =>
+  openSettings({ routed: true, ...opts });
 
 const searchInput = () =>
   document.querySelector<HTMLInputElement>(".settings-search-input")!;
 
-function typeQuery(text: string) {
+const typeQuery = (text: string) =>
   fireEvent.change(searchInput(), { target: { value: text } });
-}
 
 const options = () => [
   ...document.querySelectorAll<HTMLElement>('[role="option"]'),
 ];
+
+const selected = () =>
+  options().filter((o) => o.getAttribute("aria-selected") === "true");
 
 /** The result for a box (and a row): its dataset says which it is. */
 function optionOf(anchor: string, row?: string): HTMLElement {
@@ -774,14 +764,14 @@ function optionOf(anchor: string, row?: string): HTMLElement {
   return found;
 }
 
-/** The first box of the page that carries an anchor, in document order. */
-function boxOf(anchor: string, scope: ParentNode = document) {
-  return (
-    [...scope.querySelectorAll<HTMLElement>("[data-settings-anchor]")].find(
-      (b) => b.dataset["settingsAnchor"] === anchor,
-    ) ?? null
+/** The boxes of the page that carry an anchor, in document order. */
+const boxesOf = (anchor: string, scope: ParentNode = document) =>
+  [...scope.querySelectorAll<HTMLElement>("[data-settings-anchor]")].filter(
+    (b) => b.dataset["settingsAnchor"] === anchor,
   );
-}
+
+const boxOf = (anchor: string, scope: ParentNode = document) =>
+  boxesOf(anchor, scope)[0] ?? null;
 
 const rowForm = (row: string) =>
   [...document.querySelectorAll<HTMLElement>(".settings-detail")].find(
@@ -790,6 +780,26 @@ const rowForm = (row: string) =>
 
 const headTitle = () =>
   document.querySelector(".sessions-head")!.firstElementChild!.textContent;
+
+const isRinged = (el: Element) => el.classList.contains("is-search-target");
+
+const tabIsOpen = (id: string) =>
+  screen.getByTestId(`settings-tab-${id}`).getAttribute("aria-current") ===
+  "page";
+
+/** Whether the "Advanced settings" fold in a row form (or the fold itself) is open. */
+const advancedOpen = (form: HTMLElement) =>
+  within(form)
+    .getByRole("button", { name: "Advanced settings" })
+    .getAttribute("aria-expanded") === "true";
+
+const expectAddress = (hash: string) => expect(window.location.hash).toBe(hash);
+
+const expectCursor = (el: Element | null) =>
+  expect(document.activeElement).toBe(el);
+
+/** How a reveal scrolls: to the middle of the area, or to the top of a tall setting. */
+const smoothTo = (block: "center" | "start") => ({ block, behavior: "smooth" });
 
 /** Answers some GET routes of the stubbed server with the given bodies. */
 function answering(
@@ -810,10 +820,7 @@ function answering(
   }) as never);
 }
 
-/**
- * Fake timers that leave the animation frames to frameClock: the fake clock
- * would take requestAnimationFrame over and hand it back to the spy.
- */
+/** Fake timers that leave the animation frames to frameClock (the fake clock would take them over). */
 function useClockWithFrames() {
   vi.useFakeTimers({
     shouldAdvanceTime: true,
@@ -827,10 +834,17 @@ function useClockWithFrames() {
   });
 }
 
+const tick = (ms: number) =>
+  act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+
 describe("settings search", () => {
   let scrolled: ReturnType<typeof vi.fn>;
   let frames: ReturnType<typeof frameClock>;
-  /** What a reveal scrolled to (the middle of the area), in order. */
+  /** The page at each scroll to the middle: the box or a fold above it hidden, and the fold's own body. */
+  let atScroll: { hidden: boolean; foldBodyHidden: boolean }[];
+  /** What a reveal scrolled to (the middle of the area by default), in order. */
   const scrolledTo = (block = "center") =>
     scrolled.mock.contexts.filter(
       (_, i) =>
@@ -838,7 +852,18 @@ describe("settings search", () => {
     ) as Element[];
 
   beforeEach(() => {
-    scrolled = vi.fn();
+    atScroll = [];
+    scrolled = vi.fn(function (this: Element, arg?: { block?: string }) {
+      if (arg?.block === "center") {
+        atScroll.push({
+          hidden: this.closest("[hidden]") !== null,
+          foldBodyHidden:
+            this.querySelector<HTMLElement>(
+              ":scope > .settings-form-group-body",
+            )?.hidden === true,
+        });
+      }
+    });
     Element.prototype.scrollIntoView = scrolled;
     frames = frameClock();
   });
@@ -849,52 +874,86 @@ describe("settings search", () => {
     resetPage();
   });
 
-  // ---- the "/" badge
+  /** Types the query, chooses the result for a box (of a row) and lets the page reveal it. */
+  async function choose(query: string, anchor: string, row?: string) {
+    typeQuery(query);
+    fireEvent.click(optionOf(anchor, row));
+    await frames.settle();
+  }
+
+  /** Clicks a control of the drawer and lets the page settle. */
+  async function press(testId: string) {
+    fireEvent.click(screen.getByTestId(testId));
+    await frames.settle();
+  }
+
+  /** The field takes the cursor back and Enter opens the highlighted result. */
+  async function enterAgain() {
+    act(() => searchInput().focus());
+    fireEvent.keyDown(searchInput(), { key: "Enter" });
+    await frames.settle();
+  }
+
+  /** Moves the address the way a pasted link or a hashchange does. */
+  async function goTo(hash: string) {
+    await act(async () => {
+      window.location.hash = hash;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    await frames.settle();
+  }
+
+  const arrow = (key: "ArrowDown" | "ArrowUp", times = 1) => {
+    for (let i = 0; i < times; i++) {
+      fireEvent.keyDown(searchInput(), { key });
+    }
+  };
+
+  const pressEscape = (target: Element = document.body) =>
+    fireEvent.keyDown(target, { key: "Escape" });
 
   const badge = () => document.querySelector(".settings-search-kbd");
+  const slash = (
+    target: Element = document.body,
+    init: KeyboardEventInit = {},
+  ) => fireEvent.keyDown(target, { key: "/", ...init });
 
   test("the slash badge shows in an empty field that has no cursor, and goes while the field has the cursor or holds text", async () => {
-    await drawer({ section: "agent" });
-    expect(badge()).not.toBeNull();
-    expect(badge()!.textContent).toBe("/");
+    const view = await drawer({ section: "agent" });
+    expect(badge()?.textContent).toBe("/");
     expect(badge()!.getAttribute("aria-hidden")).toBe("true");
-
     // The cursor is in the field: the shortcut has done its work.
     act(() => searchInput().focus());
     expect(badge()).toBeNull();
     act(() => searchInput().blur());
     expect(badge()).not.toBeNull();
-
     // Text in the field, with or without the cursor.
     act(() => searchInput().focus());
     typeQuery("proxy");
     expect(badge()).toBeNull();
     act(() => searchInput().blur());
     expect(badge()).toBeNull();
-
     // Cleared again, the cursor gone: the badge is back.
     act(() => searchInput().focus());
-    fireEvent.keyDown(searchInput(), { key: "Escape" });
+    pressEscape(searchInput());
     expect(searchInput().value).toBe("");
     expect(badge()).toBeNull();
     act(() => searchInput().blur());
     expect(badge()).not.toBeNull();
-  });
-
-  test("after a jump that leaves the cursor in the revealed setting and the field empty, the badge advertises the shortcut", async () => {
-    await drawer({ section: "agent", field: "agent:max_turns" });
-    await frames.settle();
-    expect(document.activeElement).toBe(screen.getByLabelText("Max turns"));
-    expect(searchInput().value).toBe("");
-    expect(badge()).not.toBeNull();
-  });
-
-  test("a narrow desktop window has a keyboard, so the badge shows over the tiles too", async () => {
-    await drawer({ width: 390 });
+    view.unmount();
+    // A narrow desktop window has a keyboard: the badge shows over the tiles too.
+    const narrow = await drawer({ width: 390 });
     expect(screen.getByTestId("settings-tile-grid")).toBeTruthy();
     expect(badge()).not.toBeNull();
     act(() => searchInput().focus());
     expect(badge()).toBeNull();
+    narrow.unmount();
+    // After a jump that leaves the cursor in the revealed setting and the field empty.
+    await drawer({ section: "agent", field: "agent:max_turns" });
+    await frames.settle();
+    expectCursor(screen.getByLabelText("Max turns"));
+    expect(searchInput().value).toBe("");
+    expect(badge()).not.toBeNull();
   });
 
   test("a touch-only device has no key to press, so no badge is drawn on any width", async () => {
@@ -907,53 +966,40 @@ describe("settings search", () => {
   });
 
   test("slash puts the cursor in the settings search unless a field has it or a dialog is open", async () => {
-    await drawer({ section: "agent" });
-    const slash = (
-      target: Element = document.body,
-      init: KeyboardEventInit = {},
-    ) => fireEvent.keyDown(target, { key: "/", ...init });
-
+    const view = await drawer({ section: "agent" });
     // Nothing has the cursor: the search takes it, and no "/" is typed.
     expect(slash()).toBe(false);
-    expect(document.activeElement).toBe(searchInput());
+    expectCursor(searchInput());
     act(() => searchInput().blur());
-
     // A modifier makes it a shortcut that belongs to the browser.
     expect(slash(document.body, { ctrlKey: true })).toBe(true);
     expect(slash(document.body, { metaKey: true })).toBe(true);
-    expect(document.activeElement).toBe(document.body);
-
+    expectCursor(document.body);
     // A field with the cursor takes the character.
     const field = screen.getByLabelText("Max turns");
     act(() => field.focus());
     expect(slash(field)).toBe(true);
-    expect(document.activeElement).toBe(field);
+    expectCursor(field);
     act(() => field.blur());
-
     // A dialog is open: the cursor stays where it was.
-    const dialog = document.createElement("div");
+    const dialog = document.body.appendChild(document.createElement("div"));
     dialog.setAttribute("aria-modal", "true");
-    document.body.appendChild(dialog);
     expect(slash()).toBe(true);
-    expect(document.activeElement).toBe(document.body);
+    expectCursor(document.body);
     dialog.remove();
-  });
-
-  test("on a narrow screen with a tab open, slash goes back to the tiles and puts the cursor in the field once it is drawn", async () => {
+    view.unmount();
+    // On a narrow screen with a tab open the field is not drawn: slash goes back to the tiles.
     await drawer({ width: 390, section: "agent" });
-    // The tab is open and the field is not drawn over it.
     expect(searchInput()).toBeNull();
     expect(screen.getByLabelText("Max turns")).toBeTruthy();
-
-    expect(fireEvent.keyDown(document.body, { key: "/" })).toBe(false);
-
+    expect(slash()).toBe(false);
     expect(screen.getByTestId("settings-tile-grid")).toBeTruthy();
-    expect(window.location.hash).toBe("#/settings");
-    expect(document.activeElement).toBe(searchInput());
+    expectAddress("#/settings");
+    expectCursor(searchInput());
     // On the tiles the field takes the cursor at once.
     act(() => searchInput().blur());
-    expect(fireEvent.keyDown(document.body, { key: "/" })).toBe(false);
-    expect(document.activeElement).toBe(searchInput());
+    expect(slash()).toBe(false);
+    expectCursor(searchInput());
   });
 
   test("typing a query shows the matching settings of every tab in place of the sections, with the words marked", async () => {
@@ -977,8 +1023,7 @@ describe("settings search", () => {
     );
     expect(marked.length).toBeGreaterThan(0);
     expect(marked.every((m) => m === "proxy")).toBe(true);
-    // They stand in place of the sections: the rail names no tab, and the tab
-    // under them is hidden, not unmounted.
+    // They stand in place of the sections: the rail names no tab, the tab under them is hidden.
     expect(document.querySelector('[aria-current="page"]')).toBeNull();
     const tab = document.querySelector<HTMLElement>(
       '[data-settings-tab="agent"]',
@@ -988,7 +1033,6 @@ describe("settings search", () => {
     expect(within(tab).queryByRole("listbox")).toBeNull();
     expect(searchInput().getAttribute("aria-expanded")).toBe("true");
     view.unmount();
-
     // The field waits for the first read.
     const first = mountSettings({ routed: true });
     expect(searchInput().disabled).toBe(true);
@@ -996,235 +1040,225 @@ describe("settings search", () => {
     first.unmount();
   });
 
-  test("choosing a field in another tab opens that tab, rings the setting and puts the cursor in it", async () => {
-    useClockWithFrames();
-    await drawer();
-    typeQuery("max_turns");
-
-    fireEvent.click(optionOf("agent:max_turns"));
-
-    expect(
-      screen.getByTestId("settings-tab-agent").getAttribute("aria-current"),
-    ).toBe("page");
-    expect(window.location.hash).toBe(
-      "#/settings/agent?field=agent%3Amax_turns",
-    );
-    // The results are away and the query is kept.
-    expect(screen.queryByRole("listbox")).toBeNull();
-    expect(searchInput().value).toBe("max_turns");
-
-    await frames.settle();
-    const box = boxOf("agent:max_turns")!;
-    expect(box.classList.contains("is-search-target")).toBe(true);
-    expect(scrolledTo()).toContain(box);
-    expect(scrolled).toHaveBeenCalledWith({
-      block: "center",
-      behavior: "smooth",
-    });
-    expect(document.activeElement).toBe(screen.getByLabelText("Max turns"));
-
-    // The ring goes after its time.
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(SEARCH_TARGET_MS + 50);
-    });
-    expect(box.classList.contains("is-search-target")).toBe(false);
-  });
-
-  test("choosing the same result again reveals it again", async () => {
-    await drawer();
-    typeQuery("max_turns");
-    fireEvent.click(optionOf("agent:max_turns"));
-    await frames.settle();
-    expect(scrolledTo()).toHaveLength(1);
-    const box = boxOf("agent:max_turns")!;
-    const input = screen.getByLabelText("Max turns");
-    expect(document.activeElement).toBe(input);
-
-    // The cursor leaves; the field brings the results back and Enter opens
-    // the one highlighted: the same one.
-    act(() => input.blur());
-    act(() => searchInput().focus());
-    expect(optionOf("agent:max_turns").getAttribute("aria-selected")).toBe(
-      "true",
-    );
-    fireEvent.keyDown(searchInput(), { key: "Enter" });
-    await frames.settle();
-
-    expect(scrolledTo()).toHaveLength(2);
-    expect(scrolledTo()[1]).toBe(box);
-    expect(box.classList.contains("is-search-target")).toBe(true);
-    expect(document.activeElement).toBe(input);
-  });
-
-  // ---- a link to a setting
-
-  /** Moves the address the way a pasted link or a hashchange does. */
-  async function goTo(hash: string) {
-    await act(async () => {
-      window.location.hash = hash;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    });
-    await frames.settle();
-  }
-
   test("choosing a result writes the setting into the address, next to its row, and a tab writes none", async () => {
     await drawer();
-    typeQuery("max_turns");
-    fireEvent.click(optionOf("agent:max_turns"));
-    await frames.settle();
-    expect(window.location.hash).toBe(
-      "#/settings/agent?field=agent%3Amax_turns",
-    );
-
-    // A field of a row: the row and the setting, and the row opening in the
-    // list does not take the setting out of the address again.
-    typeQuery("proxy");
-    fireEvent.click(optionOf("providers:proxy", "openai"));
-    await frames.settle();
-    expect(window.location.hash).toBe(
-      "#/settings/providers?id=openai&field=providers%3Aproxy",
-    );
-
+    await choose("max_turns", "agent:max_turns");
+    expectAddress("#/settings/agent?field=agent%3Amax_turns");
+    // A field of a row: the row and the setting, and the row opening keeps the setting.
+    await choose("proxy", "providers:proxy", "openai");
+    expectAddress("#/settings/providers?id=openai&field=providers%3Aproxy");
     // A block of a row, a dot and a colon in the anchor of a list's field.
-    typeQuery("advanced");
-    fireEvent.click(optionOf("group:providers:advanced", "anthropic"));
-    await frames.settle();
-    expect(window.location.hash).toBe(
+    await choose("advanced", "group:providers:advanced", "anthropic");
+    expectAddress(
       "#/settings/providers?id=anthropic&field=group%3Aproviders%3Aadvanced",
     );
-    typeQuery("component");
-    fireEvent.click(optionOf("logger:levels.component"));
-    await frames.settle();
-    expect(window.location.hash).toBe(
-      "#/settings/logger?field=logger%3Alevels.component",
-    );
-
+    await choose("component", "logger:levels.component");
+    expectAddress("#/settings/logger?field=logger%3Alevels.component");
     // A tab result is the tab: no setting in the address.
-    typeQuery("ReAct loop");
-    fireEvent.click(optionOf("tab:agent"));
-    await frames.settle();
-    expect(window.location.hash).toBe("#/settings/agent");
-  });
-
-  test("the history sidebar stays in the address next to the setting a choice writes", async () => {
-    await drawer();
+    await choose("ReAct loop", "tab:agent");
+    expectAddress("#/settings/agent");
+    // The history sidebar stays next to the setting a choice writes.
     window.location.hash = "#/settings?history=1";
-    typeQuery("max_turns");
-    fireEvent.click(optionOf("agent:max_turns"));
-    await frames.settle();
-    expect(window.location.hash).toBe(
-      "#/settings/agent?field=agent%3Amax_turns&history=1",
-    );
+    await choose("max_turns", "agent:max_turns");
+    expectAddress("#/settings/agent?field=agent%3Amax_turns&history=1");
   });
 
-  test("an address that names a setting reveals it as a choice does: the tab, the ring, the scroll and the control", async () => {
+  type Landing = (box: HTMLElement, form: HTMLElement | null) => void;
+  const onMaxTurns: Landing = () => {
+    expect(tabIsOpen("agent")).toBe(true);
+    expectCursor(screen.getByLabelText("Max turns"));
+  };
+  const onProxyField: Landing = (box, form) => {
+    expect(form!.getAttribute("role")).toBe("group");
+    expect(advancedOpen(form!)).toBe(true);
+    expectCursor(within(box).getByLabelText("Proxy URL"));
+  };
+  const onPairingTokens: Landing = (box) => {
+    expect(tabIsOpen("swarm")).toBe(true);
+    expect(box.contains(document.activeElement)).toBe(true);
+  };
+
+  // Each row opens the drawer, reaches a setting by address or by choosing a result, and says where it lands.
+  const revealCases: [
+    title: string,
+    open: MountOptions,
+    pick: [query: string, anchor: string, row?: string] | null,
+    landing: Landing,
+  ][] = [
+    [
+      "an address that names a setting reveals it as a choice does: the tab, the ring, the scroll and the control",
+      { section: "agent", field: "agent:max_turns" },
+      null,
+      onMaxTurns,
+    ],
+    [
+      "an address that names a field of a row opens the row, unfolds its block and reveals the field",
+      { section: "providers", item: "openai", field: "providers:proxy" },
+      null,
+      onProxyField,
+    ],
+    [
+      "on a touch-only device an address that names a setting takes the focus to its box",
+      { section: "agent", field: "agent:max_turns", width: 390, touch: true },
+      null,
+      (box) => {
+        expectCursor(box);
+        expect(box.getAttribute("role")).toBe("group");
+        expect(box.getAttribute("aria-label")).toBe("Max turns");
+      },
+    ],
+    [
+      "a relay's own settings open on the setting an address names",
+      { schema: RELAY_SCHEMA, section: "swarm", field: "swarm:pairing_tokens" },
+      null,
+      onPairingTokens,
+    ],
+    [
+      "a folded group named by an address opens as it does when chosen",
+      {
+        section: "providers",
+        item: "anthropic",
+        field: "group:providers:advanced",
+      },
+      null,
+      (fold) => {
+        expect(fold.classList.contains("is-open")).toBe(true);
+        expectCursor(fold);
+      },
+    ],
+    [
+      "choosing a field of a provider row opens that row and unfolds the block it stands in",
+      {},
+      ["proxy", "providers:proxy", "openai"],
+      onProxyField,
+    ],
+    [
+      "choosing a field of another row of the open list reveals it in that row, not in the one that was open",
+      { section: "providers", item: "openai" },
+      ["proxy", "providers:proxy", "anthropic"],
+      (box) => {
+        expectAddress(
+          "#/settings/providers?id=anthropic&field=providers%3Aproxy",
+        );
+        expect(rowForm("openai")).toBeNull();
+        expectCursor(within(box).getByLabelText("Proxy URL"));
+      },
+    ],
+    [
+      "a relay's settings are searched too",
+      { schema: RELAY_SCHEMA },
+      ["pairing", "swarm:pairing_tokens"],
+      onPairingTokens,
+    ],
+    [
+      "choosing a field in another tab opens that tab, rings the setting and puts the cursor in it",
+      {},
+      ["max_turns", "agent:max_turns"],
+      onMaxTurns,
+    ],
+    [
+      "a folded group chosen from the results opens, is scrolled to whole and ringed, and takes the cursor as the named fieldset",
+      {},
+      ["advanced settings", "group:providers:advanced", "openai"],
+      (fold) => {
+        expect(fold.classList.contains("settings-fieldset--collapsible")).toBe(
+          true,
+        );
+        // The fold that is the box opened, not only a fold above it.
+        expect(fold.classList.contains("is-open")).toBe(true);
+        expect(advancedOpen(fold)).toBe(true);
+        // The cursor is on the fieldset, named by its legend alone.
+        expectCursor(fold);
+        expect(fold.hasAttribute("aria-label")).toBe(false);
+        expect(fold.getAttribute("role")).toBeNull();
+      },
+    ],
+    [
+      "a setting hidden in a folded block is found, unfolded and then revealed, never replaced by its list's box",
+      {},
+      ["timeout_ms", "providers:timeout_ms", "anthropic"],
+      (box, form) => {
+        expect(advancedOpen(form!)).toBe(true);
+        expect(document.activeElement?.getAttribute("aria-label")).toBe(
+          "Request timeout ms",
+        );
+        // Neither the row form nor the fold took the ring.
+        expect(isRinged(form!)).toBe(false);
+        expect(
+          document.querySelector(
+            ".settings-fieldset--collapsible.is-search-target",
+          ),
+        ).toBeNull();
+      },
+    ],
+  ];
+
+  test.each(revealCases)("%s", async (_title, open, pick, landing) => {
     useClockWithFrames();
-    await drawer({ section: "agent", field: "agent:max_turns" });
-    await frames.settle();
-
-    expect(
-      screen.getByTestId("settings-tab-agent").getAttribute("aria-current"),
-    ).toBe("page");
-    const box = boxOf("agent:max_turns")!;
+    await drawer(open);
+    const address = window.location.hash;
+    if (pick !== null) {
+      await choose(...pick);
+    } else {
+      await frames.settle();
+    }
+    const row = pick?.[2] ?? open.item;
+    const form = row ? rowForm(row) : null;
+    const box = boxOf(pick?.[1] ?? open.field!, form ?? document)!;
     expect(scrolledTo()).toEqual([box]);
-    expect(scrolled).toHaveBeenCalledWith({
-      block: "center",
-      behavior: "smooth",
-    });
-    expect(box.classList.contains("is-search-target")).toBe(true);
-    expect(document.activeElement).toBe(screen.getByLabelText("Max turns"));
-    // The address is left as it was: no second write, no new entry.
-    expect(window.location.hash).toBe(
-      "#/settings/agent?field=agent%3Amax_turns",
-    );
-
-    // The ring goes after its time, as a choice's does.
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(SEARCH_TARGET_MS + 50);
-    });
-    expect(box.classList.contains("is-search-target")).toBe(false);
+    expect(scrolled).toHaveBeenCalledWith(smoothTo("center"));
+    // Nothing above the box, and no fold body, was still hidden when the page scrolled.
+    expect(atScroll).toEqual([{ hidden: false, foldBodyHidden: false }]);
+    expect(isRinged(box)).toBe(true);
+    landing(box, form);
+    if (pick === null) {
+      // An address is left as it was: no second write, no new entry.
+      expectAddress(address);
+    } else {
+      // Chosen again from the field, it is revealed again and lands the same way.
+      act(() => (document.activeElement as HTMLElement).blur());
+      await enterAgain();
+      expect(scrolledTo()).toEqual([box, box]);
+      expect(isRinged(box)).toBe(true);
+      landing(box, form);
+    }
+    // The ring goes after its time.
+    await tick(SEARCH_TARGET_MS + 50);
+    expect(isRinged(box)).toBe(false);
   });
 
-  test("an address that names a field of a row opens the row, unfolds its block and reveals the field", async () => {
-    await drawer({
-      section: "providers",
-      item: "openai",
-      field: "providers:proxy",
-    });
-    await frames.settle();
-
-    const form = rowForm("openai")!;
-    expect(
-      within(form)
-        .getByRole("button", { name: "Advanced settings" })
-        .getAttribute("aria-expanded"),
-    ).toBe("true");
-    const box = boxOf("providers:proxy", form)!;
-    expect(scrolledTo()).toEqual([box]);
-    expect(box.classList.contains("is-search-target")).toBe(true);
-    expect(document.activeElement).toBe(
-      within(box).getByLabelText("Proxy URL"),
-    );
-    expect(window.location.hash).toBe(
-      "#/settings/providers?id=openai&field=providers%3Aproxy",
-    );
-  });
-
-  test("on a touch-only device an address that names a setting takes the focus to its box", async () => {
-    await drawer({
+  test("an address named while the first read is on its way, or changed later, reveals the setting once, and the drawer's own write is not a second reveal", async () => {
+    const early = mountSettings({
+      routed: true,
       section: "agent",
       field: "agent:max_turns",
-      width: 390,
-      touch: true,
     });
-    await frames.settle();
-
-    const box = boxOf("agent:max_turns")!;
-    expect(scrolledTo()).toEqual([box]);
-    expect(box.classList.contains("is-search-target")).toBe(true);
-    expect(document.activeElement).toBe(box);
-    expect(box.getAttribute("role")).toBe("group");
-    expect(box.getAttribute("aria-label")).toBe("Max turns");
-  });
-
-  test("a setting named while the first read is still on its way is revealed once the page can draw it", async () => {
-    mountSettings({ routed: true, section: "agent", field: "agent:max_turns" });
     expect(boxOf("agent:max_turns")).toBeNull();
-
     await frames.settle();
     await waitFor(() => expect(boxOf("agent:max_turns")).not.toBeNull());
     await frames.settle();
-
     expect(scrolledTo()).toEqual([boxOf("agent:max_turns")]);
-    expect(document.activeElement).toBe(screen.getByLabelText("Max turns"));
-  });
+    expectCursor(screen.getByLabelText("Max turns"));
+    early.unmount();
+    scrolled.mockClear();
 
-  test("a changed address reveals the setting it names, once, and the drawer's own write is not a second reveal", async () => {
     await drawer({ section: "agent" });
     await frames.settle();
     expect(scrolledTo()).toEqual([]);
 
     await goTo("#/settings/agent?field=agent%3Amax_turns");
     expect(scrolledTo()).toEqual([boxOf("agent:max_turns")]);
-    expect(document.activeElement).toBe(screen.getByLabelText("Max turns"));
-
+    expectCursor(screen.getByLabelText("Max turns"));
     // Another setting of the tab: a new reveal.
     await goTo("#/settings/agent?field=agent%3Aqueue_mode");
     expect(scrolledTo()).toEqual([
       boxOf("agent:max_turns"),
       boxOf("agent:queue_mode"),
     ]);
-    expect(
-      boxOf("agent:queue_mode")!.classList.contains("is-search-target"),
-    ).toBe(true);
-
+    expect(isRinged(boxOf("agent:queue_mode")!)).toBe(true);
     // A choice writes the address and the page reads it back: one reveal.
-    typeQuery("llm_retry_max");
-    fireEvent.click(optionOf("agent:llm_retry_max"));
-    await frames.settle();
-    expect(window.location.hash).toBe(
-      "#/settings/agent?field=agent%3Allm_retry_max",
-    );
+    await choose("llm_retry_max", "agent:llm_retry_max");
+    expectAddress("#/settings/agent?field=agent%3Allm_retry_max");
     await frames.settle();
     expect(scrolledTo()).toHaveLength(3);
     expect(scrolledTo()[2]).toBe(boxOf("agent:llm_retry_max"));
@@ -1239,18 +1273,13 @@ describe("settings search", () => {
     });
     await drawer({ section: "agent", field: "agent:ghost" });
     await frames.settle();
-    expect(
-      screen.getByTestId("settings-tab-agent").getAttribute("aria-current"),
-    ).toBe("page");
+    expect(tabIsOpen("agent")).toBe(true);
     expect(screen.getByLabelText("Max turns")).toBeTruthy();
-
     // A real anchor under a row the list does not have is as stale.
     await goTo("#/settings/providers?id=openai&field=providers%3Aghost");
     expect(rowForm("openai")).not.toBeNull();
-
     // An anchor of another tab does not reveal in this one.
     await goTo("#/settings/logger?field=agent%3Amax_turns");
-    await frames.settle();
 
     expect(scrolledTo()).toEqual([]);
     expect(document.querySelector(".is-search-target")).toBeNull();
@@ -1259,184 +1288,60 @@ describe("settings search", () => {
   });
 
   test("the setting leaves the address when the operator goes elsewhere, and a new choice replaces it", async () => {
-    await drawer({
+    const view = await drawer({
       section: "providers",
       item: "openai",
       field: "providers:proxy",
     });
     await frames.settle();
-    expect(window.location.hash).toBe(
-      "#/settings/providers?id=openai&field=providers%3Aproxy",
-    );
-
+    expectAddress("#/settings/providers?id=openai&field=providers%3Aproxy");
     // The head's back arrow closes the row: the list, no setting.
-    fireEvent.click(screen.getByTestId("settings-head-back"));
-    await frames.settle();
-    expect(window.location.hash).toBe("#/settings/providers");
-
+    await press("settings-head-back");
+    expectAddress("#/settings/providers");
     // Another row opened from the list carries none of it.
     await goTo("#/settings/providers?id=openai&field=providers%3Aproxy");
     fireEvent.click(screen.getByTestId("settings-head-back"));
-    fireEvent.click(screen.getByTestId("settings-master-item-1"));
-    await frames.settle();
-    expect(window.location.hash).toBe("#/settings/providers?id=anthropic");
-
+    await press("settings-master-item-1");
+    expectAddress("#/settings/providers?id=anthropic");
     // A rail click.
     await goTo("#/settings/agent?field=agent%3Amax_turns");
-    fireEvent.click(screen.getByTestId("settings-tab-logger"));
-    await frames.settle();
-    expect(window.location.hash).toBe("#/settings/logger");
-
+    await press("settings-tab-logger");
+    expectAddress("#/settings/logger");
     // A new choice replaces the old setting.
     await goTo("#/settings/agent?field=agent%3Amax_turns");
-    typeQuery("queue");
-    fireEvent.click(optionOf("agent:queue_mode"));
+    await choose("queue", "agent:queue_mode");
+    expectAddress("#/settings/agent?field=agent%3Aqueue_mode");
+    view.unmount();
+    // On the narrow shell the head's back arrow and a tile leave none either.
+    await drawer({ section: "agent", field: "agent:max_turns", width: 390 });
     await frames.settle();
-    expect(window.location.hash).toBe(
-      "#/settings/agent?field=agent%3Aqueue_mode",
-    );
-  });
-
-  test("on the narrow shell the tile grid and the head's back arrow leave no setting in the address", async () => {
-    await drawer({
-      section: "agent",
-      field: "agent:max_turns",
-      width: 390,
-    });
-    await frames.settle();
-    expect(window.location.hash).toBe(
-      "#/settings/agent?field=agent%3Amax_turns",
-    );
-
-    fireEvent.click(screen.getByTestId("settings-head-back"));
-    await frames.settle();
-    expect(window.location.hash).toBe("#/settings");
-
-    fireEvent.click(screen.getByTestId("settings-tile-logger"));
-    await frames.settle();
-    expect(window.location.hash).toBe("#/settings/logger");
-  });
-
-  test("a relay's own settings open on the setting an address names", async () => {
-    await drawer({
-      schema: RELAY_SCHEMA,
-      section: "swarm",
-      field: "swarm:pairing_tokens",
-    });
-    await frames.settle();
-
-    const box = boxOf("swarm:pairing_tokens")!;
-    expect(scrolledTo()).toEqual([box]);
-    expect(box.classList.contains("is-search-target")).toBe(true);
-    expect(box.contains(document.activeElement)).toBe(true);
-  });
-
-  // ---- groups are results in their own right
-
-  /** The group a result names, drawn in the given scope. */
-  const fieldsetOf = (anchor: string, scope: ParentNode = document) =>
-    boxOf(anchor, scope) as HTMLFieldSetElement;
-
-  test("a folded group chosen from the results opens, is scrolled to whole and ringed, and takes the cursor as the named fieldset", async () => {
-    // What the fold's body is when the page scrolls: shown, never still hidden.
-    const bodyHiddenAtScroll: boolean[] = [];
-    scrolled.mockImplementation(function (
-      this: Element,
-      arg?: { block?: string },
-    ) {
-      if (arg?.block === "center") {
-        bodyHiddenAtScroll.push(
-          this.querySelector<HTMLElement>(":scope > .settings-form-group-body")
-            ?.hidden === true,
-        );
-      }
-    });
-    await drawer();
-    typeQuery("advanced settings");
-
-    fireEvent.click(optionOf("group:providers:advanced", "openai"));
-    await frames.settle();
-
-    expect(window.location.hash).toBe(
-      "#/settings/providers?id=openai&field=group%3Aproviders%3Aadvanced",
-    );
-    const form = rowForm("openai")!;
-    const fold = fieldsetOf("group:providers:advanced", form);
-    expect(fold.classList.contains("settings-fieldset--collapsible")).toBe(
-      true,
-    );
-    // The fold that is the box opened, not only a fold above it.
-    expect(fold.classList.contains("is-open")).toBe(true);
-    expect(
-      within(fold)
-        .getByRole("button", { name: "Advanced settings" })
-        .getAttribute("aria-expanded"),
-    ).toBe("true");
-    expect(
-      fold.querySelector<HTMLElement>(":scope > .settings-form-group-body")!
-        .hidden,
-    ).toBe(false);
-    // The whole group is what scrolled, once it was shown, and it is ringed.
-    expect(scrolledTo()).toEqual([fold]);
-    expect(bodyHiddenAtScroll).toEqual([false]);
-    expect(fold.classList.contains("is-search-target")).toBe(true);
-    // The cursor is on the fieldset, named by its legend alone.
-    expect(document.activeElement).toBe(fold);
-    expect(fold.hasAttribute("aria-label")).toBe(false);
-    expect(fold.getAttribute("role")).toBeNull();
-
-    // Chosen again with the fold open, it stays open: the reveal never folds.
-    act(() => fold.blur());
-    act(() => searchInput().focus());
-    fireEvent.keyDown(searchInput(), { key: "Enter" });
-    await frames.settle();
-    expect(fold.classList.contains("is-open")).toBe(true);
-    expect(scrolledTo()).toEqual([fold, fold]);
-  });
-
-  test("a folded group named by an address opens as it does when chosen", async () => {
-    await drawer({
-      section: "providers",
-      item: "anthropic",
-      field: "group:providers:advanced",
-    });
-    await frames.settle();
-
-    const fold = fieldsetOf("group:providers:advanced", rowForm("anthropic")!);
-    expect(fold.classList.contains("is-open")).toBe(true);
-    expect(scrolledTo()).toEqual([fold]);
-    expect(fold.classList.contains("is-search-target")).toBe(true);
-    expect(document.activeElement).toBe(fold);
+    expectAddress("#/settings/agent?field=agent%3Amax_turns");
+    await press("settings-head-back");
+    expectAddress("#/settings");
+    await press("settings-tile-logger");
+    expectAddress("#/settings/logger");
   });
 
   test("a block of a tab is found by its name and takes the ring, and so does a block of a model's row", async () => {
     await drawer();
-    const legend = (scope: ParentNode) =>
-      scope.querySelector("legend")!.textContent!.trim();
-
-    typeQuery("Model and turns");
-    fireEvent.click(optionOf("group:agent:turn"));
-    await frames.settle();
-    const turn = fieldsetOf("group:agent:turn");
-    expect(legend(turn)).toBe("Model and turns");
-    expect(scrolledTo()).toEqual([turn]);
-    expect(turn.classList.contains("is-search-target")).toBe(true);
-    expect(document.activeElement).toBe(turn);
-    expect(window.location.hash).toBe(
-      "#/settings/agent?field=group%3Aagent%3Aturn",
+    await choose("Model and turns", "group:agent:turn");
+    const turn = boxOf("group:agent:turn")!;
+    expect(turn.querySelector("legend")!.textContent!.trim()).toBe(
+      "Model and turns",
     );
-
+    expect(scrolledTo()).toEqual([turn]);
+    expect(isRinged(turn)).toBe(true);
+    expectCursor(turn);
+    expectAddress("#/settings/agent?field=group%3Aagent%3Aturn");
     // The blocks of a model's row form are results per row.
-    typeQuery("Generation");
-    fireEvent.click(optionOf("group:models:generation", "demo/qwen3-27b"));
-    await frames.settle();
+    await choose("Generation", "group:models:generation", "demo/qwen3-27b");
     const form = rowForm("demo/qwen3-27b")!;
-    const generation = fieldsetOf("group:models:generation", form);
+    const generation = boxOf("group:models:generation", form)!;
     expect(generation.tagName).toBe("FIELDSET");
     expect(scrolledTo().at(-1)).toBe(generation);
-    expect(generation.classList.contains("is-search-target")).toBe(true);
-    expect(document.activeElement).toBe(generation);
-    expect(form.classList.contains("is-search-target")).toBe(false);
+    expect(isRinged(generation)).toBe(true);
+    expectCursor(generation);
+    expect(isRinged(form)).toBe(false);
   });
 
   test("a nested object and a list are found by their legends, and the whole fieldset is scrolled to and ringed", async () => {
@@ -1446,71 +1351,26 @@ describe("settings search", () => {
       ["Component levels", "logger:levels"],
     ];
     for (const [name, anchor] of cases) {
-      typeQuery(name);
-      fireEvent.click(optionOf(anchor));
-      await frames.settle();
+      await choose(name, anchor);
       const box = boxOf(anchor)!;
       const group = box.querySelector(":scope > fieldset")!;
       expect(group.querySelector("legend")!.textContent).toContain(name);
       expect(scrolledTo().at(-1)).toBe(box);
-      expect(box.classList.contains("is-search-target")).toBe(true);
+      expect(isRinged(box)).toBe(true);
       // The box holds the whole fieldset and rings it from outside.
       expect(box.contains(group)).toBe(true);
       expect(box.contains(document.activeElement)).toBe(true);
     }
   });
 
-  test("choosing a field of a provider row opens that row and unfolds the block it stands in", async () => {
-    await drawer();
-    typeQuery("proxy");
-
-    fireEvent.click(optionOf("providers:proxy", "openai"));
-    await frames.settle();
-
-    expect(window.location.hash).toBe(
-      "#/settings/providers?id=openai&field=providers%3Aproxy",
-    );
-    const form = rowForm("openai")!;
-    expect(form).not.toBeNull();
-    expect(form.getAttribute("role")).toBe("group");
-    // The block the field stands in was folded; the reveal opened it.
-    const advanced = within(form).getByRole("button", {
-      name: "Advanced settings",
-    });
-    expect(advanced.getAttribute("aria-expanded")).toBe("true");
-    const box = boxOf("providers:proxy", form)!;
-    expect(scrolledTo()).toContain(box);
-    expect(box.classList.contains("is-search-target")).toBe(true);
-    expect(document.activeElement).toBe(
-      within(box).getByLabelText("Proxy URL"),
-    );
-  });
-
-  test("choosing a field of another row of the open list reveals it in that row, not in the one that was open", async () => {
-    await drawer({ section: "providers", item: "openai" });
-    expect(rowForm("openai")).not.toBeNull();
-    typeQuery("proxy");
-
-    fireEvent.click(optionOf("providers:proxy", "anthropic"));
-    await frames.settle();
-
-    expect(window.location.hash).toBe(
-      "#/settings/providers?id=anthropic&field=providers%3Aproxy",
-    );
-    expect(rowForm("openai")).toBeNull();
-    const form = rowForm("anthropic")!;
-    const box = boxOf("providers:proxy", form)!;
-    expect(scrolledTo().at(-1)).toBe(box);
-    expect(document.activeElement).toBe(
-      within(box).getByLabelText("Proxy URL"),
-    );
-    expect(form.contains(document.activeElement)).toBe(true);
-  });
-
-  test("with two rows of one name and the second open, neither row's fields are offered", async () => {
+  test("with results over an open row the head reads Settings, and with two rows of one name the second open, neither row's fields are offered", async () => {
     // The document holds two providers called "shared" and one without a name.
     await drawer({ section: "providers", item: "shared" });
+    expect(headTitle()).toBe("Provider settings");
+    expect(screen.getByTestId("settings-head-back")).toBeTruthy();
     typeQuery("proxy");
+    expect(headTitle()).toBe("Settings");
+    expect(screen.queryByTestId("settings-head-back")).toBeNull();
 
     const rows = options()
       .filter((o) => o.dataset["settingsTarget"] === "providers:proxy")
@@ -1522,37 +1382,48 @@ describe("settings search", () => {
       "codex",
       "devin",
     ]);
-    expect(options().some((o) => o.dataset["settingsRow"] === "shared")).toBe(
-      false,
+    expect(options().map((o) => o.dataset["settingsRow"])).not.toContain(
+      "shared",
     );
+    typeQuery("");
+    expect(headTitle()).toBe("Provider settings");
+    expect(screen.getByTestId("settings-head-back")).toBeTruthy();
   });
 
   test("the query stays after a choice, and the field brings the results back with the chosen one highlighted", async () => {
     await drawer();
-    typeQuery("proxy");
-    fireEvent.click(optionOf("gateways:telegram.proxy"));
-    await frames.settle();
+    await choose("proxy", "gateways:telegram.proxy");
     expect(searchInput().value).toBe("proxy");
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(searchInput().hasAttribute("aria-activedescendant")).toBe(false);
 
     act(() => searchInput().focus());
-
     const chosen = optionOf("gateways:telegram.proxy");
-    expect(chosen.getAttribute("aria-selected")).toBe("true");
-    expect(
-      options().filter((o) => o.getAttribute("aria-selected") === "true"),
-    ).toEqual([chosen]);
+    expect(selected()).toEqual([chosen]);
     expect(searchInput().getAttribute("aria-activedescendant")).toBe(chosen.id);
-
     // A rail click puts the results away and keeps the query.
-    fireEvent.click(screen.getByTestId("settings-tab-agent"));
+    await press("settings-tab-agent");
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(searchInput().value).toBe("proxy");
-    expect(
-      screen.getByTestId("settings-tab-agent").getAttribute("aria-current"),
-    ).toBe("page");
+    expect(tabIsOpen("agent")).toBe(true);
+    // Emptying the field forgets the result chosen with the query, as Escape does.
+    typeQuery("");
+    typeQuery("proxy");
+    expect(options()[0]!.dataset["settingsTarget"]).not.toBe(
+      "gateways:telegram.proxy",
+    );
+    expect(selected()).toEqual([options()[0]]);
+    expect(searchInput().getAttribute("aria-activedescendant")).toBe(
+      options()[0]!.id,
+    );
   });
+
+  // The rows: query, anchor, row and the name of the control focused.
+  const focusCases: [string, string, string, string][] = [
+    ["proxy", "providers:proxy", "openai", "Proxy URL"],
+    ["model id", "models:model", "demo/qwen3-27b", "Model id"],
+    ["proxy", "providers:proxy", "direct", "Proxy URL"],
+  ];
 
   test.each([
     [
@@ -1570,52 +1441,24 @@ describe("settings search", () => {
     const providers = config["providers"] as Record<string, unknown>[];
     // A provider that goes direct: its Proxy URL input is disabled.
     providers.push({ ...providers[0]!, name: "direct", proxy: "none" });
-    const cases: {
-      query: string;
-      anchor: string;
-      row: string;
-      name: string;
-    }[] = [
-      {
-        query: "proxy",
-        anchor: "providers:proxy",
-        row: "openai",
-        name: "Proxy URL",
-      },
-      {
-        query: "model id",
-        anchor: "models:model",
-        row: "demo/qwen3-27b",
-        name: "Model id",
-      },
-      {
-        query: "proxy",
-        anchor: "providers:proxy",
-        row: "direct",
-        name: "Proxy URL",
-      },
-    ];
-    for (const one of cases) {
+    for (const [query, anchor, row, name] of focusCases) {
       const view = await drawer(
         touch ? { config, width: 390, touch: true } : { config },
       );
-      typeQuery(one.query);
-      fireEvent.click(optionOf(one.anchor, one.row));
-      await frames.settle();
-      const box = boxOf(one.anchor, rowForm(one.row)!)!;
+      await choose(query, anchor, row);
+      const box = boxOf(anchor, rowForm(row)!)!;
       const focused = document.activeElement as HTMLElement;
       expect(scrolledTo().at(-1)).toBe(box);
-      if (!touch && one.row !== "direct") {
-        // The id input, not the Provider combobox before it; the URL input,
-        // not the switch before it, nor the (i).
+      if (!touch && row !== "direct") {
+        // The id input, not the Provider combobox before it; the URL input, not the switch or the (i).
         expect(focused.tagName).toBe("INPUT");
-        expect(focused.getAttribute("aria-label")).toBe(one.name);
+        expect(focused.getAttribute("aria-label")).toBe(name);
         expect(box.contains(focused)).toBe(true);
       } else {
         // No keyboard rises: the box itself, named.
         expect(focused).toBe(box);
         expect(focused.getAttribute("role")).toBe("group");
-        expect(focused.getAttribute("aria-label")).toBe(one.name);
+        expect(focused.getAttribute("aria-label")).toBe(name);
       }
       view.unmount();
     }
@@ -1623,16 +1466,15 @@ describe("settings search", () => {
 
   test("the result's title is the primary name, whatever order the box draws its names in", async () => {
     await drawer();
+    const title = (anchor: string, row: string) =>
+      optionOf(anchor, row).querySelector(".settings-hit-title")!.textContent;
     typeQuery("ignore system");
-    const title = () =>
-      optionOf("providers:proxy", "openai").querySelector(
-        ".settings-hit-title",
-      )!;
     // The word is in the second name only: it is shown beside the first.
-    expect(title().textContent).toBe("Proxy URL · Ignore system proxy");
+    expect(title("providers:proxy", "openai")).toBe(
+      "Proxy URL · Ignore system proxy",
+    );
 
-    fireEvent.click(optionOf("providers:proxy", "openai"));
-    await frames.settle();
+    await choose("ignore system", "providers:proxy", "openai");
     // The box draws the switch before the URL.
     const drawn = boxOf("providers:proxy", rowForm("openai")!)!.textContent!;
     expect(drawn.indexOf("Ignore system proxy")).toBeLessThan(
@@ -1640,16 +1482,14 @@ describe("settings search", () => {
     );
 
     typeQuery("provider");
-    expect(
-      optionOf("models:model", "demo/qwen3-27b").querySelector(
-        ".settings-hit-title",
-      )!.textContent,
-    ).toBe("Model id · Provider");
+    expect(title("models:model", "demo/qwen3-27b")).toBe("Model id · Provider");
   });
 
   test("searching and choosing a result leave unsaved edits as they were", async () => {
     const view = await drawer({ section: "agent" });
     const saved = structuredClone(view.server.config);
+    const turns = () =>
+      (screen.getByLabelText("Max turns") as HTMLInputElement).value;
     fireEvent.change(screen.getByLabelText("Max turns"), {
       target: { value: "45" },
     });
@@ -1659,18 +1499,13 @@ describe("settings search", () => {
     typeQuery("proxy");
     expect(status()).toBe("Unsaved changes");
     // The tab under the results keeps what was typed.
-    expect((screen.getByLabelText("Max turns") as HTMLInputElement).value).toBe(
-      "45",
-    );
+    expect(turns()).toBe("45");
 
-    fireEvent.click(optionOf("gateways:telegram.proxy"));
-    await frames.settle();
+    await choose("proxy", "gateways:telegram.proxy");
     expect(status()).toBe("Unsaved changes");
 
-    fireEvent.click(screen.getByTestId("settings-tab-agent"));
-    expect((screen.getByLabelText("Max turns") as HTMLInputElement).value).toBe(
-      "45",
-    );
+    await press("settings-tab-agent");
+    expect(turns()).toBe("45");
     expect(
       view.fetch.mock.calls.some(
         ([, init]) => (init as RequestInit | undefined)?.method === "PUT",
@@ -1687,32 +1522,26 @@ describe("settings search", () => {
     });
     return closeDrawer;
   }
-  const pressEscape = (target: Element) =>
-    fireEvent.keyDown(target, { key: "Escape" });
 
   test("Escape with results showing clears the query wherever the focus is", async () => {
     const closeDrawer = await drawerUnderRailScreen();
-
-    typeQuery("proxy");
-    pressEscape(document.body);
-    expect(searchInput().value).toBe("");
-    expect(screen.queryByRole("listbox")).toBeNull();
-
-    typeQuery("proxy");
-    const first = options()[0]!;
-    act(() => first.focus());
-    pressEscape(first);
-    expect(searchInput().value).toBe("");
-
-    typeQuery("proxy");
-    act(() => searchInput().focus());
-    pressEscape(searchInput());
-    expect(searchInput().value).toBe("");
-    expect(screen.queryByRole("listbox")).toBeNull();
+    // With the cursor nowhere, on a result and in the field.
+    for (const focusOn of [
+      () => document.body,
+      () => options()[0]!,
+      searchInput,
+    ]) {
+      typeQuery("proxy");
+      const target = focusOn();
+      act(() => target.focus());
+      pressEscape(target);
+      expect(searchInput().value).toBe("");
+      expect(screen.queryByRole("listbox")).toBeNull();
+    }
     expect(closeDrawer).not.toHaveBeenCalled();
   });
 
-  test("Escape in the field with the results hidden clears the query", async () => {
+  test("Escape in the field with the results hidden clears the query, and with no query takes the drawer's own step", async () => {
     const closeDrawer = await drawerUnderRailScreen();
 
     act(() => searchInput().focus());
@@ -1721,17 +1550,12 @@ describe("settings search", () => {
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(searchInput().value).toBe("max_turns");
     // The cursor has not left the field yet.
-    expect(document.activeElement).toBe(searchInput());
+    expectCursor(searchInput());
     pressEscape(searchInput());
     expect(searchInput().value).toBe("");
     expect(closeDrawer).not.toHaveBeenCalled();
-  });
 
-  test("Escape with no query takes the drawer's own step", async () => {
-    const closeDrawer = await drawerUnderRailScreen();
-
-    pressEscape(document.body);
-
+    pressEscape();
     expect(closeDrawer).toHaveBeenCalledTimes(1);
   });
 
@@ -1744,56 +1568,42 @@ describe("settings search", () => {
       beside: <OpenRailScreen id="settings" onClose={closeDrawer} />,
     });
     // Telegram presses Back outside any React handler.
-    const back = () => {
-      let pressed: ReturnType<typeof pressBack> = "nothing";
+    const pressed: string[] = [];
+    const back = () =>
       act(() => {
-        pressed = pressBack(window, document);
+        pressed.push(pressBack(window, document));
       });
-      return pressed;
-    };
-    typeQuery("max_turns");
-    fireEvent.click(optionOf("agent:max_turns"));
-    await frames.settle();
+    await choose("max_turns", "agent:max_turns");
     expect(
       document.querySelector('input[aria-label="Max turns"]'),
     ).not.toBeNull();
-
     // Back from the tab: the tiles, with the query kept and its results away.
-    expect(back()).toBe("escape");
+    back();
     expect(screen.getByTestId("settings-tile-grid")).toBeTruthy();
     expect(searchInput().value).toBe("max_turns");
     expect(screen.queryByRole("listbox")).toBeNull();
-
-    // Tapped open again, the results are cleared by the next Back, and the
-    // tiles stay.
+    // Tapped open again, the next Back clears the results, and the tiles stay.
     fireEvent.click(searchInput());
     expect(screen.getByRole("listbox")).toBeTruthy();
     expect(screen.queryByTestId("settings-tile-grid")).toBeNull();
-    expect(back()).toBe("escape");
+    back();
     expect(searchInput().value).toBe("");
     expect(screen.getByTestId("settings-tile-grid")).toBeTruthy();
     expect(closeDrawer).not.toHaveBeenCalled();
-
     // Back again leaves Settings, as before.
-    expect(back()).toBe("escape");
+    back();
     expect(closeDrawer).toHaveBeenCalledTimes(1);
+    expect(pressed).toEqual(["escape", "escape", "escape"]);
   });
 
-  /** What every layer under the results is checked with. */
-  type LayerKit = {
-    closeDrawer: ReturnType<typeof vi.fn>;
-    /** Rendered before the drawer, so it listens for Escape first. */
-    beside: ReactNode;
-    escape: () => void;
-    /** Presses a key that is to clear the query, and checks that it did. */
-    clearedBy: (press: () => void) => void;
-  };
-
-  // Each row carries its own layer and its own check.
-  const layersUnderResults: [string, (kit: LayerKit) => Promise<void>][] = [
+  // Each row opens a layer under the results (`beside` is rendered before the drawer, so it
+  // hears Escape first), checks it is gone from the page while they show, and that
+  // `clearResults` (Escape, the drawer staying open) brings it back as it was.
+  type Layer = (beside: ReactNode, clearResults: () => void) => Promise<void>;
+  const layersUnderResults: [string, Layer][] = [
     [
       "a tip pinned by a touch, the results scrolled meanwhile, placed again",
-      async ({ closeDrawer, beside, escape, clearedBy }) => {
+      async (beside, clearResults) => {
         stubTipSize();
         await drawer({ section: "agent", beside });
         const hint = screen.getAllByTestId("field-hint")[0]!;
@@ -1806,20 +1616,16 @@ describe("settings search", () => {
         typeQuery("proxy");
         expect(tip()).toBeNull();
         expect(document.body.querySelector('[role="tooltip"]')).toBeNull();
-        // Nothing the results do closes it: not their scroll, a resize, nor a
-        // press on them.
-        fireEvent.scroll(screen.getByTestId("settings-search-results"));
+        // Nothing the results do closes it: not their scroll, a resize, nor a press on them.
+        const results = screen.getByTestId("settings-search-results");
+        fireEvent.scroll(results);
         act(() => {
           window.dispatchEvent(new Event("resize"));
         });
-        fireEvent.mouseDown(screen.getByTestId("settings-search-results"));
-        // The (i) moved while the results were up.
-        placeHint(hint, 500, 100);
-        clearedBy(escape);
-        expect(closeDrawer).not.toHaveBeenCalled();
-
-        // As it was: open, placed against the (i) where it is now, and still
-        // pinned until something outside it is pressed or scrolled.
+        fireEvent.mouseDown(results);
+        placeHint(hint, 500, 100); // the (i) moved while the results were up
+        clearResults();
+        // As it was: open, placed against the (i) where it is now, pinned until something outside it moves.
         expect(tip()?.textContent).toBeTruthy();
         expect(tip()?.style.left).toBe("460px");
         expect(tip()?.style.top).toBe("52px");
@@ -1834,18 +1640,17 @@ describe("settings search", () => {
     ],
     [
       "an open tag editor",
-      async ({ closeDrawer, beside, escape, clearedBy }) => {
+      async (beside, clearResults) => {
         const { fetch } = await drawer({ beside });
+        const session = {
+          id: "sess_one",
+          title: "Refactor the parser",
+          cwd: "/home/u/projects/coddy",
+          updatedAt: "2026-09-02T10:00:00Z",
+        };
         answering(fetch, {
           "/coddy/sessions": {
-            sessions: [
-              {
-                id: "sess_one",
-                title: "Refactor the parser",
-                cwd: "/home/u/projects/coddy",
-                updatedAt: "2026-09-02T10:00:00Z",
-              },
-            ],
+            sessions: [session],
             hasMore: false,
             nextCursor: null,
           },
@@ -1857,52 +1662,42 @@ describe("settings search", () => {
         fireEvent.change(await screen.findByTestId("session-tag-input"), {
           target: { value: "beta" },
         });
+        const backdrop = () =>
+          document.body.querySelector(".sessions-filter-backdrop");
 
         typeQuery("proxy");
         expect(screen.queryByTestId("session-tag-editor")).toBeNull();
-        expect(
-          document.body.querySelector(".sessions-filter-backdrop"),
-        ).toBeNull();
-        clearedBy(escape);
-        expect(closeDrawer).not.toHaveBeenCalled();
-
+        expect(backdrop()).toBeNull();
+        clearResults();
         // The editor is back, open, with the draft it held.
         expect(
           (screen.getByTestId("session-tag-input") as HTMLInputElement).value,
         ).toBe("beta");
-        expect(
-          document.body.querySelector(".sessions-filter-backdrop"),
-        ).not.toBeNull();
+        expect(backdrop()).not.toBeNull();
       },
     ],
     [
       "the Skills install results",
-      async ({ closeDrawer, beside, escape, clearedBy }) => {
+      async (beside, clearResults) => {
         await drawer({ section: "skills", beside });
         const installInput = (await screen.findByTestId(
           "skills-install-input",
         )) as HTMLInputElement;
+        const installResults = () =>
+          screen.queryByTestId("skills-install-results");
         fireEvent.change(installInput, { target: { value: "alpha" } });
-        expect(screen.getByTestId("skills-install-results")).toBeTruthy();
+        expect(installResults()).toBeTruthy();
 
         typeQuery("proxy");
         // Still there, under the hidden tab, and deaf to the key.
-        expect(
-          screen.getByTestId("skills-install-results").closest("[hidden]"),
-        ).not.toBeNull();
-        clearedBy(escape);
-        expect(closeDrawer).not.toHaveBeenCalled();
-
-        // As it was: the results hang under the box, and Escape takes them
-        // first again.
+        expect(installResults()!.closest("[hidden]")).not.toBeNull();
+        clearResults();
+        // As it was: the results hang under the box, and Escape takes them first again.
         expect(installInput.value).toBe("alpha");
-        expect(
-          screen.getByTestId("skills-install-results").closest("[hidden]"),
-        ).toBeNull();
-        escape();
-        expect(screen.queryByTestId("skills-install-results")).toBeNull();
+        expect(installResults()!.closest("[hidden]")).toBeNull();
+        clearResults();
+        expect(installResults()).toBeNull();
         expect(installInput.value).toBe("");
-        expect(closeDrawer).not.toHaveBeenCalled();
       },
     ],
   ];
@@ -1911,272 +1706,107 @@ describe("settings search", () => {
     "while results show, %s draws nothing in the page and claims no Escape, and comes back as it was",
     async (_layer, run) => {
       const closeDrawer = vi.fn();
-      await run({
-        closeDrawer,
-        beside: <OpenRailScreen id="settings" onClose={closeDrawer} />,
-        escape: () => fireEvent.keyDown(document.body, { key: "Escape" }),
-        clearedBy: (press) => {
-          press();
-          expect(searchInput().value).toBe("");
-          expect(screen.queryByRole("listbox")).toBeNull();
-        },
+      await run(<OpenRailScreen id="settings" onClose={closeDrawer} />, () => {
+        pressEscape();
+        expect(searchInput().value).toBe("");
+        expect(screen.queryByRole("listbox")).toBeNull();
+        expect(closeDrawer).not.toHaveBeenCalled();
       });
     },
   );
 
-  test("the head reads Settings while results show over an open row", async () => {
-    await drawer({ section: "providers", item: "openai" });
-    expect(headTitle()).toBe("Provider settings");
-    expect(screen.getByTestId("settings-head-back")).toBeTruthy();
-
-    typeQuery("agent");
-    expect(headTitle()).toBe("Settings");
-    expect(screen.queryByTestId("settings-head-back")).toBeNull();
-
-    typeQuery("");
-    expect(headTitle()).toBe("Provider settings");
-    expect(screen.getByTestId("settings-head-back")).toBeTruthy();
-  });
-
-  test("a query nothing matches says so", async () => {
-    await drawer();
-    typeQuery("zzzzqq");
-
-    expect(
-      screen.getByText("No matching settings; try other or fewer words"),
-    ).toBeTruthy();
-    expect(screen.queryByRole("listbox")).toBeNull();
-    expect(searchInput().getAttribute("aria-expanded")).toBe("false");
-    expect(searchInput().hasAttribute("aria-activedescendant")).toBe(false);
-  });
-
-  test("the highlighted result stays in view and stays the active descendant as the results change", async () => {
+  test("the highlighted result stays in view and stays the active descendant as the results change, and a click or focus in the field, or a trailing space in the query, keeps it", async () => {
     await drawer();
     act(() => searchInput().focus());
     typeQuery("proxy");
     const input = searchInput();
-    const selected = () =>
-      options().filter((o) => o.getAttribute("aria-selected") === "true");
     const activeOption = () =>
       document.getElementById(input.getAttribute("aria-activedescendant")!);
 
     expect(selected()).toEqual([options()[0]]);
     expect(activeOption()).toBe(options()[0]);
-
     // The arrows move it, wrap around, and scroll it into view.
-    fireEvent.keyDown(input, { key: "ArrowDown" });
-    fireEvent.keyDown(input, { key: "ArrowDown" });
+    arrow("ArrowDown", 2);
     expect(selected()).toEqual([options()[2]]);
     expect(activeOption()).toBe(options()[2]);
     expect(scrolled).toHaveBeenLastCalledWith({ block: "nearest" });
     expect(scrolledTo("nearest").at(-1)).toBe(options()[2]);
-    fireEvent.keyDown(input, { key: "ArrowUp" });
-    fireEvent.keyDown(input, { key: "ArrowUp" });
-    fireEvent.keyDown(input, { key: "ArrowUp" });
+    // A click or focus in the field, or a trailing space in the query, keeps it.
+    fireEvent.click(input);
+    fireEvent.focus(input);
+    typeQuery("proxy ");
+    expect(selected()).toEqual([options()[2]]);
+    arrow("ArrowUp", 3);
     expect(selected()).toEqual([options().at(-1)]);
     expect(scrolledTo("nearest").at(-1)).toBe(options().at(-1));
-    fireEvent.keyDown(input, { key: "ArrowDown" });
+    arrow("ArrowDown");
     expect(selected()).toEqual([options()[0]]);
-
     // The chosen result stays highlighted while it is among the hits ...
-    fireEvent.click(optionOf("gateways:telegram.proxy"));
+    const chosen = () => optionOf("gateways:telegram.proxy");
+    fireEvent.click(chosen());
     await frames.settle();
     act(() => input.focus());
-    expect(selected()).toEqual([optionOf("gateways:telegram.proxy")]);
+    expect(selected()).toEqual([chosen()]);
     typeQuery("proxy url");
-    expect(selected()).toEqual([optionOf("gateways:telegram.proxy")]);
-    expect(activeOption()).toBe(optionOf("gateways:telegram.proxy"));
-    expect(scrolledTo("nearest").at(-1)).toBe(
-      optionOf("gateways:telegram.proxy"),
-    );
+    expect(selected()).toEqual([chosen()]);
+    expect(activeOption()).toBe(chosen());
+    expect(scrolledTo("nearest").at(-1)).toBe(chosen());
     // ... and the first one takes it over when it is not.
     typeQuery("timeout");
-    expect(
-      options().some(
-        (o) => o.dataset["settingsTarget"] === "gateways:telegram.proxy",
-      ),
-    ).toBe(false);
+    expect(options().map((o) => o.dataset["settingsTarget"])).not.toContain(
+      "gateways:telegram.proxy",
+    );
     expect(selected()).toEqual([options()[0]]);
     expect(activeOption()).toBe(options()[0]);
-    // No result, no active descendant.
+    // A query nothing matches says so, and leaves no active descendant.
     typeQuery("zzzzqq");
+    expect(
+      screen.getByText("No matching settings; try other or fewer words"),
+    ).toBeTruthy();
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(input.getAttribute("aria-expanded")).toBe("false");
     expect(input.hasAttribute("aria-activedescendant")).toBe(false);
   });
 
-  test("a click or focus in the field while the results show keeps the highlighted result", async () => {
-    await drawer();
-    act(() => searchInput().focus());
-    typeQuery("proxy");
-    const selected = () =>
-      options().filter((o) => o.getAttribute("aria-selected") === "true");
-    fireEvent.keyDown(searchInput(), { key: "ArrowDown" });
-    fireEvent.keyDown(searchInput(), { key: "ArrowDown" });
-    expect(selected()).toEqual([options()[2]]);
-
-    fireEvent.click(searchInput());
-    expect(selected()).toEqual([options()[2]]);
-    fireEvent.focus(searchInput());
-    expect(selected()).toEqual([options()[2]]);
-  });
-
-  test("a trailing space in the query is the same words: the highlight stays", async () => {
+  test("a pointer over the highlighted result does not skip the next scroll into view, and one resting over the results does not take the highlight when they change under it", async () => {
     await drawer();
     typeQuery("proxy");
-    fireEvent.keyDown(searchInput(), { key: "ArrowDown" });
-    fireEvent.keyDown(searchInput(), { key: "ArrowDown" });
-    const before = options()[2]!;
-
-    typeQuery("proxy ");
-
-    expect(before.getAttribute("aria-selected")).toBe("true");
-    expect(
-      options().filter((o) => o.getAttribute("aria-selected") === "true"),
-    ).toEqual([options()[2]]);
-  });
-
-  test("hovering the highlighted result does not make the next change of the highlight skip its scroll into view", async () => {
-    await drawer();
-    typeQuery("proxy");
-    const nearest = () => scrolledTo("nearest").length;
-
-    // The pointer moves over the result that is already highlighted: nothing moves.
-    fireEvent.mouseMove(options()[0]!, { clientX: 40, clientY: 80 });
-    fireEvent.mouseMove(options()[0]!, { clientX: 42, clientY: 82 });
-    const before = nearest();
+    const hover = (index: number, x: number, y: number) =>
+      fireEvent.mouseMove(options()[index]!, { clientX: x, clientY: y });
+    // Over the result already highlighted nothing moves, and the next change still scrolls to it.
+    hover(0, 40, 80);
+    hover(0, 42, 82);
+    const before = scrolledTo("nearest").length;
     typeQuery("proxy url");
-
-    expect(nearest()).toBeGreaterThan(before);
+    expect(scrolledTo("nearest").length).toBeGreaterThan(before);
     expect(scrolledTo("nearest").at(-1)).toBe(options()[0]);
-  });
-
-  test("a pointer resting over the results does not take the highlight when the results change under it", async () => {
-    await drawer();
-    typeQuery("proxy");
-    const highlighted = () =>
-      options().filter((o) => o.getAttribute("aria-selected") === "true");
-
     // A pointer moved onto a result highlights it.
-    fireEvent.mouseMove(options()[2]!, { clientX: 40, clientY: 200 });
-    fireEvent.mouseMove(options()[2]!, { clientX: 41, clientY: 202 });
-    expect(highlighted()).toEqual([options()[2]]);
-
-    // New results come in under the resting pointer: the browser reports a
-    // move at the same spot, which is no move of the operator's.
-    typeQuery("proxy url");
-    expect(highlighted()).toEqual([options()[0]]);
-    fireEvent.mouseMove(options()[2]!, { clientX: 41, clientY: 202 });
-    expect(highlighted()).toEqual([options()[0]]);
-
+    hover(2, 40, 200);
+    hover(2, 41, 202);
+    expect(selected()).toEqual([options()[2]]);
+    // New results under a resting pointer: the browser reports a move at the same spot, no move of the operator's.
+    typeQuery("proxy");
+    expect(selected()).toEqual([options()[0]]);
+    hover(2, 41, 202);
+    expect(selected()).toEqual([options()[0]]);
     // Moving it again does.
-    fireEvent.mouseMove(options()[2]!, { clientX: 44, clientY: 206 });
-    expect(highlighted()).toEqual([options()[2]]);
+    hover(2, 44, 206);
+    expect(selected()).toEqual([options()[2]]);
   });
 
-  test("emptying the field forgets the result chosen with the query, as Escape does", async () => {
-    await drawer();
-    typeQuery("proxy");
-    const first = options()[0]!.dataset["settingsTarget"];
-    const chosen = optionOf("gateways:telegram.proxy");
-    expect(chosen).not.toBe(options()[0]);
-    fireEvent.click(chosen);
-    await frames.settle();
+  test("a Russian page finds a setting by its Russian name and by its config key", async () => {
+    await drawer({ lang: "ru" });
+    expect(searchInput().placeholder).toBe("Поиск по настройкам");
+    typeQuery("max_turns");
+    // The name the page draws for the setting, read from the page.
+    const name = optionOf("agent:max_turns").querySelector(
+      ".settings-hit-title",
+    )!.textContent!;
+    expect(name).toMatch(/[а-яё]/i);
 
-    // What the native clear button of a search field, or deleting the text,
-    // does: the field is empty.
-    typeQuery("");
-    typeQuery("proxy");
-
-    expect(
-      options().filter((o) => o.getAttribute("aria-selected") === "true"),
-    ).toEqual([options()[0]]);
-    expect(options()[0]!.dataset["settingsTarget"]).toBe(first);
-    expect(searchInput().getAttribute("aria-activedescendant")).toBe(
-      options()[0]!.id,
-    );
-  });
-
-  // Each row carries its own page and its own check.
-  const otherPages: [string, () => Promise<void>][] = [
-    [
-      "a Russian page finds a setting by its Russian name and by its config key",
-      async () => {
-        await drawer({ lang: "ru" });
-        expect(searchInput().placeholder).toBe("Поиск по настройкам");
-        typeQuery("max_turns");
-        // The name the page draws for the setting, read from the page.
-        const name = optionOf("agent:max_turns").querySelector(
-          ".settings-hit-title",
-        )!.textContent!;
-        expect(name).toMatch(/[а-яё]/i);
-
-        typeQuery(name);
-        fireEvent.click(optionOf("agent:max_turns"));
-        await frames.settle();
-        expect(document.activeElement).toBe(screen.getByLabelText(name));
-        expect(
-          screen.getByTestId("settings-tab-agent").getAttribute("aria-current"),
-        ).toBe("page");
-      },
-    ],
-    [
-      "a relay's settings are searched too",
-      async () => {
-        await drawer({ schema: RELAY_SCHEMA });
-        typeQuery("pairing");
-        fireEvent.click(optionOf("swarm:pairing_tokens"));
-        await frames.settle();
-        expect(
-          screen.getByTestId("settings-tab-swarm").getAttribute("aria-current"),
-        ).toBe("page");
-        const box = boxOf("swarm:pairing_tokens")!;
-        expect(scrolledTo()).toContain(box);
-        expect(box.classList.contains("is-search-target")).toBe(true);
-        expect(box.contains(document.activeElement)).toBe(true);
-      },
-    ],
-  ];
-
-  test.each(otherPages)("%s", async (_name, run) => {
-    await run();
-  });
-
-  test("a setting hidden in a folded block is found, unfolded and then revealed, never replaced by its list's box", async () => {
-    // The page the scroll happens on: nothing above the box is hidden then.
-    const hiddenAtScroll: boolean[] = [];
-    scrolled.mockImplementation(function (
-      this: Element,
-      arg?: { block?: string },
-    ) {
-      if (arg?.block === "center") {
-        hiddenAtScroll.push(this.closest("[hidden]") !== null);
-      }
-    });
-    await drawer();
-    typeQuery("timeout_ms");
-
-    fireEvent.click(optionOf("providers:timeout_ms", "anthropic"));
-    await frames.settle();
-
-    const form = rowForm("anthropic")!;
-    expect(
-      within(form)
-        .getByRole("button", { name: "Advanced settings" })
-        .getAttribute("aria-expanded"),
-    ).toBe("true");
-    const box = boxOf("providers:timeout_ms", form)!;
-    expect(scrolledTo()).toEqual([box]);
-    expect(hiddenAtScroll).toEqual([false]);
-    expect(box.classList.contains("is-search-target")).toBe(true);
-    expect(document.activeElement?.getAttribute("aria-label")).toBe(
-      "Request timeout ms",
-    );
-    // Neither the row form nor the fold took the ring.
-    expect(form.classList.contains("is-search-target")).toBe(false);
-    expect(
-      document.querySelector(
-        ".settings-fieldset--collapsible.is-search-target",
-      ),
-    ).toBeNull();
+    await choose(name, "agent:max_turns");
+    expectCursor(screen.getByLabelText(name));
+    expect(tabIsOpen("agent")).toBe(true);
   });
 
   test("an entry added to a list after the search was built is revealed in that entry, and with the list empty again the list is revealed", async () => {
@@ -2185,45 +1815,30 @@ describe("settings search", () => {
       { component: "component-0", level: "debug" },
     ];
     await drawer({ config });
-    typeQuery("component");
     const listBox = () => boxOf("logger:levels")!;
-    const entries = () =>
-      [
-        ...document.querySelectorAll<HTMLElement>("[data-settings-anchor]"),
-      ].filter(
-        (b) => b.dataset["settingsAnchor"] === "logger:levels.component",
-      );
-    const choose = async () => {
-      act(() => searchInput().focus());
-      fireEvent.keyDown(searchInput(), { key: "Enter" });
-      await frames.settle();
-    };
+    const entries = () => boxesOf("logger:levels.component");
 
-    fireEvent.click(optionOf("logger:levels.component"));
-    await frames.settle();
+    await choose("component", "logger:levels.component");
     expect(entries()).toHaveLength(1);
     expect(scrolledTo().at(-1)).toBe(entries()[0]);
     expect(document.activeElement?.getAttribute("aria-label")).toBe(
       "Component",
     );
-
-    // An entry added: the index holds no count, and the first entry in the
-    // document is the one revealed.
+    // An entry added: the index holds no count, and the first entry in the document is revealed.
     fireEvent.click(within(listBox()).getByRole("button", { name: "Add" }));
     expect(entries()).toHaveLength(2);
-    await choose();
+    await enterAgain();
     expect(scrolledTo().at(-1)).toBe(entries()[0]);
     expect(entries()[0]!.contains(document.activeElement)).toBe(true);
-
     // Both removed: the list draws no entry, and the list itself is revealed.
     const remove = () =>
       within(listBox()).getAllByRole("button", { name: "Remove" })[0]!;
     fireEvent.click(remove());
     fireEvent.click(remove());
     expect(entries()).toHaveLength(0);
-    await choose();
+    await enterAgain();
     expect(scrolledTo().at(-1)).toBe(listBox());
-    expect(listBox().classList.contains("is-search-target")).toBe(true);
+    expect(isRinged(listBox())).toBe(true);
   });
 
   test("a setting taller than its scroll area is scrolled to by its top, so its name is not cut off", async () => {
@@ -2234,15 +1849,9 @@ describe("settings search", () => {
       )!;
     const tall = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect");
     onTestFinished(() => tall.mockRestore());
-    typeQuery("Model and turns");
-    fireEvent.click(optionOf("group:agent:turn"));
-    await frames.settle();
+    await choose("Model and turns", "group:agent:turn");
     // No layout in jsdom: a box of no height is not taller than anything.
-    expect(scrolled).toHaveBeenLastCalledWith({
-      block: "center",
-      behavior: "smooth",
-    });
-
+    expect(scrolled).toHaveBeenLastCalledWith(smoothTo("center"));
     // The same group, now taller than the area it stands in.
     Object.defineProperty(area(), "clientHeight", {
       configurable: true,
@@ -2254,23 +1863,32 @@ describe("settings search", () => {
           this.dataset["settingsAnchor"] === "group:agent:turn" ? 900 : 20,
       } as DOMRect;
     });
-    act(() => searchInput().focus());
-    fireEvent.keyDown(searchInput(), { key: "Enter" });
-    await frames.settle();
-    expect(scrolled).toHaveBeenLastCalledWith({
-      block: "start",
-      behavior: "smooth",
-    });
+    await enterAgain();
+    expect(scrolled).toHaveBeenLastCalledWith(smoothTo("start"));
     expect(scrolled.mock.contexts.at(-1)).toBe(boxOf("group:agent:turn"));
   });
 
-  test("typing a query never builds the index again: it is made when the tabs, the schema, the rows or the language change", async () => {
-    await drawer();
+  test("typing a query neither builds the index again nor renders the tab under the results again", async () => {
+    await drawer({ section: "agent" });
     const built = indexBuilds.count;
-    for (const text of ["p", "pr", "pro", "prox", "proxy", "proxy u"]) {
-      typeQuery(text);
+    // The results start showing with the first word: the drawer renders for it.
+    typeQuery("p");
+    const rendered = rowsKeyCalls.count;
+
+    for (const query of ["pr", "pro", "prox", "proxy", "proxy ", "proxy u"]) {
+      typeQuery(query);
     }
+    arrow("ArrowDown");
+    arrow("ArrowUp");
+    fireEvent.mouseMove(options()[1]!, { clientX: 40, clientY: 120 });
+    fireEvent.mouseMove(options()[1]!, { clientX: 42, clientY: 122 });
+    expect(options().length).toBeGreaterThan(0);
+    // The index is made when the tabs, the schema, the rows or the language change.
     expect(indexBuilds.count).toBe(built);
+    expect(rowsKeyCalls.count).toBe(rendered);
+    // The counter does see a render: putting the results away is one.
+    typeQuery("");
+    expect(rowsKeyCalls.count).toBeGreaterThan(rendered);
   });
 
   test("a reveal whose setting never appears gives up quietly within a second", async () => {
@@ -2278,27 +1896,20 @@ describe("settings search", () => {
     await drawer();
     const errors = vi.spyOn(console, "error");
     onTestFinished(() => errors.mockRestore());
-    // The fold above the setting does not hear the request to open, so the
-    // setting stays hidden and the reveal has nothing to go to.
+    // The fold above the setting does not hear the request to open: the reveal has nothing to go to.
     const deaf = (event: Event) => event.stopPropagation();
     const listenDeaf = () =>
       document.addEventListener(SETTINGS_REVEAL_EVENT, deaf, true);
     const hearAgain = () =>
       document.removeEventListener(SETTINGS_REVEAL_EVENT, deaf, true);
     onTestFinished(hearAgain);
-    const choose = async () => {
+    const chooseAgain = async () => {
       fireEvent.click(searchInput());
-      fireEvent.click(optionOf("providers:timeout_ms", "anthropic"));
-      await frames.settle();
+      await choose("timeout_ms", "providers:timeout_ms", "anthropic");
     };
-    const wait = (ms: number) =>
-      act(async () => {
-        await vi.advanceTimersByTimeAsync(ms);
-      });
 
     listenDeaf();
-    typeQuery("timeout_ms");
-    await choose();
+    await chooseAgain();
     const form = rowForm("anthropic")!;
     const fold = within(form).getByRole("button", {
       name: "Advanced settings",
@@ -2306,39 +1917,37 @@ describe("settings search", () => {
     const box = boxOf("providers:timeout_ms", form)!;
     expect(box.closest("[hidden]")).not.toBeNull();
     expect(scrolledTo()).toEqual([]);
-
-    // Within the second it is still looking: let the fold hear, and the
-    // setting is gone to once the block opens.
-    await wait(REVEAL_WAIT_MS - 100);
+    // Within the second it is still looking: let the fold hear, and the setting is gone to.
+    await tick(REVEAL_WAIT_MS - 100);
     hearAgain();
     fireEvent.click(fold);
     await frames.settle();
     expect(scrolledTo()).toEqual([box]);
-    expect(box.classList.contains("is-search-target")).toBe(true);
-
-    // Past the second it has given up: the block opening later takes nobody
-    // anywhere, and nothing was said.
-    await wait(SEARCH_TARGET_MS);
+    expect(isRinged(box)).toBe(true);
+    // Past the second it has given up: the block opening later takes nobody anywhere, silently.
+    await tick(SEARCH_TARGET_MS);
     fireEvent.click(fold);
     expect(box.closest("[hidden]")).not.toBeNull();
     listenDeaf();
-    await choose();
-    await wait(REVEAL_WAIT_MS + 50);
+    await chooseAgain();
+    await tick(REVEAL_WAIT_MS + 50);
     hearAgain();
     fireEvent.click(fold);
     await frames.settle();
     expect(box.closest("[hidden]")).toBeNull();
     expect(scrolledTo()).toEqual([box]);
-    expect(box.classList.contains("is-search-target")).toBe(false);
+    expect(isRinged(box)).toBe(false);
     expect(errors).not.toHaveBeenCalled();
   });
 
   test("a new choice cancels the reveal before it, and closing the drawer takes the ring away", async () => {
     const view = await drawer();
     typeQuery("llm");
-    const first = "agent:llm_min_interval_ms";
-    const second = "agent:llm_retry_base_ms";
-    const third = "agent:llm_retry_max";
+    const [first, second, third] = [
+      "agent:llm_min_interval_ms",
+      "agent:llm_retry_base_ms",
+      "agent:llm_retry_max",
+    ] as const;
     const ringed = () =>
       [...document.querySelectorAll(".is-search-target")].filter(
         (el) => el.closest("[hidden]") === null,
@@ -2348,12 +1957,10 @@ describe("settings search", () => {
     await frames.settle();
     const firstBox = boxOf(first)!;
     expect(ringed()).toEqual([firstBox]);
-
-    // A second choice takes the ring of the first away at once, before its own
-    // reveal has had its frame ...
+    // A second choice takes the ring of the first away at once, before its own frame ...
     fireEvent.click(searchInput());
     fireEvent.click(optionOf(second));
-    expect(firstBox.classList.contains("is-search-target")).toBe(false);
+    expect(isRinged(firstBox)).toBe(false);
     // ... and a third, before that frame, is the only one that is revealed.
     fireEvent.click(searchInput());
     fireEvent.click(optionOf(third));
@@ -2362,23 +1969,18 @@ describe("settings search", () => {
     expect(scrolledTo()).toEqual([firstBox, thirdBox]);
     expect(ringed()).toEqual([thirdBox]);
     expect(thirdBox.contains(document.activeElement)).toBe(true);
-
     // Closing the drawer does not leave its ring behind.
     view.unmount();
-    expect(thirdBox.classList.contains("is-search-target")).toBe(false);
+    expect(isRinged(thirdBox)).toBe(false);
   });
 
   test("Enter and Escape while an input method composes leave the search alone", async () => {
-    const closeDrawer = vi.fn();
-    await drawer({
-      beside: <OpenRailScreen id="settings" onClose={closeDrawer} />,
-    });
+    const closeDrawer = await drawerUnderRailScreen();
     act(() => searchInput().focus());
     typeQuery("proxy");
     const composing: KeyboardEventInit[] = [
       { isComposing: true },
-      // Safari reports the key that ends a composition as keyCode 229.
-      { keyCode: 229 },
+      { keyCode: 229 }, // Safari reports the key that ends a composition so
     ];
 
     for (const init of composing) {
@@ -2387,44 +1989,21 @@ describe("settings search", () => {
       expect(scrolled).not.toHaveBeenCalledWith(
         expect.objectContaining({ block: "center" }),
       );
-      expect(window.location.hash).toBe("#/settings");
+      expectAddress("#/settings");
 
       fireEvent.keyDown(searchInput(), { key: "Escape", ...init });
       expect(searchInput().value).toBe("proxy");
       expect(screen.getByRole("listbox")).toBeTruthy();
       expect(closeDrawer).not.toHaveBeenCalled();
     }
-
     // The same keys, the composition over, are the search's again.
-    fireEvent.keyDown(searchInput(), { key: "Escape" });
+    pressEscape(searchInput());
     expect(searchInput().value).toBe("");
     expect(closeDrawer).not.toHaveBeenCalled();
     typeQuery("proxy");
     fireEvent.keyDown(searchInput(), { key: "Enter" });
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(window.location.hash).not.toBe("#/settings");
-  });
-
-  test("typing a query does not render the tab under the results again", async () => {
-    await drawer({ section: "agent" });
-    // The results start showing with the first word: the drawer renders for it.
-    typeQuery("p");
-    const input = searchInput();
-    const rendered = rowsKeyCalls.count;
-
-    for (const query of ["pr", "pro", "prox", "proxy", "proxy ", "proxy u"]) {
-      typeQuery(query);
-    }
-    fireEvent.keyDown(input, { key: "ArrowDown" });
-    fireEvent.keyDown(input, { key: "ArrowUp" });
-    fireEvent.mouseMove(options()[1]!, { clientX: 40, clientY: 120 });
-    fireEvent.mouseMove(options()[1]!, { clientX: 42, clientY: 122 });
-    expect(options().length).toBeGreaterThan(0);
-    expect(rowsKeyCalls.count).toBe(rendered);
-
-    // The counter does see a render: putting the results away is one.
-    typeQuery("");
-    expect(rowsKeyCalls.count).toBeGreaterThan(rendered);
   });
 
   test("the number found is announced once typing pauses", async () => {
@@ -2439,18 +2018,11 @@ describe("settings search", () => {
     const count = options().length;
     expect(count).toBeGreaterThan(1);
     expect(status().textContent).toBe("");
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(450);
-    });
+    await tick(450);
     expect(status().textContent).toBe("");
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(100);
-    });
+    await tick(100);
     expect(status().textContent).toBe(`${count} settings found`);
-
-    // Past the limit the rest is counted, in a line of its own, and the count
-    // announced is of all that were found.
+    // Past the limit the rest is counted in a line of its own; the count announced is of all found.
     typeQuery("e");
     expect(options()).toHaveLength(50);
     const more = Number(
@@ -2459,9 +2031,7 @@ describe("settings search", () => {
       )![1],
     );
     expect(more).toBeGreaterThan(1);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(550);
-    });
+    await tick(550);
     expect(status().textContent).toBe(`${50 + more} settings found`);
   });
 });
