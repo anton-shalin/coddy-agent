@@ -158,3 +158,14 @@ test("a box the reveal focused shows no browser focus ring of its own once its r
   );
   expect(idle?.body).toBe("outline: none;");
 });
+
+test("a result's config key stands on a line of its own under where the setting is", () => {
+  // Inline after the path, a key wrapped or not by the length of the path
+  // beside it, so the rows of one list looked uneven; on a line of its own
+  // every row has the same shape.
+  const key = rules(css).find(
+    (r) =>
+      r.selectors.includes(".settings-hit-key") && r.selectors.length === 1,
+  );
+  expect(key?.body).toMatch(/display: block;/);
+});

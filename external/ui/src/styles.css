@@ -15118,7 +15118,8 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
 }
 
 /* Where the setting is, then its config key: plain lines, not the clamped
-   snippet of the documentation hit. */
+   snippet of the documentation hit. The key takes a line of its own, so every
+   row has the same shape whatever the length of the path. */
 .settings-hit-where {
   display: block;
   overflow: visible;
@@ -15126,6 +15127,7 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
 }
 
 .settings-hit-key {
+  display: block;
   font:
     11.5px/1.4 ui-monospace,
     SFMono-Regular,

@@ -624,6 +624,8 @@ What the implementation does differently from the text above, and why. Each poin
 15. **The look of the reveal changed after the demo.** The ring replaces the box-shadow ring and wash of note 7. It is a 2px accent outline, 3px off the box so the switch and the label of a field never touch it, over a light accent wash (an inset shadow, so no ground of the box is painted over). Both come in over the first 8% of the 1.6 s, hold, and fade over the last 0.6 s, and under reduced motion they hold still. A box taller than its scroll area is aligned by its top instead of centred, so its name and its first fields show. Every box keeps a 12px scroll margin, so the ring is never cut at the edge of the scroll area. A box the reveal focused from the keyboard shows no second, browser focus ring once the ring has faded.
 16. **The spec and the browser check grew with these.** `features/web_ui_settings_search.feature` has 12 scenarios; it adds a link, a group and the badge. The browser check additionally asserts the address with `field=`, opening a link, a search for a group and the badge.
 
+17. **A result's config key has a line of its own.** Inline after the path (7.5), the key wrapped or not by the length of the path beside it, so the rows of one list had different shapes; on a line of its own every row looks the same.
+
 ## Appendix A. Review log
 
 **Key:** T = technical review (2026-10-12), U = UX review (2026-10-12), C = cross-review (2026-10-13), X = its second round (2026-10-13), Y = its third round (2026-10-13), Z = its final round (2026-10-13).
