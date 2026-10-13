@@ -16,9 +16,18 @@ Feature: Settings can be searched
 
   Scenario: A field of a provider row opens that row
     Then choosing a field of a provider row opens that row and unfolds the block it stands in
+    And choosing a field of another row of the open list reveals it in that row, not in the one that was open
+
+  Scenario: A mouse gets the setting's control, a touch screen its box
+    Then on a fine pointer the focus goes to the control named by the primary name (Proxy URL's input, a model's id input), never a switch beside it, a disabled input or the (i)
+    And on a touch-only device the focus goes to the setting's named box, so no keyboard opens
 
   Scenario: The query stays for the next result
     Then the query stays after a choice, and the field brings the results back with the chosen one highlighted
+
+  Scenario: Escape and Telegram's Back clear the search first
+    Then Escape with results showing clears the query wherever the focus is
+    And the Telegram back button clears shown results first, then goes back from a tab to the tiles
 
   Scenario: Russian names and config keys both find a setting
     Then a Russian page finds a setting by its Russian name and by its config key
