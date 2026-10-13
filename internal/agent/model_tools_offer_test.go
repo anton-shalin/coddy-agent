@@ -164,6 +164,68 @@ func TestModelToolListsABatchWithASwitchIsJudgedByItsOwnOffer(t *testing.T) {
 	}
 }
 
+// A config_commit that narrows the lists of the model the turn runs on takes
+// effect from the next request, as a switch does: a call later in the batch
+// that committed is judged by the offer that batch was made under, and the next
+// request carries the new set with a system message listing the same tools.
+func TestModelToolListsConfigReloadTakesEffectFromTheNextRequest(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	body := "providers:\n  - name: fake\n    type: openai\n    api_key: test\n" +
+		"models:\n  - model: fake/model\n    max_tokens: 100\n" +
+		"agent:\n  model: fake/model\n"
+	if err := os.WriteFile(configPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := &session.State{ID: "sess_model_tools_reload", CWD: dir, Mode: session.ModeAgent, SessionDir: t.TempDir()}
+	target := filepath.Join(dir, "batch.md")
+	provider := scripted(
+		toolStep(llm.ToolCall{ID: "call_set", Name: "config_set",
+			InputJSON: `{"commands":["set models[model=fake/model].tools=[\"read\",\"grep\"]"]}`}),
+		toolStep(
+			llm.ToolCall{ID: "call_commit", Name: "config_commit", InputJSON: `{}`},
+			llm.ToolCall{ID: "call_write", Name: "write", InputJSON: `{"path":` + quoteJSON(target) + `,"content":"batch"}`},
+		),
+		answerStep("done"),
+	)
+	ag := NewAgent(cfg, st, resumePermissionSender{}, nil)
+	ag.SetConfigReloader(func(context.Context) ([]string, error) { return nil, nil })
+	ag.providerFactory = func(llm.ProviderInput) (llm.Provider, error) { return provider, nil }
+
+	stop, err := ag.Run(context.Background(), []acp.ContentBlock{{Type: "text", Text: "narrow the tools, then write"}})
+	if err != nil || stop != string(acp.StopReasonEndTurn) {
+		t.Fatalf("Run = %q, %v", stop, err)
+	}
+	for _, m := range st.GetMessages() {
+		if m.Role == llm.RoleTool && m.ToolCallID == "call_commit" && strings.HasPrefix(m.Content, "error") {
+			t.Fatalf("config_commit failed: %q", m.Content)
+		}
+	}
+	if b, err := os.ReadFile(target); err != nil || string(b) != "batch" {
+		t.Fatalf("the write the batch was offered did not run after the commit: %q, %v", b, err)
+	}
+	if len(provider.offered) != 3 {
+		t.Fatalf("the model was called %d times, want 3", len(provider.offered))
+	}
+	if !contains(provider.offered[1], "write") {
+		t.Fatalf("the batch that committed was not offered write: %v", provider.offered[1])
+	}
+	if got := joined(provider.offered[2]); got != "read,grep" && got != "grep,read" {
+		t.Fatalf("the request after the commit carried %v, want read and grep", provider.offered[2])
+	}
+	system := provider.requests[2][0]
+	if system.Role != llm.RoleSystem {
+		t.Fatalf("the request after the commit starts with %s", system.Role)
+	}
+	if got := joined(promptToolNames(system.Content)); got != "grep,read" {
+		t.Fatalf("the system message after the commit lists %s, want the tools the request carries", got)
+	}
+}
+
 // modelMayAdmitServer decides, before a server's tools exist, whether a model's
 // lists could ever admit one of them.
 func TestModelMayAdmitServer(t *testing.T) {

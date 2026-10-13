@@ -23,19 +23,30 @@ package agent
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
 	"github.com/EvilFreelancer/coddy-agent/internal/llm"
 	"github.com/EvilFreelancer/coddy-agent/internal/subagents"
 )
 
+// toolOffer is what the requests of a running turn are offered their tools
+// for: the model of the turn's transport and a copy of its row's lists as the
+// configuration held them when the offer was made. A call is judged by the
+// offer of the request that produced it, so neither a switch_model nor a
+// config_commit earlier in the same batch changes how the rest of the batch
+// is judged; both take effect from the next request.
+type toolOffer struct {
+	model string
+	// entry is a copy of the row's lists, nil when the row restricts nothing.
+	entry *config.ModelEntry
+}
+
 // modelToolEntry is the models[] row whose tool lists apply to this agent
-// right now: the one of the model the request being worked on was offered its
-// tools for (offerModelID), nil when the model has none or none of its row
-// restricts anything. A system child (the memory subagent) is out of reach of
-// them: its tool set is fixed by the runtime that launched it, and an
-// allowlist written for the main loop would strip it.
+// right now: the offer of the request being worked on while a turn runs, the
+// session's current model otherwise; nil when that row restricts nothing. A
+// system child (the memory subagent) is out of reach of them: its tool set is
+// fixed by the runtime that launched it, and an allowlist written for the
+// main loop would strip it.
 func (a *Agent) modelToolEntry() *config.ModelEntry {
 	if a == nil || a.cfg == nil || a.state == nil {
 		return nil
@@ -43,31 +54,36 @@ func (a *Agent) modelToolEntry() *config.ModelEntry {
 	if a.subagent != nil && a.subagent.Kind != "" {
 		return nil
 	}
-	entry := a.cfg.FindModelEntry(a.offerModelID())
+	a.offerMu.RLock()
+	offer := a.offer
+	a.offerMu.RUnlock()
+	if offer != nil {
+		return offer.entry
+	}
+	entry := a.cfg.FindModelEntry(a.state.EffectiveModelID(a.cfg))
 	if !hasToolLists(entry) {
 		return nil
 	}
 	return entry
 }
 
-// offerModelID is the model whose lists the current request's tools follow:
-// the model of the turn's transport while a turn runs, the session's current
-// model otherwise.
-func (a *Agent) offerModelID() string {
-	a.offerMu.RLock()
-	id := a.offerModel
-	a.offerMu.RUnlock()
-	if id != "" {
-		return id
-	}
-	return a.state.EffectiveModelID(a.cfg)
-}
-
-// setOfferModel records the model the next requests of the turn are offered
-// their tools for; "" hands the decision back to the session's current model.
+// setOfferModel makes the offer the next requests of the turn are built and
+// judged by: the lists model id carries in the configuration now. "" ends the
+// offer and hands the decision back to the session's current model.
 func (a *Agent) setOfferModel(id string) {
+	var offer *toolOffer
+	if id != "" {
+		offer = &toolOffer{model: id}
+		if entry := a.cfg.FindModelEntry(id); hasToolLists(entry) {
+			offer.entry = &config.ModelEntry{
+				Model:           entry.Model,
+				Tools:           append([]string(nil), entry.Tools...),
+				DisallowedTools: append([]string(nil), entry.DisallowedTools...),
+			}
+		}
+	}
 	a.offerMu.Lock()
-	a.offerModel = id
+	a.offer = offer
 	a.offerMu.Unlock()
 }
 
@@ -113,7 +129,7 @@ func sameToolNames(a, b []llm.ToolDefinition) bool {
 // narrowToolNamesForModel is filterToolDefsForModel for a list of names: the
 // effective set of a spawned child, narrowed by the model it will run on.
 func narrowToolNamesForModel(names []string, entry *config.ModelEntry) []string {
-	if entry == nil || (len(entry.Tools) == 0 && len(entry.DisallowedTools) == 0) {
+	if !hasToolLists(entry) {
 		return names
 	}
 	out := make([]string, 0, len(names))
@@ -132,38 +148,9 @@ func hasToolLists(entry *config.ModelEntry) bool {
 
 // modelMayAdmitServer reports whether a model's lists could admit some tool of
 // an MCP server, for the runs that decide whether to dial it before any of its
-// tools exist (a scheduled job). It errs towards dialing: only a model whose
-// allowlist names nothing of the server, or whose denylist takes the whole
-// server, answers no. A tool is named server__tool, so a pattern reaches the
-// server when it is a prefix* that overlaps "server__", or an exact name inside it.
+// tools exist: the rule a subagent definition follows (subagents.MayAdmitServer).
 func modelMayAdmitServer(entry *config.ModelEntry, server string) bool {
-	if !hasToolLists(entry) {
-		return true
-	}
-	scope := server + "__"
-	for _, p := range entry.DisallowedTools {
-		if p = strings.TrimSpace(p); p == "*" || (strings.HasSuffix(p, "*") && strings.HasPrefix(scope, strings.TrimSuffix(p, "*"))) {
-			return false
-		}
-	}
-	if len(entry.Tools) == 0 {
-		return true
-	}
-	for _, p := range entry.Tools {
-		p = strings.TrimSpace(p)
-		switch {
-		case p == "*":
-			return true
-		case strings.HasSuffix(p, "*"):
-			prefix := strings.TrimSuffix(p, "*")
-			if strings.HasPrefix(scope, prefix) || strings.HasPrefix(prefix, scope) {
-				return true
-			}
-		case strings.HasPrefix(p, scope):
-			return true
-		}
-	}
-	return false
+	return !hasToolLists(entry) || subagents.MayAdmitServer(entry.Tools, entry.DisallowedTools, server)
 }
 
 // modelHidesTool reports whether the session's current model is not offered a

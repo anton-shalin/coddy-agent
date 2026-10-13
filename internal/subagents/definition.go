@@ -337,27 +337,33 @@ func AllowsTool(allow, deny []string, tool string) bool {
 }
 
 // MayAdmitServer reports whether the definition can admit some tool of the
-// MCP server named server, whose tools are named server__tool, before the
-// server is dialed and its tool names are known: an allowlist entry naming
-// one of its tools, a pattern reaching into it or covering it, and no
-// denylist pattern covering the whole server. Allows still decides about
-// every name the server then reports, so the answer only says whether the
-// server is worth starting.
+// MCP server named server (the shared rule, MayAdmitServer).
 func (d *Definition) MayAdmitServer(server string) bool {
 	if d == nil {
 		return true
 	}
+	return MayAdmitServer(d.Tools, d.DisallowedTools, server)
+}
+
+// MayAdmitServer is AllowsTool asked about an MCP server, whose tools are
+// named server__tool, before the server is dialed and its tool names are
+// known: an allowlist entry naming one of its tools, a pattern reaching into
+// it or covering it, and no denylist pattern covering the whole server.
+// AllowsTool still decides about every name the server then reports, so the
+// answer only says whether the server is worth starting. A subagent
+// definition and a models[] row both ask it.
+func MayAdmitServer(allow, deny []string, server string) bool {
 	prefix := strings.TrimSpace(server) + "__"
-	for _, p := range d.DisallowedTools {
+	for _, p := range deny {
 		p = strings.TrimSpace(p)
 		if p == "*" || (strings.HasSuffix(p, "*") && strings.HasPrefix(prefix, strings.TrimSuffix(p, "*"))) {
 			return false
 		}
 	}
-	if len(d.Tools) == 0 {
+	if len(allow) == 0 {
 		return true
 	}
-	for _, p := range d.Tools {
+	for _, p := range allow {
 		p = strings.TrimSpace(p)
 		if p == "*" {
 			return true

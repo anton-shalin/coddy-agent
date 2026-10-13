@@ -127,14 +127,14 @@ type Agent struct {
 	// callImages are the pictures the running tool call handed the model
 	// (Env.AttachImage, tool_images.go); they ride on that call's result.
 	callImages []llm.ImagePart
-	// offerModel is the models[].model the tools of the request being worked
-	// on were offered for (model_tools.go): the model of the turn's transport,
-	// moved only when the loop builds a transport for another model, so a call
-	// is checked against the offer that produced it and not against whatever
-	// the session switched to meanwhile. Empty outside a turn, where the
-	// session's current model stands in.
-	offerMu    sync.RWMutex
-	offerModel string
+	// offer is what the tools of the request being worked on were offered
+	// for (model_tools.go): the model of the turn's transport and its row's
+	// lists, made again only when the loop builds a transport for another
+	// model or reloads the configuration, so a call is checked against the
+	// offer that produced it and not against whatever the session switched to
+	// meanwhile. Nil outside a turn, where the session's current model stands in.
+	offerMu sync.RWMutex
+	offer   *toolOffer
 
 	// hooks is the operator hook runner of the current turn, built on first
 	// use from the definition files (hooks.go). hookStopReason carries a
@@ -938,7 +938,7 @@ func (a *Agent) runReActLoop(
 				a.log.Warn("settings changed mid-turn but the new model is unavailable; keeping the current one", "error", err)
 			} else {
 				a.log.Info("model settings changed mid-turn", "from", transport.key, "to", next.key)
-				previous := a.cfg.FindModelEntry(transport.model)
+				hadLists := a.modelToolEntry() != nil
 				transport, switched = next, true
 				// The requests from here on are offered their tools for the
 				// new model (models[].tools, disallowed_tools). A call is
@@ -950,7 +950,7 @@ func (a *Agent) runReActLoop(
 				// message that lists it is rendered again. The switch itself
 				// changes neither between two models that carry no lists.
 				a.setOfferModel(transport.model)
-				if hasToolLists(previous) || hasToolLists(a.cfg.FindModelEntry(transport.model)) {
+				if hadLists || a.modelToolEntry() != nil {
 					if defs := a.currentToolDefinitions(mode); !sameToolNames(defs, toolDefs) {
 						toolDefs = defs
 						sys = a.buildSystemPromptParts(mode, activeSkills, toolDefs)
@@ -1849,7 +1849,19 @@ func (a *Agent) runReActLoop(
 		}
 		if toolEnv.ConfigReloaded {
 			activeSkills = FilterSkillsForContext(a.state.GetSkills(), contextFiles)
-			toolDefs = a.currentToolDefinitions(mode)
+			// The batch that committed was judged by the lists it was offered;
+			// the next request is offered, and judged, by the lists the model
+			// carries now. When the reload moved the set, the system message
+			// that lists it is rendered again, as a model switch does.
+			a.setOfferModel(transport.model)
+			defs := a.currentToolDefinitions(mode)
+			if !sameToolNames(defs, toolDefs) {
+				sys = a.buildSystemPromptParts(mode, activeSkills, defs)
+				if len(messages) > 0 && messages[0].Role == llm.RoleSystem {
+					messages[0].Content = sys.Content
+				}
+			}
+			toolDefs = defs
 			toolEnv.PermissionMode = effectivePermMode(a.state, a.cfg)
 			toolEnv.CommandAllowlist = append([]string(nil), a.cfg.Tools.CommandAllowlist...)
 			httpRequestEnv(toolEnv, a.cfg)
