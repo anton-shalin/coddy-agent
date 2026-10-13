@@ -25,7 +25,7 @@ ReAct loop (internal/agent/react.go)
     │
     ├── (agent or plan mode, never ask) append MCP tool definitions
     │
-    ├── narrow to the session model's models[].tools / disallowed_tools  ← internal/agent/model_tools.go
+    ├── narrow to the session model's models[].tools / disallowed_tools  ← internal/agent/toolsets.go
     │
     ├── passes tool definitions to LLM via provider.Stream()
     │
@@ -433,4 +433,4 @@ r.Register(gitLogTool())
 Инструменты MCP регистрируются во время работы с префиксом `serverName__toolName` и подчиняются
 той же модели `RequiresPermission` и списка разрешённых для плана, что и встроенные инструменты.
 
-<!-- docsgen:source sha256=b807c273d10aaec3 -->
+<!-- docsgen:source sha256=27819e1622c7afb5 -->

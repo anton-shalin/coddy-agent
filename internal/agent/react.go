@@ -128,7 +128,7 @@ type Agent struct {
 	// (Env.AttachImage, tool_images.go); they ride on that call's result.
 	callImages []llm.ImagePart
 	// offer is what the tools of the request being worked on were offered
-	// for (model_tools.go): the model of the turn's transport and its row's
+	// for (toolsets.go): the model of the turn's transport and its row's
 	// lists, made again only when the loop builds a transport for another
 	// model or reloads the configuration, so a call is checked against the
 	// offer that produced it and not against whatever the session switched to
@@ -363,7 +363,7 @@ func (a *Agent) Run(ctx context.Context, prompt []acp.ContentBlock) (string, err
 	}
 	// The tools of every request of this turn are offered for the model of the
 	// transport built here, until the loop builds one for another model: a call
-	// is checked against that offer (model_tools.go).
+	// is checked against that offer (toolsets.go).
 	a.setOfferModel(transport.model)
 	defer a.setOfferModel("")
 	toolDefs := a.currentToolDefinitions(mode)
@@ -2582,7 +2582,7 @@ func (a *Agent) callMCPTool(ctx context.Context, serverName, toolName, argsJSON 
 
 // currentToolDefinitions is the tool set a request carries: what the session
 // could call in the mode (sessionToolDefinitions), narrowed by the lists of the
-// models[] row the session runs on (model_tools.go). The row is read on every
+// models[] row the session runs on (toolsets.go). The row is read on every
 // call, so a switch of the model changes the set from the next request.
 func (a *Agent) currentToolDefinitions(mode string) []llm.ToolDefinition {
 	return filterToolDefsForModel(a.sessionToolDefinitions(mode), a.modelToolEntry())

@@ -55,7 +55,7 @@ type ModelEntry struct {
 	// mode would. It never adds a tool: the mode, a subagent definition and
 	// the session's switches narrow the offer first. A small-window local
 	// model that uses a dozen tools is not sent the schemas of the other
-	// forty. See internal/agent/model_tools.go.
+	// forty. See internal/agent/toolsets.go.
 	Tools []string `yaml:"tools,omitempty"`
 	// DisallowedTools removes tools from what this model is offered, after
 	// Tools, with the same pattern syntax. A name in both lists is out.
