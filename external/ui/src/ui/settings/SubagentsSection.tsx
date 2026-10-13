@@ -28,7 +28,6 @@ import {
   subscribeSettingsConfig,
 } from "./settingsConfigStore";
 
-/** The one fieldset of the tab's generated form, over the definitions catalog. */
 export function subagentsFormGroups(): SchemaFormGroup[] {
   return [
     {

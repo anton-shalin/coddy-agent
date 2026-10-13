@@ -20,7 +20,6 @@ export function SettingsNav(props: {
   onSelect: (id: string) => void;
   /** Grey rows after the tabs, for the ones the schema has yet to bring. */
   placeholders?: number;
-  /** The settings search field, which stands above the tabs. */
   search?: ReactNode;
 }) {
   const { sections, active, onSelect } = props;

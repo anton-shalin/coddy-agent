@@ -3,7 +3,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ModelField } from "./ModelField";
 import type { ProviderRow } from "./useProviderModels";
-import type { ResolvedBoxTextsWithSecond } from "./settingsTexts";
+import type { OverrideTexts } from "./settingsTexts";
 
 afterEach(() => {
   cleanup();
@@ -16,7 +16,7 @@ const PROVIDERS: ProviderRow[] = [
   { name: "hub", type: "neuraldeep" },
 ];
 
-const TEXTS: ResolvedBoxTextsWithSecond = {
+const TEXTS: OverrideTexts = {
   primary: "Model id",
   second: "Provider",
 };

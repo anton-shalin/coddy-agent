@@ -1,47 +1,33 @@
 /**
- * Going to a setting the search found: the event a fold listens for, the times
- * the reveal waits and shows its mark, and the reveal itself.
- *
- * The reveal finds the setting's box in the page (a box is an element that
- * carries `data-settings-anchor`; lookups compare `dataset` values as strings
- * and never build a selector from a name), unfolds a block that hides it,
- * waits until nothing above it is hidden, then scrolls to it, rings it and
- * moves the focus.
+ * Going to a setting the search found: find its box (an element with
+ * `data-settings-anchor`; lookups compare `dataset` values and never build a
+ * selector from a name), unfold what hides it, scroll to it, ring it, focus it.
  */
 import type { SettingsSearchEntry } from "./settingsSearch";
 
 /**
- * Dispatched (bubbling) from a setting's box before it is scrolled to. A
- * folded block above the box opens on it, and so does the box itself when it is
- * a folded block, so what the operator was sent to is not inside a hidden body
- * and a group that is the target is not left shut.
+ * Dispatched (bubbling) from a setting's box before it is scrolled to: a folded
+ * block above it, or the box itself when it is a fold, opens on it.
  */
 export const SETTINGS_REVEAL_EVENT = "coddy:settings-reveal";
 
-/** How long the ring on a found setting stays, in milliseconds. */
 export const SEARCH_TARGET_MS = 1600;
-
-/** How long a reveal waits for its box to be drawn and shown, in milliseconds. */
 export const REVEAL_WAIT_MS = 1000;
-
-/** The class that rings the setting the search took the operator to. */
 const TARGET_CLASS = "is-search-target";
 
 function squash(text: string | null | undefined): string {
   return (text ?? "").replace(/\s+/g, " ").trim();
 }
 
-/** Every box under a node, in document order. */
 function boxesIn(scope: ParentNode): HTMLElement[] {
   return [...scope.querySelectorAll<HTMLElement>("[data-settings-anchor]")];
 }
 
 /**
  * The box of an entry, or null while it is not drawn. A repeated box (a field
- * of a list of objects, drawn once per entry) resolves to the first one in
- * document order, folded or not. A row's box is looked up only inside the row
- * form whose row is the entry's. The list's own box answers only when the list
- * draws no entry of its field.
+ * of a list of objects) resolves to the first in document order. A row's box is
+ * looked up only inside that row's form; the list's own box answers only when
+ * the list draws no entry of the field.
  */
 export function findSettingsBox(
   root: HTMLElement,
@@ -76,7 +62,7 @@ export function findSettingsBox(
   );
 }
 
-/** What a tab entry is taken to: the scroll area of the tab, drawn at its top. */
+/** What a tab entry is taken to: the scroll area of the tab. */
 function findPane(
   root: HTMLElement,
   entry: SettingsSearchEntry,
@@ -88,14 +74,9 @@ function findPane(
   );
 }
 
-/** A fold that is shut: its legend shows and its body is hidden under it. */
 const SHUT_FOLD = ".settings-fieldset--collapsible:not(.is-open)";
 
-/**
- * Whether the box can be seen: no ancestor is hidden, and the box is not
- * itself a fold that is shut (a group chosen by its name is the fold, and its
- * body is hidden under it).
- */
+/** Whether the box can be seen: no hidden ancestor, and it is not itself a shut fold. */
 function isShown(box: HTMLElement): boolean {
   return box.closest("[hidden]") === null && !box.matches(SHUT_FOLD);
 }
@@ -128,9 +109,9 @@ function controlName(control: HTMLElement): string {
 }
 
 /**
- * The control of a box whose accessible name is `name`: not disabled, not the
- * (i), not one a box nested in this one owns. It is how a field's primary name
- * picks the input out of a box that also draws a switch beside it.
+ * The control of a box whose accessible name is `name`, skipping disabled
+ * ones, the (i) and those of a nested box: how a primary name picks the input
+ * out of a box that also draws a switch.
  */
 export function controlNamed(
   box: HTMLElement,
@@ -159,9 +140,8 @@ export function controlNamed(
 }
 
 /**
- * Makes a box focusable and named for as long as it holds the focus: a
- * fieldset is named by its legend and a row form by its label, any other box
- * gets a group role and the name. Returns what puts it back as it was.
+ * Makes a box focusable and named while it holds the focus (a fieldset by its
+ * legend, any other unnamed box as a group). Returns what puts it back.
  */
 function nameForFocus(box: HTMLElement, name: string): () => void {
   const undo: (() => void)[] = [];
@@ -191,17 +171,12 @@ function nameForFocus(box: HTMLElement, name: string): () => void {
 
 /**
  * Takes the operator to the setting of an entry once the page can show it:
- * waits (within REVEAL_WAIT_MS, with a MutationObserver) until the box is
- * drawn, asks a folded block above it (or the box itself, a group that folds)
- * to open and waits until nothing above it is hidden, then, a frame later,
- * scrolls it to the middle of its scroll area (by its top when it is taller
- * than the area), rings it for SEARCH_TARGET_MS and moves the focus. A field
- * takes the control named by its primary name on a fine pointer, and the box
- * itself on a touch-only device (no keyboard rises), as every tab, row, block
- * and landmark does. A tab has no box: the scroll area of the tab is taken to
- * its top and focused, with no ring. It gives up quietly when the budget runs
- * out.
- * Returns what cancels it, the ring included.
+ * waits (within REVEAL_WAIT_MS) until the box is drawn and nothing above it is
+ * hidden, then scrolls it into view, rings it for SEARCH_TARGET_MS and focuses
+ * it. A field takes the control named by its primary name, except on a
+ * touch-only device (no keyboard rises), where, like every tab, row, block and
+ * landmark, the box itself is focused. A tab is scrolled to its top, with no
+ * ring. It gives up quietly when the budget runs out; returns what cancels it.
  */
 export function revealWhenReady(
   root: HTMLElement,
@@ -237,11 +212,9 @@ export function revealWhenReady(
       return;
     }
     if (!isShown(target)) {
-      // A folded block opens on the event, and the hidden attribute going away
-      // is the mutation that brings the next attempt. Asking again at every
-      // mutation costs nothing: a fold that is open ignores it, and one that
-      // was not listening yet hears it. The box itself may be the fold: the
-      // event reaches it first.
+      // A fold opens on the event and the hidden attribute going away brings
+      // the next attempt. Asking at every mutation is cheap, and reaches a
+      // fold that was not listening yet.
       target.dispatchEvent(new Event(SETTINGS_REVEAL_EVENT, { bubbles: true }));
       return;
     }
@@ -270,8 +243,7 @@ export function revealWhenReady(
         target.scrollTop = 0;
       }
     } else {
-      // The middle of the area, unless the box is taller than it: then its
-      // top, so its name and the first of its fields are what shows.
+      // The middle of the area, or its top when the box is taller than it.
       const area = target.closest<HTMLElement>(".settings-scroll");
       const tall =
         area !== null &&

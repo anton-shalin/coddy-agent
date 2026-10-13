@@ -11,10 +11,7 @@ import {
   type NotificationSupport,
 } from "./notifications";
 
-/**
- * Whether the block is drawn at all: inside the Telegram Mini App it is not.
- * Settings search reads the same answer, so it offers nothing the tab omits.
- */
+/** Whether the block is drawn (not in the Telegram Mini App); search reads it too. */
 export function notificationsShown(): boolean {
   return !telegramLaunch();
 }

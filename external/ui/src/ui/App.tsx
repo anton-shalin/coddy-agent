@@ -1240,7 +1240,6 @@ export function App() {
   const [settingsItem, setSettingsItem] = useState<string | null>(() =>
     initialRoute.branch === "settings" ? initialRoute.item : null,
   );
-  // The setting the address names, from `?field=`: the drawer reveals it.
   const [settingsField, setSettingsField] = useState<string | null>(() =>
     initialRoute.branch === "settings" ? initialRoute.field : null,
   );

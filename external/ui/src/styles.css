@@ -9824,8 +9824,7 @@ html:not([data-theme="light"]) .context-usage-note--error {
   box-sizing: border-box;
 }
 
-/* A view laid over a mounted tab (the settings search results) hides it with
-   the hidden attribute, which no rule of the scroller may override. */
+/* A tab hidden under the search results: no rule of the scroller may override it. */
 .settings-scroll[hidden] {
   display: none;
 }
@@ -10089,11 +10088,9 @@ html:not([data-theme="light"]) .context-usage-note--error {
   gap: 10px;
 }
 
-/* The box every drawn setting stands in (SchemaField), the one a settings
-   search scrolls to and rings. It adds nothing of its own to the layout: no
-   padding, no margin, and the gap of the column it stands in, so a field the
-   override draws as two nodes (the proxy switch and its URL) keeps the rhythm
-   they had as siblings. */
+/* The box every drawn setting stands in (SchemaField). It adds nothing to the
+   layout and keeps the column's gap, so an override drawn as two nodes (the
+   proxy switch and its URL) keeps the rhythm they had as siblings. */
 .settings-field {
   display: flex;
   flex-direction: column;
@@ -10105,13 +10102,10 @@ html:not([data-theme="light"]) .context-usage-note--error {
 }
 
 /* The setting a search took the operator to: a ring and a faint wash for
-   SEARCH_TARGET_MS (settingsReveal.ts). The ring is an outline that stands 3px
-   off the box, so the switch and the label of a field never touch it (it
-   follows the box's radius); the wash is an inset shadow, so no ground of the
-   box is painted over. Both come in over the first 8% of the time, hold, and
-   fade over the last 0.6s. They are declared as the state itself and the fade
-   is only the animation, so under reduced motion they hold still and the
-   script takes the class off. */
+   SEARCH_TARGET_MS (settingsReveal.ts). The ring is an outline 3px off the box;
+   the wash an inset shadow, so no ground is painted over. Both are declared as
+   the state itself and the animation only fades them, so under reduced motion
+   they hold still and the script takes the class off. */
 .is-search-target {
   outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
   outline-offset: 3px;
@@ -10137,22 +10131,19 @@ html:not([data-theme="light"]) .context-usage-note--error {
   }
 }
 
-/* A box scrolled to the top or the bottom of its area (a group taller than the
-   area is aligned by its top) keeps 12px clear: the ring stands 5px off it and
-   the area pads 8px, so it is never cut. */
+/* A box scrolled to an edge of its area keeps 12px clear: the ring stands 5px
+   off it and the area pads 8px, so it is never cut. */
 [data-settings-anchor] {
   scroll-margin-block: 12px;
 }
 
-/* A box the reveal focused by script (a group, a landmark, a row form) is no
-   tab stop - tabindex goes again on blur - and the ring is its indicator. Once
-   the ring has faded, the browser's own blue ring must not take its place. */
+/* A box the reveal focused by script is no tab stop and the ring is its
+   indicator: once it has faded, the browser's own ring must not take its place. */
 [data-settings-anchor]:focus-visible:not(.is-search-target) {
   outline: none;
 }
 
-/* A tab's scroll area the search focused is a focus target, not a tab stop:
-   its ring goes, except where the keyboard put the focus on a scroller. */
+/* A tab's scroll area the search focused is no tab stop: its ring goes. */
 .settings.drawer .settings-scroll:focus:not(:focus-visible) {
   outline: none;
 }
@@ -11908,8 +11899,7 @@ html:not([data-theme="light"]) .context-usage-note--error {
     min-height: 0;
     flex: 1 1 auto;
   }
-  /* The search stands over the tiles (or the results that replace them), on
-     the drawer's 14px inset. */
+  /* The search stands over the tiles, on the drawer's 14px inset. */
   .settings-grid-search {
     flex: 0 0 auto;
     padding: 14px 14px 0;
@@ -15090,13 +15080,11 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   color: color-mix(in srgb, var(--text) 58%, var(--coddy-blend-base));
 }
 
-/* The settings search adds only what a button row in a drawer needs; its field
-   and its result rows are the documentation search's rules above. */
+/* The settings search reuses the documentation search's field and result rows. */
 .settings-search-box {
   position: relative;
 }
 
-/* The field stands at the top of the section rail, inside the rail's 8px. */
 .settings-nav-search {
   flex: 0 0 auto;
   padding: 8px 8px 0;
@@ -15117,9 +15105,8 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   overflow-wrap: anywhere;
 }
 
-/* Where the setting is, then its config key: plain lines, not the clamped
-   snippet of the documentation hit. The key takes a line of its own, so every
-   row has the same shape whatever the length of the path. */
+/* Where the setting is, then its config key on a line of its own: plain lines,
+   not the clamped snippet of the documentation hit. */
 .settings-hit-where {
   display: block;
   overflow: visible;

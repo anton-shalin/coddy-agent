@@ -1,13 +1,9 @@
 /**
  * Settings search: the matching, the order of the results and the index of
- * everything the Settings drawer draws. Pure and synchronous.
- *
- * The index is built by walking the served schema with SchemaForm's own layout
- * (layoutSchemaForm), the per-tab declarations the tabs pass to their forms,
- * and the texts the overrides put in a box (overrideTexts), so a name or a
- * description is searched exactly as the drawing shows it. Values of the
- * document are never read, except the names of the rows of the two lists
- * (LLM providers, Logical models), which the list itself draws.
+ * everything the Settings drawer draws. The index walks the served schema with
+ * SchemaForm's own layout (layoutSchemaForm), the tabs' form groups and the
+ * texts the overrides draw (overrideTexts), so a name is searched as it is
+ * shown. The document is read only for the row names of the two lists.
  */
 import {
   defaultForSchema,
@@ -25,7 +21,6 @@ import {
   objectSectionGroups,
   overrideTexts,
   providerFormGroups,
-  resolveBoxTexts,
   sessionsFormGroups,
   systemPartGroups,
 } from "./SettingsSection";
@@ -39,13 +34,13 @@ import { skillsFormGroups } from "./SkillsSection";
 import { subagentsFormGroups } from "./SubagentsSection";
 import {
   landmarkAnchor,
-  settingsTextKey,
+  SETTINGS_TEXTS,
+  type DrawnText,
   type SettingsTextId,
 } from "./settingsTexts";
 import { translate } from "../i18n/i18n";
 import { notificationsShown } from "../pwa/NotificationsSetting";
 
-/** The most results shown; the rest are counted. */
 export const SETTINGS_SEARCH_LIMIT = 50;
 /** How much of a description shows before the word that matched. */
 export const SNIPPET_LEAD = 40;
@@ -55,24 +50,23 @@ type EntryKind = "section" | "row" | "group" | "field" | "landmark";
 export type SettingsSearchEntry = {
   id: string;
   kind: EntryKind;
-  /** The id of the tab. */
   section: string;
   /** The trimmed name of the list row it stands in; unique and non-empty. */
   row: string | null;
   /** The anchor of its box (data-settings-anchor); null for a tab. */
   anchor: string | null;
-  /** The anchor of the list of objects it stands in, or null. No count is kept. */
+  /** The anchor of the list of objects it stands in. */
   list: string | null;
   /** That list's box, used only when the list draws no entry. */
   fallbackAnchor: string | null;
-  /** names[0] is the primary: the result's title and the name of the control to focus. */
+  /** names[0] is the result's title and the name of the control to focus. */
   names: string[];
   descriptions: string[];
   /** The names around it: the tab, the row, the blocks and objects it stands in. */
   where: string[];
   /** The dotted YAML path, as the documentation spells it. */
   keyPath: string | null;
-  /** The texts, folded once (normalizeSearchText), each kept apart. */
+  /** The texts folded once (normalizeSearchText), each kept apart. */
   hay: { own: string; where: string; descriptions: string };
 };
 
@@ -84,14 +78,11 @@ export type SettingsSearchHit = {
   secondMatched: string | null;
 };
 
-// ---- text
-
 /** Lower case, and ё as е. Nothing else is folded. */
 export function normalizeSearchText(text: string): string {
   return text.toLowerCase().replace(/ё/g, "е");
 }
 
-/** The words of a query: split at whitespace, folded, each once. */
 export function searchWords(query: string): string[] {
   const words = normalizeSearchText(query)
     .split(/\s+/)
@@ -99,48 +90,45 @@ export function searchWords(query: string): string[] {
   return [...new Set(words)];
 }
 
-export type EntryParts = {
-  id: string;
+/** An entry with its texts folded; the id defaults to its kind, tab, row and anchor. */
+export function makeSearchEntry(p: {
   kind: EntryKind;
   section: string;
   names: string[];
-  row?: string | null | undefined;
-  anchor?: string | null | undefined;
-  list?: string | null | undefined;
-  fallbackAnchor?: string | null | undefined;
-  descriptions?: string[] | undefined;
-  where?: string[] | undefined;
+  id?: string;
+  row?: string | null;
+  anchor?: string | null;
+  list?: string | null;
+  fallbackAnchor?: string | null;
+  descriptions?: string[];
+  where?: string[];
   keyPath?: string | null | undefined;
-};
-
-/** An entry with its texts folded: the one place that builds one. */
-export function makeSearchEntry(parts: EntryParts): SettingsSearchEntry {
-  const where = parts.where ?? [];
-  const descriptions = parts.descriptions ?? [];
-  const keyPath = parts.keyPath ?? null;
+}): SettingsSearchEntry {
+  const { kind, section, names, descriptions = [], where = [] } = p;
+  const row = p.row ?? null;
+  const anchor = p.anchor ?? null;
+  const keyPath = p.keyPath ?? null;
   return {
-    id: parts.id,
-    kind: parts.kind,
-    section: parts.section,
-    row: parts.row ?? null,
-    anchor: parts.anchor ?? null,
-    list: parts.list ?? null,
-    fallbackAnchor: parts.fallbackAnchor ?? null,
-    names: parts.names,
+    id: p.id ?? [kind, section, row ?? "", anchor ?? ""].join("|"),
+    kind,
+    section,
+    row,
+    anchor,
+    list: p.list ?? null,
+    fallbackAnchor: p.fallbackAnchor ?? null,
+    names,
     descriptions,
     where,
     keyPath,
     hay: {
       own: normalizeSearchText(
-        [...parts.names, ...(keyPath === null ? [] : [keyPath])].join("\n"),
+        [...names, ...(keyPath === null ? [] : [keyPath])].join("\n"),
       ),
       where: normalizeSearchText(where.join("\n")),
       descriptions: normalizeSearchText(descriptions.join("\n")),
     },
   };
 }
-
-// ---- matching
 
 function tierOf(entry: SettingsSearchEntry, words: readonly string[]) {
   const { own, where, descriptions } = entry.hay;
@@ -188,10 +176,9 @@ function secondNameFor(
 const LEADS: ReadonlySet<EntryKind> = new Set(["section", "group", "landmark"]);
 
 /**
- * The entries every word of the query occurs in, best first: those whose own
- * names or config key hold every word (tabs and blocks ahead), then those that
- * needed the names around them, then those that needed a description; the
- * drawer's order inside each. At most `limit` come back, `more` counts the rest.
+ * The entries every word of the query occurs in, best first: by tier (see
+ * SettingsSearchHit), tabs and blocks ahead, then in the drawer's order. At
+ * most `limit` come back, `more` counts the rest.
  */
 export function searchSettings(
   index: readonly SettingsSearchEntry[],
@@ -224,43 +211,20 @@ export function searchSettings(
   };
 }
 
-/**
- * The ranges of `text` (in its own indices) that hold a word, merged. A text
- * whose lower case has the length of the text maps one to one; a character
- * whose lower case does not (İ) is folded on its own to keep the ranges true.
- */
+/** The ranges of `text` that hold a word, merged (İ shifts the ones after it). */
 function wordRanges(
   text: string,
   words: readonly string[],
 ): [number, number][] {
-  const needles = words.filter((w) => w !== "");
-  if (text === "" || needles.length === 0) {
-    return [];
-  }
-  let folded = normalizeSearchText(text);
-  let starts: number[] | null = null;
-  let ends: number[] | null = null;
-  if (folded.length !== text.length) {
-    starts = [];
-    ends = [];
-    folded = "";
-    let at = 0;
-    for (const ch of text) {
-      const piece = normalizeSearchText(ch);
-      for (let k = 0; k < piece.length; k++) {
-        starts.push(at);
-        ends.push(at + ch.length);
-      }
-      folded += piece;
-      at += ch.length;
-    }
-  }
+  const folded = normalizeSearchText(text);
   const found: [number, number][] = [];
-  for (const word of needles) {
-    for (let from = folded.indexOf(word); from >= 0; ) {
-      const to = from + word.length;
-      found.push(starts && ends ? [starts[from]!, ends[to - 1]!] : [from, to]);
-      from = folded.indexOf(word, from + 1);
+  for (const word of words.filter((w) => w !== "")) {
+    for (
+      let from = folded.indexOf(word);
+      from >= 0;
+      from = folded.indexOf(word, from + 1)
+    ) {
+      found.push([from, from + word.length]);
     }
   }
   found.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
@@ -276,7 +240,6 @@ function wordRanges(
   return merged;
 }
 
-/** The text in parts, the ones holding a word of the query marked. */
 export function markWords(
   text: string,
   words: readonly string[],
@@ -301,8 +264,7 @@ export function markWords(
 
 /**
  * A description as a result's line: whole when its first matching word is near
- * the start, else from shortly before that word, at a word boundary, with an
- * ellipsis where the start was cut.
+ * the start, else from shortly before it, with an ellipsis.
  */
 export function descriptionLine(
   text: string,
@@ -320,16 +282,12 @@ export function descriptionLine(
   return `…${text.slice(start)}`;
 }
 
-// ---- landmarks
-
 export type SettingsLandmark = {
-  /** The tab. */
   section: string;
   id: string;
-  /** The heading and the heading's (i): a constant of SETTINGS_TEXTS. */
+  /** The heading and its (i): a key of SETTINGS_TEXTS. */
   heading: SettingsTextId;
   keyPath?: string;
-  /** Whether the block stands above or below the tab's generated forms. */
   place: "before" | "after";
   /** The block's own predicate: false where the tab does not draw it. */
   shown?: () => boolean;
@@ -337,11 +295,7 @@ export type SettingsLandmark = {
   row?: (row: Record<string, unknown>) => boolean;
 };
 
-/**
- * The blocks a tab draws by hand. Each is its heading and the heading's (i),
- * rendered from the same constant; what is below the heading (filters, tables,
- * editor cards, the install box) is not a setting and is not indexed.
- */
+/** A block a tab draws by hand: its heading and the (i), not what is below it. */
 function landmark(
   section: string,
   id: string,
@@ -374,8 +328,6 @@ export const SETTINGS_LANDMARKS: readonly SettingsLandmark[] = [
   }),
 ];
 
-// ---- the index
-
 type PlainObject = Record<string, unknown>;
 
 function asObject(v: unknown): PlainObject {
@@ -398,10 +350,8 @@ function rowLabel(row: unknown, field: string): string {
 }
 
 /**
- * What the rows of the two lists are, for the one thing the index reads from
- * the document: the trimmed names, and a provider's type, which decides the
- * fields its form draws. The index is rebuilt when this changes and not when
- * anything else does.
+ * What the index reads from the document: the trimmed row names of the two
+ * lists and a provider's type. The index is rebuilt when this changes only.
  */
 export function settingsIndexRowsKey(doc: PlainObject): string {
   return JSON.stringify(
@@ -430,89 +380,54 @@ type Walk = {
   row: string | null;
 };
 
-function entryId(parts: {
-  kind: EntryKind;
-  section: string;
-  row: string | null;
-  anchor: string | null;
-}): string {
-  return [parts.kind, parts.section, parts.row ?? "", parts.anchor ?? ""].join(
-    "|",
-  );
-}
-
-function push(
-  out: SettingsSearchEntry[],
-  parts: Omit<EntryParts, "id">,
-): SettingsSearchEntry {
-  const entry = makeSearchEntry({
-    ...parts,
-    id: entryId({
-      kind: parts.kind,
-      section: parts.section,
-      row: parts.row ?? null,
-      anchor: parts.anchor ?? null,
-    }),
-  });
-  out.push(entry);
-  return entry;
-}
-
-/** A field to index and where it stands: what the recursion hands to its children. */
 type FieldFrame = {
   walk: Walk;
   name: string;
   schema: JsonSchema;
   /** The dictionary path: the anchor and the override are looked up by it. */
   path: string;
-  /** The dotted YAML path, as the documentation spells it. */
   keyPath: string;
-  /** The object that holds the field's value. */
   parent: PlainObject;
-  /** The names around it. */
   where: string[];
-  /** The anchor of the list of objects it stands in, or null. */
   list: string | null;
 };
 
 function walkField(frame: FieldFrame): void {
   const { walk, name, schema, path, keyPath, parent, where, list } = frame;
   const { form, section } = walk;
-  const box = overrideTexts(form.domain, path, parent);
+  const box = overrideTexts(form.domain, path, parent, schema);
   if (box === "hidden") {
     return;
   }
-  let names: string[];
-  let descriptions: string[];
-  if (box !== null) {
-    const r = resolveBoxTexts(box, form.domain, path, schema);
-    names = r.second === undefined ? [r.primary] : [r.primary, r.second];
-    descriptions = [r.primaryDesc, r.secondDesc].filter(
-      (d): d is string => !!d,
-    );
-  } else {
-    names = [schemaFieldLabel(form.domain, path, schema.title, name)];
-    const desc = schemaFieldDesc(form.domain, path, schema.description);
-    descriptions = desc ? [desc] : [];
-  }
+  const texts = box ?? {
+    primary: schemaFieldLabel(form.domain, path, schema.title, name),
+    primaryDesc: schemaFieldDesc(form.domain, path, schema.description),
+  };
+  const names =
+    texts.second === undefined
+      ? [texts.primary]
+      : [texts.primary, texts.second];
   const anchor = fieldAnchor(form.domain, path);
-  push(walk.out, {
-    kind: "field",
-    section: section.id,
-    row: walk.row,
-    anchor,
-    list,
-    fallbackAnchor: list,
-    names,
-    descriptions,
-    where,
-    keyPath,
-  });
+  walk.out.push(
+    makeSearchEntry({
+      kind: "field",
+      section: section.id,
+      row: walk.row,
+      anchor,
+      list,
+      fallbackAnchor: list,
+      names,
+      descriptions: [texts.primaryDesc, texts.secondDesc].filter(
+        (d): d is string => !!d,
+      ),
+      where,
+      keyPath,
+    }),
+  );
   if (box !== null) {
     return;
   }
   const inside = [...where, names[0]!];
-  // A nested object draws its fields in its own fieldset.
   if (schema.type === "object" && schema.properties) {
     const held = parent[name];
     const value =
@@ -535,9 +450,8 @@ function walkField(frame: FieldFrame): void {
     }
     return;
   }
-  // A list of objects draws one frame per entry, with no box of its own: its
-  // fields are the targets, one entry for all the frames, which carries the
-  // list. How many frames there are is read from the drawing, never kept here.
+  // A list of objects draws one frame per entry with no box of its own: its
+  // fields get one index entry for all the frames, which carries the list.
   const items = schema.items;
   if (
     schema.type === "array" &&
@@ -583,16 +497,18 @@ function walkForm(walk: Walk, parent: PlainObject, where: string[]): void {
       continue;
     }
     const g = node.group;
-    push(walk.out, {
-      kind: "group",
-      section: section.id,
-      row: walk.row,
-      anchor: groupAnchor(form.domain, g.id),
-      names: [g.legend],
-      // A folded block draws no description.
-      descriptions: !g.collapsible && g.description ? [g.description] : [],
-      where,
-    });
+    walk.out.push(
+      makeSearchEntry({
+        kind: "group",
+        section: section.id,
+        row: walk.row,
+        anchor: groupAnchor(form.domain, g.id),
+        names: [g.legend],
+        // A folded block draws no description.
+        descriptions: !g.collapsible && g.description ? [g.description] : [],
+        where,
+      }),
+    );
     const inside = [...where, g.legend];
     for (const [k, sub] of node.fields) {
       walkField({
@@ -619,18 +535,19 @@ function landmarkEntries(
     if (l.shown !== undefined && !l.shown()) {
       continue;
     }
-    const label = settingsTextKey(l.heading, "label");
-    const desc = settingsTextKey(l.heading, "desc");
-    push(out, {
-      kind: "landmark",
-      section: section.id,
-      row,
-      anchor: landmarkAnchor(l.section, l.id),
-      names: [label === undefined ? l.id : translate(label)],
-      descriptions: desc === undefined ? [] : [translate(desc)],
-      where: row === null ? [section.label] : [section.label, row],
-      keyPath: l.keyPath,
-    });
+    const text: DrawnText = SETTINGS_TEXTS[l.heading];
+    out.push(
+      makeSearchEntry({
+        kind: "landmark",
+        section: section.id,
+        row,
+        anchor: landmarkAnchor(l.section, l.id),
+        names: [text.label === undefined ? l.id : translate(text.label)],
+        descriptions: text.desc === undefined ? [] : [translate(text.desc)],
+        where: row === null ? [section.label] : [section.label, row],
+        keyPath: l.keyPath,
+      }),
+    );
   }
 }
 
@@ -641,10 +558,7 @@ type TabForms = {
   rows?: Form;
 };
 
-/**
- * What a tab generates from the schema; null when it draws a notice instead
- * (its section of the schema is missing), so it holds nothing to find.
- */
+/** What a tab generates from the schema; null when it draws a notice instead. */
 function tabForms(
   section: SectionDescriptor,
   props: Record<string, JsonSchema>,
@@ -742,11 +656,7 @@ function openableRows(
   );
 }
 
-/**
- * The index of the Settings drawer: a tab, then what it draws in the order it
- * draws it. `sections` are the rail's tabs, `schema` the one the drawer holds,
- * `doc` the settings document (read only for the rows of the two lists).
- */
+/** The index of the Settings drawer: a tab, then what it draws, in drawing order. */
 export function buildSettingsSearchIndex(input: {
   sections: readonly SectionDescriptor[];
   schema: JsonSchema | null;
@@ -756,12 +666,14 @@ export function buildSettingsSearchIndex(input: {
   const props = input.schema?.properties ?? {};
 
   for (const section of input.sections) {
-    push(out, {
-      kind: "section",
-      section: section.id,
-      names: [section.label],
-      descriptions: section.description ? [section.description] : [],
-    });
+    out.push(
+      makeSearchEntry({
+        kind: "section",
+        section: section.id,
+        names: [section.label],
+        descriptions: section.description ? [section.description] : [],
+      }),
+    );
     const generated = tabForms(section, props, input.doc);
     if (generated === null) {
       continue;
@@ -781,14 +693,16 @@ export function buildSettingsSearchIndex(input: {
     for (const { label, row } of generated.rows
       ? openableRows(asArray(input.doc[key]), section.labelField ?? "")
       : []) {
-      push(out, {
-        kind: "row",
-        section: section.id,
-        row: label,
-        anchor: `row:${section.id}`,
-        names: [label],
-        where: tab,
-      });
+      out.push(
+        makeSearchEntry({
+          kind: "row",
+          section: section.id,
+          row: label,
+          anchor: `row:${section.id}`,
+          names: [label],
+          where: tab,
+        }),
+      );
       walkForm({ out, section, form: generated.rows!, row: label }, row, [
         ...tab,
         label,

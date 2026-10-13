@@ -33,9 +33,8 @@ type TipPosition = { left: number; top: number; placement: "above" | "below" };
  * only while open, and the (i) names it through aria-describedby then, so a
  * screen reader hears the description when the control takes focus.
  *
- * While its pane is hidden (PaneHidden) the tip is not drawn and nothing the
- * page does closes it: it stays open, and is placed against the (i) again
- * when the pane is shown.
+ * While its pane is hidden (PaneHidden) the tip stays open but is not drawn,
+ * and is placed again when the pane is shown.
  */
 export function FieldHint(props: {
   text: ReactNode;
@@ -53,8 +52,7 @@ export function FieldHint(props: {
   const pinned = useRef(false);
 
   // Measure the tip once it is in the document, then place it: above the
-  // (i) when it fits, below otherwise, never past the viewport edges. A tip
-  // not drawn because its pane is hidden is measured afresh when it is shown.
+  // (i) when it fits, below otherwise, never past the viewport edges.
   useLayoutEffect(() => {
     if (!open) {
       pinned.current = false;
@@ -96,8 +94,7 @@ export function FieldHint(props: {
   // Escape takes the tip down before the drawer under it hears the key.
   useEscapeCloses(open, () => setOpen(false));
 
-  // Only while the tip is open and its pane is shown: the scroll of what
-  // covers a hidden pane must not close a tip held for it.
+  // Not while the pane is hidden: what scrolls over it must not close the tip.
   useEffect(() => {
     if (!open || hidden) {
       return;

@@ -168,7 +168,6 @@ function takesTypedText(node: Element | null): boolean {
   return node instanceof HTMLElement && node.isContentEditable;
 }
 
-/** Whether the person asked the page for less motion. */
 function prefersReducedMotion(): boolean {
   return (
     typeof window.matchMedia === "function" &&
@@ -182,10 +181,7 @@ function historyOpenInAddress(): boolean {
   return "historyOpen" in route && route.historyOpen;
 }
 
-/**
- * Names a setting the address can take the operator to: the tab, the row of a
- * list (none for a tab's own field) and the anchor of its box.
- */
+/** Names a setting the address can take the operator to: tab, list row, box anchor. */
 function settingKey(
   section: string | null,
   row: string | null,
@@ -202,11 +198,7 @@ export function Settings(props: {
   initialSection?: string | null;
   /** The row a list section has open, from `?id=` of that deep link. */
   initialItem?: string | null;
-  /**
-   * The setting the deep link names, from `?field=` (the anchor of its box):
-   * the tab and the row open as the link says, then the drawer takes the
-   * operator to the setting as a choice from the search does.
-   */
+  /** The setting the deep link names, from `?field=` (the anchor of its box). */
   initialField?: string | null;
   /** The conversation on screen; the session table keeps it out of "delete all". */
   activeSessionId?: string;
@@ -298,10 +290,9 @@ export function Settings(props: {
     [formEnv],
   );
   const { locale, t } = useT();
-  // The search the drawer owns. Its query lives in a store outside the render,
-  // so typing re-renders the field and the results and never the tab under
-  // them; this component hears only when the results start or stop showing and
-  // when a result is opened.
+  // The query lives in a store outside the render, so typing never re-renders
+  // the tab under the results: this component hears only when the results
+  // start or stop showing and when a result is opened.
   const [search] = useState(createSettingsSearch);
   const showing = useResultsShowing(search);
   const choice = useSettingsSearchChoice(search);
@@ -373,9 +364,7 @@ export function Settings(props: {
     : null;
   const mobilePending = pendingTab(mobileDetailId);
 
-  // What the search looks in: the tabs, the schema's forms and the names of the
-  // rows of the two lists, in the page's language. A tab whose schema failed to
-  // load is searched by its name alone. Editing a value never rebuilds it.
+  // Editing a value never rebuilds the index, only the row names do.
   const rowsKey = settingsIndexRowsKey(doc);
   const index = useMemo(
     () => buildSettingsSearchIndex({ sections, schema, doc }),
@@ -392,8 +381,7 @@ export function Settings(props: {
     setMobileDetailId(routeSection);
   }, [routeSection]);
 
-  // Selecting a section (desktop tab or mobile tile), or one row of a list
-  // section, or one setting of a tab or a row, anchors it in the URL and puts
+  // Selecting a section, a list row or a setting anchors it in the URL and puts
   // the search results away, keeping the query. A rail click or a tile names
   // neither a row nor a setting, so the address loses both.
   const selectSection = useCallback(
@@ -455,13 +443,11 @@ export function Settings(props: {
             : null,
   );
 
-  // Opening a result: the results hide and the query stays, the tab (and the
-  // row of a list) opens through the address, which also names the setting
-  // (`field=`), and the effect below takes the operator to the setting once
-  // the page draws it.
+  // Opening a result opens its tab and row through the address, which also
+  // names the setting; the effect below then takes the operator to it.
   const revealing = useRef<SettingsSearchEntry | null>(null);
-  // The setting the operator was last taken to, by a choice or by the address:
-  // the address read back after a choice names it again and is no second trip.
+  // The setting last taken to: the address read back after a choice names it
+  // again and is no second trip.
   const takenTo = useRef<string | null>(null);
   // Counts the trips an address asked for, as `choice` counts the search's.
   const [addressTrips, setAddressTrips] = useState(0);
@@ -493,13 +479,9 @@ export function Settings(props: {
     });
   }, [choice, addressTrips]);
 
-  // An address that names a setting (a pasted link, a reload, a change of the
-  // hash, the Mini App's launch) is followed the way a choice is: the tab and
-  // the row open through the route, and the setting is found in the index by
-  // its anchor and its row. The index may not hold it yet (the first read is
-  // on its way), so the effect asks again when the index changes. A setting
-  // the index does not know - a link from another version - leaves the tab
-  // and the row open and nothing else happens.
+  // An address that names a setting (a pasted link, a reload, the Mini App's
+  // launch) is followed like a choice. The index may not hold it yet, so this
+  // asks again when the index changes; an unknown setting leaves the tab open.
   const routeItem = props.initialItem ?? null;
   const routeField = props.initialField ?? null;
   const routeSetting =
@@ -528,10 +510,9 @@ export function Settings(props: {
     setAddressTrips((n) => n + 1);
   }, [routeSetting, routeField, routeSection, routeItem, index]);
 
-  // "/" puts the cursor in the search, as it does in the documentation reader,
-  // unless a field has the cursor or a dialog is open. On the narrow shell
-  // with a tab open the field is not drawn: it goes back to the tiles first
-  // and the field takes the cursor once it is.
+  // "/" puts the cursor in the search unless a field has it or a dialog is
+  // open. On the narrow shell with a tab open the field is not drawn: go back
+  // to the tiles first and focus it once it is.
   const tabOpenOnStack = Boolean(
     isMobileShell && (mobileSection || mobilePending),
   );
@@ -575,8 +556,7 @@ export function Settings(props: {
     }
   });
 
-  // Results are drawn over the tiles only; a tab open on the narrow shell
-  // (an address that named one meanwhile) puts them away.
+  // Results are drawn over the tiles only; a tab opened meanwhile puts them away.
   useEffect(() => {
     if (showing && tabOpenOnStack) {
       search.hide();
@@ -768,9 +748,7 @@ export function Settings(props: {
               onRouteItemChange={
                 section.id === (props.initialSection ?? "")
                   ? (item) => {
-                      // The row a search or a link opened keeps the setting
-                      // the address names; any other row, or none, leaves it
-                      // behind.
+                      // Only the row a search or link opened keeps the setting.
                       const at = parseAppHash();
                       setSettingsSectionHash(section.id, {
                         item,
@@ -957,8 +935,7 @@ export function Settings(props: {
               search={searchField()}
             />
             {/* The tab stays mounted under the results, hidden and deaf
-                (PaneHidden), so what is typed in it and which blocks are open
-                survive a query cleared without choosing. */}
+                (PaneHidden), so its edits survive a query cleared unchosen. */}
             <PaneHidden.Provider value={showing}>
               {activeSection ? (
                 renderSectionBody(activeSection, showing)

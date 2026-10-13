@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { FieldLabel } from "./FieldHint";
-import type { ResolvedBoxTexts } from "./settingsTexts";
+import type { OverrideTexts } from "./settingsTexts";
 import { useT } from "../i18n/I18nProvider";
 import { translate } from "../i18n/i18n";
 
@@ -40,7 +40,7 @@ export function CodexAuthField(props: {
   providerName: string;
   proxy?: string;
   /** The account's name and description (primary). */
-  texts: ResolvedBoxTexts;
+  texts: OverrideTexts;
 }) {
   const providerName = props.providerName.trim();
   const endpoint = `/coddy/providers/${encodeURIComponent(providerName)}/codex-auth`;

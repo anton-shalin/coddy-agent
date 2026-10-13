@@ -13,8 +13,7 @@ import { PaneHidden } from "./PanePortal";
  * method's composition, are left alone. `close` may take a step of the layer's
  * own instead of closing it (a dialog folds an inner row first).
  *
- * A layer in a pane that is hidden (PaneHidden) does not listen: the key goes
- * to the screen under it, and the layer stays open for when the pane is shown.
+ * A layer in a hidden pane (PaneHidden) does not listen.
  */
 export function useEscapeCloses(open: boolean, close: () => void): void {
   const closeRef = useRef(close);

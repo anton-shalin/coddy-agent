@@ -2,7 +2,7 @@ import React, { type ChangeEvent } from "react";
 
 import { FieldLabel } from "./FieldHint";
 import { SwitchField } from "./SwitchField";
-import type { ResolvedBoxTextsWithSecond } from "./settingsTexts";
+import type { OverrideTexts } from "./settingsTexts";
 import { useT } from "../i18n/I18nProvider";
 
 /** Whether a proxy setting is the keyword kw, in any case. */
@@ -25,11 +25,8 @@ export function isProxyKeyword(value: string, kw: "none" | "inherit"): boolean {
 export function ProxySettingField(props: {
   value: unknown;
   onChange: (next: unknown) => void;
-  /**
-   * What the box draws: the URL field's name and description (primary) and the
-   * switch's (second), the second naming whose requests go direct.
-   */
-  texts: ResolvedBoxTextsWithSecond;
+  /** The URL field's name and description (primary), the switch's (second). */
+  texts: OverrideTexts;
 }) {
   const { value, onChange, texts } = props;
   const { t } = useT();

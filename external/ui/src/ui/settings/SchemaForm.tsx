@@ -249,10 +249,8 @@ function SchemaField(props: {
   const t = schema.type;
   const { t: tr, tp } = useT();
 
-  // Every field stands in a box of its own that carries its anchor, so a
-  // search can ring it and scroll to it. The frame of one entry of a list of
-  // objects is no field of its own: it is drawn with the list's path, and a
-  // box there would carry the list's anchor a second time.
+  // Every field stands in a box that carries its anchor. The frame of one list
+  // entry has none: it is drawn with the list's path and would repeat its anchor.
   const box = (node: ReactNode) =>
     entryLabel === undefined ? (
       <div
@@ -791,17 +789,13 @@ export function CollapsibleFieldset(props: {
   children: ReactNode;
   testid?: string | undefined;
   defaultOpen?: boolean | undefined;
-  /** The anchor of the fieldset (data-settings-anchor). */
   anchor?: string | undefined;
 }) {
   const [open, setOpen] = useState(props.defaultOpen === true);
   const bodyId = useId();
   const fieldsetRef = useRef<HTMLFieldSetElement>(null);
-  // Something inside is being revealed (a search took the operator to it): a
-  // fold above it opens, so the setting is not left in a hidden body. The
-  // listener goes on while the fold is committed, not after the paint: the
-  // reveal asks the moment the box is in the page, which is before a passive
-  // effect has run.
+  // A search revealing something inside opens this fold. A layout effect: the
+  // reveal asks as soon as the box is in the page, before a passive effect runs.
   useLayoutEffect(() => {
     const fieldset = fieldsetRef.current;
     if (!fieldset) {
@@ -838,17 +832,15 @@ export function CollapsibleFieldset(props: {
   );
 }
 
-/** One thing a SchemaForm draws at its top level, in the order it draws it. */
 export type FormLayoutNode =
   | { kind: "field"; key: string; schema: JsonSchema }
   | { kind: "group"; group: SchemaFormGroup; fields: [string, JsonSchema][] };
 
 /**
- * layoutSchemaForm decides what a SchemaForm draws and in which order: the
- * section's own `enable` switch first, then the fields and the groups. The
- * form renders from it, and so does the settings search index, so the two
- * cannot disagree about where a field stands. A schema that is not an object
- * with properties lays out nothing.
+ * What a SchemaForm draws at its top level and in which order: the section's
+ * `enable` switch, then the fields and groups. The form renders from it and so
+ * does the settings search index, so they cannot disagree about where a field
+ * stands.
  */
 export function layoutSchemaForm(
   schema: JsonSchema,
@@ -865,9 +857,8 @@ export function layoutSchemaForm(
   const named = new Set(all.flatMap((g) => g.paths ?? []));
   // Only the first group without paths takes the fields no group names.
   const catchAll = all.find((g) => !g.paths);
-  // A section's own on/off switch opens the form, on no frame and above every
-  // other field: it governs everything below it rather than belonging to one
-  // block.
+  // A section's own on/off switch opens the form, on no frame: it governs
+  // everything below it rather than belonging to one block.
   const enableEntry = entries.find(
     ([k, sub]) => k === "enable" && sub.type === "boolean" && !named.has(k),
   );
@@ -883,14 +874,12 @@ export function layoutSchemaForm(
     return nodes;
   }
   // The group a field is laid out in: the one naming it, else the catch-all,
-  // except that a list or a nested object stands as a block of its own
-  // rather than nesting a frame in a frame.
+  // except that a list or nested object is a block of its own.
   const groupOf = (k: string, sub: JsonSchema): SchemaFormGroup | undefined =>
     all.find((g) => g.paths?.includes(k)) ??
     (catchAll && !isBlockField(sub) ? catchAll : undefined);
-  // Every group stands where its first field stands in the schema's order,
-  // and a field no group takes (a block, or a key added to the schema after
-  // the groups were drawn) stands in place, so nothing leaves the form.
+  // Every group stands where its first field does, and a field no group takes
+  // stands in place, so nothing leaves the form.
   const placed = new Set<string>();
   for (const [k, sub] of rest) {
     const g = groupOf(k, sub);
@@ -911,12 +900,11 @@ export function layoutSchemaForm(
   return nodes;
 }
 
-/** The anchor of a field's box: its settings section and its path in the form. */
+/** The anchor of a field's box: its settings domain and its path in the form. */
 export function fieldAnchor(domain: string | undefined, path: string): string {
   return `${domain ?? ""}:${path}`;
 }
 
-/** The anchor of a group's fieldset. */
 export function groupAnchor(domain: string | undefined, id: string): string {
   return `group:${domain ?? ""}:${id}`;
 }

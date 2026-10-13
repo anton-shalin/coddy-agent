@@ -18,16 +18,10 @@ import { useT } from "../i18n/I18nProvider";
 import { translate } from "../i18n/i18n";
 import { useEscapeCloses } from "../components/useEscapeCloses";
 
-/**
- * The field the tab draws by hand, as a fieldset of its own above the form, so
- * the generated form leaves it out (settings search reads the same name).
- */
+/** The field the tab draws by hand, so the generated form leaves it out. */
 export const SKILLS_HAND_DRAWN_FIELD = "auto_discovery";
 
-/**
- * The fieldsets of the tab's generated form: the policy for the project's
- * marketplaces.json stands in one of its own above the list it governs.
- */
+/** The generated form's fieldsets: the marketplaces trust policy stands apart. */
 export function skillsFormGroups(): SchemaFormGroup[] {
   return [
     {

@@ -1,5 +1,5 @@
 import { Combobox } from "./Combobox";
-import type { ResolvedBoxTextsWithSecond } from "./settingsTexts";
+import type { OverrideTexts } from "./settingsTexts";
 import type { ProviderRow } from "./useProviderModels";
 import { useT } from "../i18n/I18nProvider";
 
@@ -21,7 +21,7 @@ export function ModelField(props: {
   onChange: (v: string) => void;
   providers: ProviderRow[];
   /** The id's name (primary) and the provider's (second); no description. */
-  texts: ResolvedBoxTextsWithSecond;
+  texts: OverrideTexts;
 }) {
   const { value, onChange, providers, texts } = props;
   const { t } = useT();

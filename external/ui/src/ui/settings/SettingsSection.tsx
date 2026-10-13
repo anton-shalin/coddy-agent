@@ -27,15 +27,7 @@ import {
   SESSIONS_CONFIG_KEY,
   type SectionDescriptor,
 } from "./settingsSections";
-import {
-  hasSecondName,
-  settingsTextKey,
-  type BoxTexts,
-  type ResolvedBoxTexts,
-  type ResolvedBoxTextsWithSecond,
-  type SettingsTextId,
-  type TextRef,
-} from "./settingsTexts";
+import { SETTINGS_TEXTS, type OverrideTexts } from "./settingsTexts";
 import { useT } from "../i18n/I18nProvider";
 import { translate } from "../i18n/i18n";
 
@@ -66,8 +58,6 @@ function matchNeuralDeepAPIBase(value: unknown): string {
       ?.value ?? ""
   );
 }
-
-export type { BoxTexts, ResolvedBoxTexts } from "./settingsTexts";
 
 type FieldOverrideContext = Parameters<FieldOverride>[0];
 
@@ -126,7 +116,7 @@ function stringList(v: unknown, key: string): string[] {
 
 function NeuralDeepAPIBaseField(props: {
   ctx: FieldOverrideContext;
-  texts: ResolvedBoxTexts;
+  texts: OverrideTexts;
 }) {
   const { value, onChange } = props.ctx;
   const { texts } = props;
@@ -176,8 +166,7 @@ function rowText(row: Record<string, unknown> | undefined, key: string) {
   return v === undefined || v === null ? "" : String(v);
 }
 
-// The row's unsaved proxy, handed to the sign-in blocks so they dial the route
-// the form shows; absent when the row has no proxy key at all.
+// The row's unsaved proxy, so a sign-in block dials the route the form shows.
 function rowProxy(row: Record<string, unknown> | undefined) {
   return Object.prototype.hasOwnProperty.call(row ?? {}, "proxy")
     ? { proxy: String(row?.proxy ?? "") }
@@ -186,7 +175,7 @@ function rowProxy(row: Record<string, unknown> | undefined) {
 
 function neuralDeepAPIBaseOverride(
   ctx: FieldOverrideContext,
-  texts: ResolvedBoxTexts,
+  texts: OverrideTexts,
 ) {
   // The overrides stack: the endpoint picker keeps the api_base slot, and the
   // hub sign-in block renders below it. The manual api_key field above stays
@@ -214,41 +203,35 @@ function neuralDeepAPIBaseOverride(
   );
 }
 
-const drawn = (text: SettingsTextId, part: "label" | "desc"): TextRef => ({
-  text,
-  part,
-});
-
-// A proxy box: the URL row speaks the schema, the switch above it speaks for
-// whose requests go direct.
-function proxyTexts(
-  text: "proxyIgnoreSystem" | "gatewayProxyIgnoreSystem",
-): BoxTexts {
-  return {
-    primary: "schema",
-    primaryDesc: "schema",
-    second: drawn(text, "label"),
-    secondDesc: drawn(text, "desc"),
-  };
-}
-
 /**
- * What a field box looks like when an override replaces its control, as the
- * override draws it - the one place that says so. "hidden": the override draws
- * nothing for this field. null: the field is drawn as the schema says. Else the
- * names and descriptions the override puts in the box. The override functions
- * below read it to draw, and the settings search index reads it to index, so
- * what is searched is what is shown. `parent` is the object that holds the
- * field, the provider row for a provider's field.
+ * What an override draws in a field's box: "hidden" (nothing), null (the
+ * schema's own control) or its texts. The overrides draw from it and the
+ * settings search indexes it, so what is searched is what is shown.
  */
 export function overrideTexts(
   domain: string,
   path: string,
   parent: Record<string, unknown> | undefined,
-): "hidden" | null | BoxTexts {
+  schema: JsonSchema,
+): "hidden" | null | OverrideTexts {
+  const label = () =>
+    schemaFieldLabel(
+      domain,
+      path,
+      schema.title,
+      path.slice(path.lastIndexOf(".") + 1),
+    );
+  const desc = () => schemaFieldDesc(domain, path, schema.description);
+  // The URL row speaks the schema; the switch above it, whose requests go direct.
+  const proxy = (ignore: { label: string; desc: string }) => ({
+    primary: label(),
+    primaryDesc: desc(),
+    second: translate(ignore.label),
+    secondDesc: translate(ignore.desc),
+  });
   if (domain === "providers") {
     if (path === "proxy") {
-      return proxyTexts("proxyIgnoreSystem");
+      return proxy(SETTINGS_TEXTS.proxyIgnoreSystem);
     }
     const providerType = rowText(parent, "type");
     if (
@@ -263,29 +246,32 @@ export function overrideTexts(
       }
       if (path === "api_base") {
         return {
-          primary: drawn("codexAccount", "label"),
-          primaryDesc: drawn("codexAccount", "desc"),
+          primary: translate(SETTINGS_TEXTS.codexAccount.label),
+          primaryDesc: translate(SETTINGS_TEXTS.codexAccount.desc),
         };
       }
     }
     if (providerType === "neuraldeep" && path === "api_base") {
       return {
-        primary: "schema",
-        primaryDesc: drawn("neuralDeepApiBase", "desc"),
-        second: drawn("neuralDeepAccount", "label"),
-        secondDesc: drawn("neuralDeepAccount", "desc"),
+        primary: label(),
+        primaryDesc: translate(SETTINGS_TEXTS.neuralDeepApiBase.desc),
+        second: translate(SETTINGS_TEXTS.neuralDeepAccount.label),
+        secondDesc: translate(SETTINGS_TEXTS.neuralDeepAccount.desc),
       };
     }
     return null;
   }
   if (domain === "models") {
     return path === "model"
-      ? { primary: "schema", second: drawn("modelProvider", "label") }
+      ? {
+          primary: label(),
+          second: translate(SETTINGS_TEXTS.modelProvider.label),
+        }
       : null;
   }
   if (domain === "gateways") {
     return path === "telegram.proxy" || path === "pachca.proxy"
-      ? proxyTexts("gatewayProxyIgnoreSystem")
+      ? proxy(SETTINGS_TEXTS.gatewayProxyIgnoreSystem)
       : null;
   }
   if (domain === "skills") {
@@ -294,110 +280,42 @@ export function overrideTexts(
   return null;
 }
 
-/**
- * The strings of a box's texts in the page's language. "schema" is the field's
- * own localized label or description (schemaI18n); a constant of
- * SETTINGS_TEXTS is looked up in the dictionary.
- */
-export function resolveBoxTexts(
-  t: BoxTexts,
-  domain: string,
-  path: string,
-  schema: JsonSchema,
-): ResolvedBoxTexts {
-  const name = path.slice(path.lastIndexOf(".") + 1);
-  const resolve = (
-    ref: TextRef | undefined,
-    part: "label" | "desc",
-  ): string | undefined => {
-    if (ref === undefined) {
-      return undefined;
-    }
-    if (ref === "schema") {
-      return part === "label"
-        ? schemaFieldLabel(domain, path, schema.title, name)
-        : schemaFieldDesc(domain, path, schema.description);
-    }
-    const key = settingsTextKey(ref.text, ref.part);
-    return key === undefined ? undefined : translate(key);
-  };
-  const out: ResolvedBoxTexts = {
-    primary: resolve(t.primary, "label") ?? name,
-  };
-  const primaryDesc = resolve(t.primaryDesc, "desc");
-  if (primaryDesc !== undefined) {
-    out.primaryDesc = primaryDesc;
-  }
-  const second = resolve(t.second, "label");
-  if (second !== undefined) {
-    out.second = second;
-  }
-  const secondDesc = resolve(t.secondDesc, "desc");
-  if (secondDesc !== undefined) {
-    out.secondDesc = secondDesc;
-  }
-  return out;
-}
-
-/**
- * The override of a field in `domain`: the texts to draw it with, or what the
- * override answers when it draws nothing here - false for a hidden field, null
- * for one the schema draws.
- */
-function boxTextsFor(
-  domain: string,
-  ctx: FieldOverrideContext,
-): ResolvedBoxTexts | false | null {
-  const texts = overrideTexts(domain, ctx.path, ctx.parentObj);
-  if (texts === "hidden") {
-    return false;
-  }
-  return texts === null
-    ? null
-    : resolveBoxTexts(texts, domain, ctx.path, ctx.schema);
-}
-
-/**
- * boxTextsFor for a control that draws a second name (the proxy's switch, a
- * model's Provider): a box that declares none is not that control's box.
- */
-function boxTextsWithSecondFor(
-  domain: string,
-  ctx: FieldOverrideContext,
-): ResolvedBoxTextsWithSecond | false | null {
-  const texts = boxTextsFor(domain, ctx);
-  return texts === false || texts === null || hasSecondName(texts)
-    ? texts
-    : null;
+// A field override's answer: false draws nothing, null leaves it to the schema.
+function boxFor(domain: string, ctx: FieldOverrideContext) {
+  const box = overrideTexts(domain, ctx.path, ctx.parentObj, ctx.schema);
+  return box === "hidden" ? false : box;
 }
 
 // A bot's proxy reads like a provider's, so it gets the same switch and URL
 // field (Gateways tab, the Telegram and Pachca blocks).
 function gatewaysFieldOverride(ctx: FieldOverrideContext) {
-  const box = boxTextsWithSecondFor("gateways", ctx);
-  if (box === false || box === null) {
-    return box;
-  }
+  const box = boxFor("gateways", ctx);
   return (
-    <ProxySettingField value={ctx.value} onChange={ctx.onChange} texts={box} />
+    box && (
+      <ProxySettingField
+        value={ctx.value}
+        onChange={ctx.onChange}
+        texts={box}
+      />
+    )
   );
 }
 
 function providerFieldOverride(ctx: FieldOverrideContext) {
-  const box = boxTextsFor("providers", ctx);
+  const box = boxFor("providers", ctx);
   if (box === false || box === null) {
     return box;
   }
   // Every provider type has the proxy switch and URL field, codex included: its
   // sign-in and its requests take the row's route like any other.
   if (ctx.path === "proxy") {
-    return hasSecondName(box) ? (
+    return (
       <ProxySettingField
         value={ctx.value}
         onChange={ctx.onChange}
         texts={box}
       />
-    ) : null;
+    );
   }
   if (rowText(ctx.parentObj, "type") === "codex") {
     return (
@@ -572,21 +490,20 @@ export function SettingsSection(props: {
       key === "models"
         ? (ctx) => {
             if (ctx.path === "model") {
-              const box = boxTextsWithSecondFor(key, ctx);
-              if (box === false || box === null) {
-                return box;
-              }
+              const box = boxFor(key, ctx);
               return (
-                <ModelField
-                  value={
-                    ctx.value === undefined || ctx.value === null
-                      ? ""
-                      : String(ctx.value)
-                  }
-                  onChange={(v) => ctx.onChange(v)}
-                  providers={providerRows}
-                  texts={box}
-                />
+                box && (
+                  <ModelField
+                    value={
+                      ctx.value === undefined || ctx.value === null
+                        ? ""
+                        : String(ctx.value)
+                    }
+                    onChange={(v) => ctx.onChange(v)}
+                    providers={providerRows}
+                    texts={box}
+                  />
+                )
               );
             }
             // 0 means "whatever the provider's listing reports" at run time;
@@ -810,7 +727,6 @@ export function SettingsSection(props: {
   );
 }
 
-/** The fieldsets of a provider's form: what it is, and the folded rest. */
 export function providerFormGroups(): SchemaFormGroup[] {
   return [
     { id: "provider", legend: translate("settings.providers.group.main") },
@@ -823,10 +739,7 @@ export function providerFormGroups(): SchemaFormGroup[] {
   ];
 }
 
-/**
- * The fieldsets of a logical model's form: which model it is and what it can
- * take in, how it answers, and how hard it thinks.
- */
+/** Which model it is and what it can take in, how it answers, how hard it thinks. */
 export function modelFormGroups(): SchemaFormGroup[] {
   return [
     {
@@ -847,7 +760,6 @@ export function modelFormGroups(): SchemaFormGroup[] {
   ];
 }
 
-/** The one fieldset over the Sessions tab's storage settings. */
 export function sessionsFormGroups(): SchemaFormGroup[] {
   return [
     {
@@ -858,7 +770,6 @@ export function sessionsFormGroups(): SchemaFormGroup[] {
   ];
 }
 
-/** The fieldset of one section the Prompts tab folds in, named after it. */
 export function systemPartGroups(
   key: string,
   sub: JsonSchema,

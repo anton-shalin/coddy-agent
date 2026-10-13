@@ -19,8 +19,7 @@ import {
  * Every change is reported at once rather than behind a Save: there is nothing
  * here to review, and a dialog that has to be confirmed is a dialog that gets
  * left open. It is rendered into the document for the same reason the row menu
- * is: the drawer clips what overflows it. Under a hidden pane it is not drawn,
- * and its draft and open state are kept for when the pane is shown.
+ * is: the drawer clips what overflows it.
  */
 export function SessionTagEditor(props: {
   open: boolean;

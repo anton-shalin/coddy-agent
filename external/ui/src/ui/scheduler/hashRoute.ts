@@ -49,10 +49,7 @@ export type ParsedAppHash =
       section: string | null;
       /** The row a list section has open (`?id=`, a provider or model name). */
       item: string | null;
-      /**
-       * The setting the address names (`?field=`, the anchor of its box): the
-       * drawer opens the tab and the row, then takes the operator to it.
-       */
+      /** The setting the address names (`?field=`, the anchor of its box). */
       field: string | null;
     }
   | { branch: "swarm"; historyOpen: boolean }
@@ -406,20 +403,18 @@ export function setSettingsHash(opts?: { historySidebar?: boolean }): void {
   }
 }
 
-/** `#/settings/<section>` deep link for a specific Settings tab, with
- * `?id=<name>` when a list section (providers, models) has one row open and
- * `field=<anchor>` when the address names a setting. Empty section falls back
- * to the bare `#/settings` route. */
-/** What a Settings address names beside its tab. */
 export type SettingsAddress = {
   /** The row a list section has open (`?id=`). */
   item?: string | null | undefined;
   /** The setting it takes the operator to (`?field=`, the anchor of its box). */
   field?: string | null | undefined;
-  /** The history sidebar stays open (`?history=1`). */
   historySidebar?: boolean | undefined;
 };
 
+/** `#/settings/<section>` deep link for a specific Settings tab, with
+ * `?id=<name>` when a list section (providers, models) has one row open and
+ * `field=<anchor>` when the address names a setting. Empty section falls back
+ * to the bare `#/settings` route. */
 export function setSettingsSectionHash(
   section: string,
   opts?: SettingsAddress,
@@ -637,12 +632,7 @@ export function setDocsHash(slug: string | null, anchor?: string | null): void {
   }
 }
 
-/**
- * `#/settings/<section>[?id=<row>][&field=<anchor>][&history=1]`: a tab, the
- * row of a list it has open, and the setting (the anchor of its box) the
- * address takes the operator to. The query is URLSearchParams', so a colon in
- * an anchor is written `%3A`; a dot stays.
- */
+/** The query is URLSearchParams', so a colon in an anchor is written `%3A`. */
 export function appNavHrefSettingsSection(
   section: string,
   opts: SettingsAddress = {},

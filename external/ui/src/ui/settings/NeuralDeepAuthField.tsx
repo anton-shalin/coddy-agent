@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { FieldLabel } from "./FieldHint";
-import type { ResolvedBoxTexts } from "./settingsTexts";
+import type { OverrideTexts } from "./settingsTexts";
 import { useT } from "../i18n/I18nProvider";
 import { translate } from "../i18n/i18n";
 import { providerAPIKeyEnvVarName } from "./providerApiKeyPlaceholder";
@@ -58,7 +58,7 @@ export function NeuralDeepAuthField(props: {
   /** Current unsaved provider proxy; undefined keeps the saved row route. */
   proxy?: string;
   /** The account's name and description (second); primary is the endpoint's. */
-  texts: ResolvedBoxTexts;
+  texts: OverrideTexts;
 }) {
   const providerName = props.providerName.trim();
   const apiBase = props.apiBase.trim();
