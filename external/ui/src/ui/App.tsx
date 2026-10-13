@@ -60,8 +60,10 @@ import {
   isNewerSettings,
   parseSessionSettings,
   permissionModeOfInfo,
+  toolsetsOfInfo,
   type SessionSettings,
   type SessionSettingsEvent,
+  type ToolsetControl,
   type TurnOverride,
 } from "./chat/sessionSettings";
 import {
@@ -383,6 +385,8 @@ type ModelInfo = {
   multimodal?: boolean;
   reasoningLevels?: string[];
   reasoningDefault?: string;
+  /** The toolsets[] preset the model names (models[].toolset). */
+  toolset?: string;
 };
 
 const PROFILE_MODES = ["agent", "plan", "ask"] as const;
@@ -1492,6 +1496,29 @@ export function App() {
    * leave the pick behind for the next try. The state mirrors the mode for the
    * chip.
    */
+  /**
+   * The toolsets[] presets the server names (GET /coddy/info, read with the
+   * permission mode after every configuration reload): the start screen has no
+   * session snapshot, and offers a toolset only while there is a preset.
+   */
+  const [serverToolsets, setServerToolsets] = useState<string[]>([]);
+  /** The viewed session's toolset and its choices, from its settings snapshot. */
+  const [sessionToolset, setSessionToolset] = useState<{
+    sid: string;
+    toolset: string;
+    choices: string[];
+  }>({ sid: "", toolset: "", choices: [] });
+  /**
+   * A toolset picked on the start screen: it rides in as metadata.toolset of
+   * the message that creates the session, and is forgotten once the server
+   * took that message.
+   */
+  const pendingToolsetRef = useRef("");
+  const [pendingToolset, setPendingToolsetState] = useState("");
+  const setPendingToolset = useCallback((name: string) => {
+    pendingToolsetRef.current = name;
+    setPendingToolsetState(name);
+  }, []);
   const pendingPermissionModeRef = useRef({ mode: "", sid: "" });
   const [pendingPermissionMode, setPendingPermissionModeState] = useState("");
   const setPendingPermissionMode = useCallback((mode: string, sid = "") => {
@@ -1514,7 +1541,12 @@ export function App() {
       headers: { Accept: "application/json" },
     })
       .then((res) => (res.ok ? res.json() : null))
-      .then(permissionModeOfInfo)
+      .then((info: unknown) => {
+        if (read === serverPermissionReadRef.current && isAppEnvironment()) {
+          setServerToolsets(toolsetsOfInfo(info));
+        }
+        return permissionModeOfInfo(info);
+      })
       .catch(() => null)
       .then((mode) => {
         if (read !== serverPermissionReadRef.current || !isAppEnvironment()) {
@@ -2947,6 +2979,7 @@ export function App() {
           multimodal?: boolean;
           reasoning_levels?: string[];
           reasoning_default?: string;
+          toolset?: string;
         }>;
       }>("/v1/models");
       if (!res.ok || !res.data?.data) {
@@ -2964,6 +2997,7 @@ export function App() {
             ? d.reasoning_levels.map((s) => `${s}`.trim()).filter(Boolean)
             : [],
           reasoningDefault: (d.reasoning_default || "").trim(),
+          toolset: (d.toolset || "").trim(),
         }))
         .filter((d) => d.id);
       const rows: ModelInfo[] = raw.map((d) => {
@@ -2976,6 +3010,9 @@ export function App() {
         };
         if (d.maxContextTokens !== undefined) {
           m.maxContextTokens = d.maxContextTokens;
+        }
+        if (d.toolset) {
+          m.toolset = d.toolset;
         }
         return m;
       });
@@ -5616,6 +5653,10 @@ export function App() {
       if (sendReasoning) meta.reasoning = reasoningSel;
       if (runSlug) meta.runPlanSlug = runSlug;
       if (heldVersion > 0) meta.settingsVersion = String(heldVersion);
+      // A toolset picked on the start screen goes with the message that
+      // creates the session.
+      const toolsetPick = isNewChatFirstSend ? pendingToolsetRef.current : "";
+      if (toolsetPick) meta.toolset = toolsetPick;
       reqBody.metadata = meta;
       // A permission mode picked before the chat had a session goes first,
       // as the command that asks for it; the server takes it off the text.
@@ -5643,6 +5684,9 @@ export function App() {
       // The server took the session's first message, and with it the pick.
       if (res.ok && pendingPermissionModeRef.current.sid === sid.trim()) {
         setPendingPermissionMode("");
+      }
+      if (res.ok && toolsetPick && pendingToolsetRef.current === toolsetPick) {
+        setPendingToolset("");
       }
       if (!ownsPost() || abortCtl.signal.aborted) return;
       pendingPostBySidRef.current.delete(postSessionKey);
@@ -6223,6 +6267,11 @@ export function App() {
     setPermissionMode(snap.permissionMode);
     setConfiguredPermissionMode(snap.configuredPermissionMode);
     setSettingsOverrides(snap.overrides);
+    setSessionToolset({
+      sid: snap.sessionId,
+      toolset: snap.toolset,
+      choices: snap.toolsetChoices,
+    });
     if (snap.mode) {
       setMode(snap.mode);
     }
@@ -6358,6 +6407,55 @@ export function App() {
     },
     [sessionId, patchSessionSettings, setPendingPermissionMode],
   );
+
+  const onToolsetChange = useCallback(
+    (next: string) => {
+      const name = next.trim();
+      if (!name) {
+        return;
+      }
+      const sid = sessionId.trim();
+      if (!sid) {
+        // No session yet: the pick rides in with the first message.
+        setPendingToolset(name);
+        return;
+      }
+      void patchSessionSettings(sid, { selectedToolset: name });
+    },
+    [sessionId, patchSessionSettings, setPendingToolset],
+  );
+
+  /**
+   * The composer's toolset chip: the presets of the viewed session's snapshot,
+   * else the ones the server names, and "default" for none of them. What it
+   * shows is the session's own toolset, else the start screen's pick, else the
+   * toolset the chosen model names. No preset, no chip.
+   */
+  const toolsetControl = useMemo<ToolsetControl | undefined>(() => {
+    const sid = sessionId.trim();
+    const own = sid && sessionToolset.sid === sid ? sessionToolset : null;
+    const choices =
+      own && own.choices.length > 0
+        ? own.choices
+        : serverToolsets.length > 0
+          ? [...serverToolsets, "default"]
+          : [];
+    if (choices.length === 0) {
+      return undefined;
+    }
+    const modelOwn = modelInfos.find((m) => m.id === llmModel)?.toolset ?? "";
+    const value =
+      (sid ? own?.toolset : pendingToolset) || modelOwn || "default";
+    return { value, choices, onChange: onToolsetChange };
+  }, [
+    sessionId,
+    sessionToolset,
+    serverToolsets,
+    modelInfos,
+    llmModel,
+    pendingToolset,
+    onToolsetChange,
+  ]);
 
   const onLlmReasoningChange = useCallback(
     (level: string) => {
@@ -7887,6 +7985,7 @@ export function App() {
             onPermissionModeChange={
               subagentTranscript ? undefined : onPermissionModeChange
             }
+            toolsetControl={subagentTranscript ? undefined : toolsetControl}
             settingsOverrides={settingsOverrides}
             {...(subagentTranscript
               ? {}

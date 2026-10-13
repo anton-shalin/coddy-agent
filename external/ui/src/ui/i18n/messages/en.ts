@@ -114,6 +114,7 @@ export const messagesEn: Record<string, string> = {
   "settings.section.sessions_manager.label": "Sessions",
   "settings.section.providers.label": "LLM providers",
   "settings.section.models.label": "Logical models",
+  "settings.section.toolsets.label": "Toolsets",
   "settings.section.agent.label": "ReAct loop",
   "settings.section.supervisor.label": "Session goal",
   "settings.section.tools.label": "Tools and permissions",
@@ -129,6 +130,7 @@ export const messagesEn: Record<string, string> = {
   "settings.section.sessions_manager.desc": "Stored chats & cleanup",
   "settings.section.providers.desc": "LLM API connections",
   "settings.section.models.desc": "Named model configs",
+  "settings.section.toolsets.desc": "Tool presets for models",
   "settings.section.agent.desc": "Model, retries, loop guard",
   "settings.section.supervisor.desc": "Goal checks, budgets, watchdog",
   "settings.section.tools.desc": "Tool permissions & limits",
@@ -334,7 +336,8 @@ export const messagesEn: Record<string, string> = {
   "settings.models.group.reasoning": "Reasoning",
   "settings.models.group.tools": "Tools",
   "settings.models.group.toolsDesc":
-    "Which tools a session is offered while it runs on this model. An entry is an exact tool name, * or a prefix*. An MCP tool is named server__tool, so context7__* is every tool of that server. The allowed tools apply first, the disallowed tools after them, and a tool in both is out. With both lists empty the model is offered every tool the mode would.",
+    "The toolset a session on this model is offered its tools by, a preset of the Toolsets tab. Without one the model is offered every tool the mode would. A session can pick another toolset in the composer or with /toolset.",
+  "settings.models.toolsetNone": "None: every tool",
   "settings.providerModels.legend": "Models",
   "settings.providerModels.needsNameAndType":
     "Give the provider an id and pick its type to list its models.",
@@ -443,12 +446,18 @@ export const messagesEn: Record<string, string> = {
   "settings.schema.models.stream.label": "Stream responses",
   "settings.schema.models.stream.desc":
     "Leave on to receive the answer token by token over SSE. Turn off to send one blocking request and wait for the whole answer, for servers or proxies that handle event streams badly; the transcript then fills in at once instead of typing out. Not available for codex models, whose backend is streaming-only.",
-  "settings.schema.models.tools.label": "Allowed tools",
-  "settings.schema.models.tools.desc":
-    "Tools offered while a session runs on this model: tool names, * or a prefix* (context7__* is every tool of that MCP server). Empty offers every tool the mode would. It only narrows, and a call to an unlisted tool is refused. Spares a small-context local model the schemas of tools it never calls.",
-  "settings.schema.models.disallowed_tools.label": "Disallowed tools",
-  "settings.schema.models.disallowed_tools.desc":
-    "Tools removed from what this model is offered, applied after the allowed tools, with the same names and patterns. A call to a removed tool is refused.",
+  "settings.schema.models.toolset.label": "Toolset",
+  "settings.schema.models.toolset.desc":
+    "The toolset a session on this model is offered its tools by, unless the session picks another. Empty offers every tool the mode would. Spares a small-context local model the schemas of tools it never calls.",
+  "settings.schema.toolsets.name.label": "Name",
+  "settings.schema.toolsets.name.desc":
+    "What models and the /toolset command call it: letters, digits, '.', '_' and '-'. default is reserved: it means every tool the mode offers.",
+  "settings.schema.toolsets.tools.label": "Allowed tools",
+  "settings.schema.toolsets.tools.desc":
+    "Tools offered with this toolset: tool names, * or a prefix* (context7__* is every tool of that MCP server). Empty offers every tool the mode would. It only narrows, and a call to an unlisted tool is refused.",
+  "settings.schema.toolsets.disallowed_tools.label": "Disallowed tools",
+  "settings.schema.toolsets.disallowed_tools.desc":
+    "Tools removed from this toolset, applied after the allowed tools, with the same names and patterns. A call to a removed tool is refused.",
 
   "settings.schema.agent.model.label": "Default model",
   "settings.schema.supervisor.enable.label": "Check every turn",
@@ -1460,6 +1469,11 @@ export const messagesEn: Record<string, string> = {
   "composer.modeAsk": "Ask",
   "composer.modePlan": "Plan",
   "composer.permission": "Permissions",
+  "composer.toolset": "Toolset",
+  "composer.toolsetTitle":
+    "The toolset this session is offered its tools by: a preset of the configuration, or All tools for every tool of the mode",
+  "composer.toolsetDefault": "All tools",
+  "composer.toolsetDefaultHint": "No preset: every tool the mode offers",
   "composer.permissionTitle":
     "When tools ask for approval in this session (new sessions start in: {configured})",
   "composer.permissionAsk": "Ask first",

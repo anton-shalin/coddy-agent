@@ -27,7 +27,7 @@ ReAct loop (internal/agent/react.go)
     │
     ├── (agent or plan mode, never ask) append MCP tool definitions
     │
-    ├── narrow to the session model's models[].tools / disallowed_tools  ← internal/agent/toolsets.go
+    ├── narrow to the session's toolset (its /toolset pick, else models[].toolset)  ← internal/agent/toolsets.go
     │
     ├── passes tool definitions to LLM via provider.Stream()
     │

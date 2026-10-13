@@ -1,12 +1,12 @@
 package agent
 
-// Godog harness for features/model_tool_restrictions.feature: drives the real
-// Agent.Run in agent mode with a fake LLM provider on a models[] row that
-// carries tools / disallowed_tools. The scenarios read what the provider was
-// sent (the request's tool list and the tool list in the system message) and
-// replay a call to a tool the row does not offer, which has to be refused
-// before any permission prompt; a control scenario runs the same call on a row
-// with no lists, so the refusal is provably the only thing between the call and
+// Godog harness for features/toolsets.feature: drives the real Agent.Run in
+// agent mode with a fake LLM provider on a models[] row that names a toolset.
+// The scenarios read what the provider was sent (the request's tool list and
+// the tool list in the system message) and replay a call to a tool the toolset
+// does not offer, which has to be refused before any permission prompt; the
+// control scenarios run the same call with no toolset, the model's or the
+// session's, so the refusal is provably the only thing between the call and
 // the file.
 
 import (
@@ -162,6 +162,14 @@ func (s *modelToolsFeatureState) sessionWithDisallowed(list string) error {
 
 func (s *modelToolsFeatureState) sessionWithoutLists() error {
 	return s.sessionOn(toolRow{})
+}
+
+func (s *modelToolsFeatureState) sessionPickedToolset(name string) error {
+	if s.st == nil {
+		return fmt.Errorf("no session prepared")
+	}
+	s.st.SetSelectedToolset(name)
+	return nil
 }
 
 func (s *modelToolsFeatureState) buildAgent() error {
@@ -399,9 +407,10 @@ func initializeModelToolsScenario(sc *godog.ScenarioContext) {
 		return ctx, nil
 	})
 
-	sc.Step(`^a coddy session on a model whose tools are "([^"]*)"$`, s.sessionWithTools)
-	sc.Step(`^a coddy session on a model whose disallowed tools are "([^"]*)"$`, s.sessionWithDisallowed)
-	sc.Step(`^a coddy session on a model with no tool lists$`, s.sessionWithoutLists)
+	sc.Step(`^a coddy session on a model whose toolset offers "([^"]*)"$`, s.sessionWithTools)
+	sc.Step(`^a coddy session on a model whose toolset disallows "([^"]*)"$`, s.sessionWithDisallowed)
+	sc.Step(`^a coddy session on a model without a toolset$`, s.sessionWithoutLists)
+	sc.Step(`^the session picked the toolset "([^"]*)"$`, s.sessionPickedToolset)
 	sc.Step(`^a model that answers directly$`, s.modelAnswersDirectly)
 	sc.Step(`^a model that requests the "([^"]+)" tool once, then answers$`, s.modelRequestsToolOnce)
 	sc.Step(`^the user sends a message$`, s.userSendsMessage)
@@ -411,23 +420,23 @@ func initializeModelToolsScenario(sc *godog.ScenarioContext) {
 	sc.Step(`^the system prompt lists the same tools$`, s.promptListsSameTools)
 	sc.Step(`^the file is not written$`, s.fileIsNotWritten)
 	sc.Step(`^the file is written$`, s.fileIsWritten)
-	sc.Step(`^the tool call is answered with the model's tool refusal$`, s.callAnsweredWithModelRefusal)
+	sc.Step(`^the tool call is answered with the toolset's refusal$`, s.callAnsweredWithModelRefusal)
 	sc.Step(`^no permission prompt was raised$`, s.noPermissionPrompt)
 	sc.Step(`^the turn ends with the model's answer$`, s.turnEndsWithAnswer)
 }
 
-func TestModelToolRestrictionsFeature(t *testing.T) {
+func TestToolsetsFeature(t *testing.T) {
 	suite := godog.TestSuite{
-		Name:                "model-tool-restrictions",
+		Name:                "toolsets",
 		ScenarioInitializer: initializeModelToolsScenario,
 		Options: &godog.Options{
 			Format:   "pretty",
-			Paths:    []string{"../../features/model_tool_restrictions.feature"},
+			Paths:    []string{"../../features/toolsets.feature"},
 			TestingT: t,
 			Strict:   true,
 		},
 	}
 	if suite.Run() != 0 {
-		t.Fatal("model tool restrictions feature suite failed")
+		t.Fatal("toolsets feature suite failed")
 	}
 }

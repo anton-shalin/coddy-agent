@@ -437,3 +437,65 @@ func TestCoddySessionPatchSelectedToolset(t *testing.T) {
 		t.Fatalf("PATCH an unknown toolset = %d %v", code, out)
 	}
 }
+
+// A new chat's first message carries the toolset picked before it had a
+// session (metadata.toolset); GET /v1/models names each model's own toolset
+// and GET /coddy/info the presets, which is what a start screen offers.
+func TestToolsetOnTheWireForANewChat(t *testing.T) {
+	cfg := reasoningHTTPConfig()
+	cfg.Toolsets = []config.Toolset{{Name: "lean", Tools: []string{"read", "grep"}}}
+	cfg.Models[0].Toolset = "lean"
+	runner := func(context.Context, *session.State, []acp.ContentBlock, acp.UpdateSender) (string, error) {
+		return "", nil
+	}
+	mgr := session.NewManager(cfg, noopSender{}, runner, slog.Default(), "/tmp", nil)
+	st, err := mgr.EnsureHTTPSession(context.Background(), "sess-toolset", "/tmp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := applyProfileSettings(context.Background(), mgr, st, "sess-toolset", "", json.RawMessage(`{"toolset":"default"}`)); err != nil {
+		t.Fatalf("metadata.toolset: %v", err)
+	}
+	if got := st.GetSelectedToolset(); got != "default" {
+		t.Fatalf("selected toolset = %q, want default", got)
+	}
+	if err := applyProfileSettings(context.Background(), mgr, st, "sess-toolset", "", json.RawMessage(`{"toolset":"nope"}`)); err == nil {
+		t.Fatal("an unknown metadata.toolset was accepted")
+	}
+
+	srv := New(cfg, mgr, slog.Default(), "/tmp")
+	t.Cleanup(srv.Drain)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	get := func(path string, into interface{}) {
+		resp, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if err := json.NewDecoder(resp.Body).Decode(into); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var models struct {
+		Data []struct {
+			ID      string `json:"id"`
+			Toolset string `json:"toolset"`
+		} `json:"data"`
+	}
+	get("/v1/models", &models)
+	named := map[string]string{}
+	for _, m := range models.Data {
+		named[m.ID] = m.Toolset
+	}
+	if named[cfg.Models[0].Model] != "lean" || named[cfg.Models[1].Model] != "" {
+		t.Fatalf("model toolsets = %v", named)
+	}
+	var info struct {
+		Toolsets []string `json:"toolsets"`
+	}
+	get("/coddy/info", &info)
+	if strings.Join(info.Toolsets, ",") != "lean" {
+		t.Fatalf("info toolsets = %v", info.Toolsets)
+	}
+}

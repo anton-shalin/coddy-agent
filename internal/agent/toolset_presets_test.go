@@ -1,9 +1,9 @@
 package agent
 
-// Edge cases of the toolsets[] presets a session is offered its tools by (toolsets.go).
-// The happy path - what a request carries, the system prompt's list and the
-// refusal of a call outside the lists - is features/model_tool_restrictions.feature,
-// run by bdd_model_tools_test.go.
+// Edge cases of the toolsets[] presets a session is offered its tools by
+// (toolsets.go). The happy path - what a request carries, the system prompt's
+// list, the refusal of a call outside the preset, a session's own pick - is
+// features/toolsets.feature, run by bdd_toolsets_test.go.
 
 import (
 	"context"

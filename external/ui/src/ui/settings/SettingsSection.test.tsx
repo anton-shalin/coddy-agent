@@ -1559,7 +1559,8 @@ test("the provider form groups its fields: provider settings, folded advanced se
 });
 
 // A logical model's form reads in four blocks: which model it is and what it
-// takes in, how it answers, how hard it thinks, and which tools it is offered.
+// takes in, how it answers, how hard it thinks, and which toolset it is
+// offered its tools by.
 test("the logical model form groups its fields: model, generation, reasoning, tools", async () => {
   stubModelsAndLevels([]);
   const schema: JsonSchema = {
@@ -1594,16 +1595,7 @@ test("the logical model form groups its fields: model, generation, reasoning, to
               title: "Allow disabling reasoning",
               default: false,
             },
-            tools: {
-              type: "array",
-              title: "Allowed tools",
-              items: { type: "string" },
-            },
-            disallowed_tools: {
-              type: "array",
-              title: "Disallowed tools",
-              items: { type: "string" },
-            },
+            toolset: { type: "string", title: "Toolset" },
           },
           "x-coddy-property-order": [
             "model",
@@ -1615,8 +1607,7 @@ test("the logical model form groups its fields: model, generation, reasoning, to
             "reasoning_levels",
             "reasoning_default",
             "allow_reasoning_off",
-            "tools",
-            "disallowed_tools",
+            "toolset",
           ],
         },
       },
@@ -1649,22 +1640,13 @@ test("the logical model form groups its fields: model, generation, reasoning, to
   expect(reasoning.textContent).toContain("Default reasoning level");
   expect(reasoning.textContent).toContain("Allow disabling reasoning");
   const tools = screen.getByTestId("settings-group-tools");
-  // Both lists stand inside it, the allowlist first, each in the frame a list
-  // has.
-  expect(
-    [
-      ...tools.querySelectorAll(
-        ":scope > .settings-form-group-body > fieldset > legend",
-      ),
-    ].map((l) => l.textContent),
-  ).toEqual(["Allowed tools", "Disallowed tools"]);
+  expect(within(tools).getByLabelText("Toolset")).toBeTruthy();
 });
 
-// models[].tools and models[].disallowed_tools are lists of names, so they
-// keep the frame a list has, inside the Tools block, the allowlist first. The
-// block explains how an entry is written and how the two lists combine; each
-// list says what it does on its own.
-const toolListsSchema: JsonSchema = {
+// A model names one of the presets of the Toolsets tab, or none: the form
+// offers exactly those, and a toolset the presets no longer have stays on
+// offer rather than being changed behind the operator's back.
+const toolsetsSchema: JsonSchema = {
   type: "object",
   properties: {
     models: {
@@ -1674,6 +1656,18 @@ const toolListsSchema: JsonSchema = {
         type: "object",
         properties: {
           model: { type: "string", title: "Model id" },
+          toolset: { type: "string", title: "Toolset" },
+        },
+        "x-coddy-property-order": ["model", "toolset"],
+      },
+    },
+    toolsets: {
+      type: "array",
+      title: "Toolsets",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string", title: "Name" },
           tools: {
             type: "array",
             title: "Allowed tools",
@@ -1685,28 +1679,49 @@ const toolListsSchema: JsonSchema = {
             items: { type: "string" },
           },
         },
-        "x-coddy-property-order": ["model", "tools", "disallowed_tools"],
+        "x-coddy-property-order": ["name", "tools", "disallowed_tools"],
       },
     },
   },
 };
 
-function ToolListsHarness(props: { model?: Record<string, unknown> }) {
+const toolsetsSection: SectionDescriptor = {
+  id: "toolsets",
+  label: "Toolsets",
+  kind: "array",
+  schemaKey: "toolsets",
+  labelField: "name",
+};
+
+function ToolsetsHarness(props: {
+  section: SectionDescriptor;
+  model?: Record<string, unknown>;
+  toolsets?: Record<string, unknown>[];
+}) {
   const [doc, setDoc] = React.useState<Record<string, unknown>>({
     providers: [{ name: "demo", type: "openai" }],
     models: [props.model ?? { model: "demo/small" }],
+    toolsets: props.toolsets ?? [
+      { name: "coding", tools: ["read", "grep"] },
+      { name: "no-net", disallowed_tools: ["webfetch"] },
+    ],
   });
   return (
     <>
       <output data-testid="settings-doc">{JSON.stringify(doc)}</output>
       <SettingsSection
-        section={modelsSection}
-        schema={toolListsSchema}
+        section={props.section}
+        schema={toolsetsSchema}
         doc={doc}
         setDoc={setDoc}
       />
     </>
   );
+}
+
+/** The document the harness holds. */
+function savedDoc(): Record<string, unknown> {
+  return JSON.parse(screen.getByTestId("settings-doc").textContent || "{}");
 }
 
 /** The first model row of the document the harness holds. */
@@ -1720,134 +1735,105 @@ function toolList(name: string): HTMLElement {
   return legend.closest("fieldset") as HTMLElement;
 }
 
-test("the tool lists of a model row are edited in place and saved on the row", () => {
+test("a model row picks its toolset from the presets, or none", () => {
+  render(<ToolsetsHarness section={modelsSection} />);
+  fireEvent.click(screen.getByTestId("settings-master-item-0"));
+
+  const select = screen.getByTestId("model-toolset") as HTMLSelectElement;
+  expect([...select.options].map((o) => o.textContent)).toEqual([
+    "None: every tool",
+    "coding",
+    "no-net",
+  ]);
+  expect(select.value).toBe("");
+  fireEvent.change(select, { target: { value: "coding" } });
+  expect(firstModel()).toEqual({ model: "demo/small", toolset: "coding" });
+  fireEvent.change(select, { target: { value: "" } });
+  expect(firstModel()).toEqual({ model: "demo/small" });
+});
+
+test("a model naming a toolset the presets no longer have keeps it on offer", () => {
   render(
-    <ToolListsHarness
-      model={{
-        model: "demo/small",
-        tools: ["read", "grep"],
-        disallowed_tools: ["http_request"],
-      }}
+    <ToolsetsHarness
+      section={modelsSection}
+      model={{ model: "demo/small", toolset: "gone" }}
     />,
+  );
+  fireEvent.click(screen.getByTestId("settings-master-item-0"));
+  const select = screen.getByTestId("model-toolset") as HTMLSelectElement;
+  expect(select.value).toBe("gone");
+  expect([...select.options].map((o) => o.value)).toContain("gone");
+});
+
+test("the Toolsets tab edits the lists of a preset in place", () => {
+  render(<ToolsetsHarness section={toolsetsSection} />);
+  expect(screen.getByTestId("settings-master-item-0").textContent).toContain(
+    "coding",
   );
   fireEvent.click(screen.getByTestId("settings-master-item-0"));
 
   const allowed = screen.getByLabelText("Allowed tools 1") as HTMLInputElement;
   expect(allowed.value).toBe("read");
-  expect(
-    (screen.getByLabelText("Allowed tools 2") as HTMLInputElement).value,
-  ).toBe("grep");
-  expect(
-    (screen.getByLabelText("Disallowed tools 1") as HTMLInputElement).value,
-  ).toBe("http_request");
-
-  // A name is retyped, an MCP pattern is added, a name is taken out.
   fireEvent.change(allowed, { target: { value: "glob" } });
   fireEvent.click(within(toolList("Allowed tools")).getByText("Add"));
   fireEvent.change(screen.getByLabelText("Allowed tools 3"), {
     target: { value: "context7__*" },
   });
-  fireEvent.click(
-    within(toolList("Allowed tools")).getAllByRole("button", {
-      name: "Remove",
-    })[1]!,
-  );
-  expect(firstModel().tools).toEqual(["glob", "context7__*"]);
-  expect(firstModel().disallowed_tools).toEqual(["http_request"]);
-
-  // The denylist is its own key.
   fireEvent.click(within(toolList("Disallowed tools")).getByText("Add"));
-  fireEvent.change(screen.getByLabelText("Disallowed tools 2"), {
+  fireEvent.change(screen.getByLabelText("Disallowed tools 1"), {
     target: { value: "ssh_*" },
   });
-  expect(firstModel().tools).toEqual(["glob", "context7__*"]);
-  expect(firstModel().disallowed_tools).toEqual(["http_request", "ssh_*"]);
+  const presets = savedDoc().toolsets as Record<string, unknown>[];
+  expect(presets[0]).toEqual({
+    name: "coding",
+    tools: ["glob", "grep", "context7__*"],
+    disallowed_tools: ["ssh_*"],
+  });
 });
 
-test("a model row without tool lists shows two empty lists and writes nothing until one is added to", () => {
-  render(<ToolListsHarness />);
-  fireEvent.click(screen.getByTestId("settings-master-item-0"));
-
-  expect(screen.queryByLabelText("Allowed tools 1")).toBeNull();
-  expect(screen.queryByLabelText("Disallowed tools 1")).toBeNull();
-  expect(firstModel()).toEqual({ model: "demo/small" });
-
-  fireEvent.click(within(toolList("Allowed tools")).getByText("Add"));
-  expect(firstModel()).toEqual({ model: "demo/small", tools: [""] });
-});
-
-// Empty lists mean no restriction, so a row the form adds starts with both.
-test("a model added in Settings starts with both tool lists empty", () => {
-  render(<ToolListsHarness />);
-  fireEvent.click(screen.getByTestId("settings-master-add"));
-
-  const models = savedModels() as Record<string, unknown>[];
-  expect(models).toHaveLength(2);
-  expect(models[1]).toEqual({ model: "", tools: [], disallowed_tools: [] });
-});
-
-test("the Tools block says how an entry is written and how the lists combine", () => {
-  render(<ToolListsHarness />);
-  fireEvent.click(screen.getByTestId("settings-master-item-0"));
-
-  const tools = screen.getByTestId("settings-group-tools");
-  const hint = tools.querySelector(
-    ":scope > legend .field-hint",
-  ) as HTMLElement;
-  fireEvent.mouseEnter(hint);
-  const tip = screen.getByRole("tooltip").textContent ?? "";
-  fireEvent.mouseLeave(hint);
-  // The three ways to name tools, the MCP form and the two orders.
-  expect(tip).toContain("exact tool name, * or a prefix*");
-  expect(tip).toContain("server__tool");
-  expect(tip).toContain("context7__*");
-  expect(tip).toContain("a tool in both is out");
-  expect(tip).toContain("every tool the mode would");
-
-  // Each list has its own description behind its own (i).
-  for (const [name, text] of [
-    ["Allowed tools", "a call to an unlisted tool is refused"],
-    ["Disallowed tools", "applied after the allowed tools"],
-  ] as const) {
-    const own = toolList(name).querySelector(
-      ":scope > legend .field-hint",
-    ) as HTMLElement;
-    fireEvent.mouseEnter(own);
-    expect(screen.getByRole("tooltip").textContent).toContain(text);
-    fireEvent.mouseLeave(own);
-  }
-});
-
-test("the tool lists and their block are named in Russian, with no English left over", () => {
-  setLocale("ru");
+test("renaming a preset renames it on the models that name it", () => {
   render(
-    <ToolListsHarness
-      model={{
-        model: "demo/small",
-        tools: ["read"],
-        disallowed_tools: ["http_request"],
-      }}
+    <ToolsetsHarness
+      section={toolsetsSection}
+      model={{ model: "demo/small", toolset: "coding" }}
     />,
   );
   fireEvent.click(screen.getByTestId("settings-master-item-0"));
+  fireEvent.change(screen.getByLabelText("Name"), {
+    target: { value: "lean" },
+  });
+  expect(firstModel()).toEqual({ model: "demo/small", toolset: "lean" });
+});
 
-  const tools = screen.getByTestId("settings-group-tools");
+test("a toolset added in Settings starts with both lists empty", () => {
+  render(<ToolsetsHarness section={toolsetsSection} />);
+  fireEvent.click(screen.getByTestId("settings-master-add"));
+  const presets = savedDoc().toolsets as Record<string, unknown>[];
+  expect(presets).toHaveLength(3);
+  expect(presets[2]).toEqual({ name: "", tools: [], disallowed_tools: [] });
+});
+
+test("the toolset of a model and the lists of a preset are named in Russian", () => {
+  setLocale("ru");
+  render(
+    <ToolsetsHarness
+      section={modelsSection}
+      model={{ model: "demo/small", toolset: "coding" }}
+    />,
+  );
+  fireEvent.click(screen.getByTestId("settings-master-item-0"));
+  expect(screen.getByLabelText("Набор инструментов")).toBeTruthy();
   expect(
-    tools.querySelector(":scope > legend .settings-legend-line")?.textContent,
-  ).toBe("Инструменты");
-  expect(
-    [
-      ...tools.querySelectorAll(
-        ":scope > .settings-form-group-body > fieldset > legend",
-      ),
-    ].map((l) => l.textContent),
-  ).toEqual(["Разрешённые инструменты", "Запрещённые инструменты"]);
+    (screen.getByTestId("model-toolset") as HTMLSelectElement).options[0]!
+      .textContent,
+  ).toBe("Нет: все инструменты");
+  cleanup();
+
+  render(<ToolsetsHarness section={toolsetsSection} />);
+  fireEvent.click(screen.getByTestId("settings-master-item-0"));
   expect(screen.getByLabelText("Разрешённые инструменты 1")).toBeTruthy();
-  expect(screen.getByLabelText("Запрещённые инструменты 1")).toBeTruthy();
-  expect(tools.textContent).not.toMatch(/Allowed|Disallowed/);
-  // Both lists keep the buttons of every list, translated.
   expect(
-    within(toolList("Разрешённые инструменты")).getByText("Добавить"),
+    within(toolList("Запрещённые инструменты")).getByText("Добавить"),
   ).toBeTruthy();
 });
 
