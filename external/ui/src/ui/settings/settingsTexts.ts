@@ -58,6 +58,16 @@ export const SETTINGS_TEXTS = {
 
 export type SettingsTextId = keyof typeof SETTINGS_TEXTS;
 
+/**
+ * The anchor (data-settings-anchor) of a hand-drawn block's root. A string and
+ * nothing else, so the components that draw the block can import it without
+ * pulling in the index that lists them; a drawn anchor the index lacks fails
+ * the comparison of the drawing with the index.
+ */
+export function landmarkAnchor(section: string, id: string): string {
+  return `landmark:${section}:${id}`;
+}
+
 /** The dictionary key of one part of a drawn text, undefined when it has none. */
 export function settingsTextKey(
   id: SettingsTextId,
@@ -95,3 +105,12 @@ export type ResolvedBoxTexts = {
   second?: string;
   secondDesc?: string;
 };
+
+/** ResolvedBoxTexts of a box that draws a second name: the proxy's switch, a model's Provider. */
+export type ResolvedBoxTextsWithSecond = ResolvedBoxTexts & { second: string };
+
+export function hasSecondName(
+  texts: ResolvedBoxTexts,
+): texts is ResolvedBoxTextsWithSecond {
+  return texts.second !== undefined;
+}

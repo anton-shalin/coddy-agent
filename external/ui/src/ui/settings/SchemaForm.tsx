@@ -751,7 +751,7 @@ function StringMapField(props: {
 }
 
 /** A field that renders as a fieldset of its own: a list, a map or a nested object. */
-export function isBlockField(sub: JsonSchema): boolean {
+function isBlockField(sub: JsonSchema): boolean {
   return (
     (sub.type === "object" && sub.properties !== undefined) ||
     (sub.type === "array" && sub.items !== undefined) ||

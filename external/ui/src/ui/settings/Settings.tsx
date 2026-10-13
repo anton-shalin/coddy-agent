@@ -374,14 +374,22 @@ export function Settings(props: {
     setMobileDetailId(routeSection);
   }, [routeSection]);
 
-  // Selecting a section (desktop tab or mobile tile) anchors it in the URL and
-  // puts the search results away, keeping the query.
+  // Selecting a section (desktop tab or mobile tile), or one row of a list
+  // section, anchors it in the URL and puts the search results away, keeping
+  // the query.
   const selectSection = useCallback(
-    (id: string) => {
+    (id: string, row?: string) => {
       search.hide();
       setActiveTab(id);
       setMobileDetailId(id);
-      setSettingsSectionHash(id);
+      if (row === undefined) {
+        setSettingsSectionHash(id);
+      } else {
+        setSettingsSectionHash(id, {
+          item: row,
+          historySidebar: historyOpenInAddress(),
+        });
+      }
     },
     [search],
   );
@@ -435,16 +443,7 @@ export function Settings(props: {
     (entry: SettingsSearchEntry) => {
       search.choose(entry.id);
       revealing.current = entry;
-      if (entry.row !== null) {
-        setActiveTab(entry.section);
-        setMobileDetailId(entry.section);
-        setSettingsSectionHash(entry.section, {
-          item: entry.row,
-          historySidebar: historyOpenInAddress(),
-        });
-      } else {
-        selectSection(entry.section);
-      }
+      selectSection(entry.section, entry.row ?? undefined);
     },
     [search, selectSection],
   );
@@ -454,12 +453,10 @@ export function Settings(props: {
     if (choice === 0 || entry === null || root === null) {
       return undefined;
     }
-    return revealWhenReady(
-      root,
-      entry,
-      { touchOnly: snapshotTouchOnly(), reducedMotion: prefersReducedMotion() },
-      () => {},
-    );
+    return revealWhenReady(root, entry, {
+      touchOnly: snapshotTouchOnly(),
+      reducedMotion: prefersReducedMotion(),
+    });
   }, [choice]);
 
   // "/" puts the cursor in the search, as it does in the documentation reader,

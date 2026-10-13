@@ -8,10 +8,11 @@ import {
   render,
   screen,
 } from "@testing-library/react";
-import { afterEach, expect, onTestFinished, test, vi } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { FieldHint, FieldLabel, LegendWithHint } from "./FieldHint";
 import { PaneHidden } from "../components/PanePortal";
 import { OpenRailScreen } from "../nav/railEscape.fakes";
+import { pinTipByTouch, placeHint, stubTipSize } from "./pinnedTip.fakes";
 
 afterEach(cleanup);
 
@@ -146,26 +147,7 @@ test("a fieldset legend carries its description the same way", () => {
 // touch pinned stays open meanwhile: scrolling the results cannot close it,
 // and it is measured against its (i) again when the pane is shown.
 test("a tip pinned by a touch in a hidden pane is not drawn, survives a scroll and is placed again when shown", () => {
-  // jsdom lays nothing out: give the tip a size and the (i) a place.
-  vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(100);
-  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(40);
-  onTestFinished(() => {
-    vi.restoreAllMocks();
-  });
-  const placeHint = (left: number, top: number) => {
-    hint().getBoundingClientRect = () =>
-      ({
-        left,
-        top,
-        right: left + 20,
-        bottom: top + 20,
-        width: 20,
-        height: 20,
-        x: left,
-        y: top,
-        toJSON: () => ({}),
-      }) as DOMRect;
-  };
+  stubTipSize();
   const pane = (hidden: boolean) => (
     <PaneHidden.Provider value={hidden}>
       <FieldLabel label="Timeout" description="Per request." />
@@ -174,12 +156,8 @@ test("a tip pinned by a touch in a hidden pane is not drawn, survives a scroll a
   const tip = () => screen.queryByTestId("field-hint-tip");
 
   const { rerender } = render(pane(false));
-  placeHint(400, 300);
-  // jsdom has no PointerEvent: a plain event carries the pointer type.
-  const touch = new Event("pointerdown", { bubbles: true });
-  Object.defineProperty(touch, "pointerType", { value: "touch" });
-  fireEvent(hint(), touch);
-  fireEvent.click(hint());
+  placeHint(hint(), 400, 300);
+  pinTipByTouch(hint());
   expect(tip()?.style.left).toBe("360px");
   expect(tip()?.style.top).toBe("252px");
 
@@ -197,7 +175,7 @@ test("a tip pinned by a touch in a hidden pane is not drawn, survives a scroll a
   expect(fireEvent.keyDown(document.body, { key: "Escape" })).toBe(true);
 
   // The (i) moved while the pane was hidden.
-  placeHint(500, 100);
+  placeHint(hint(), 500, 100);
   rerender(pane(false));
   expect(tip()?.textContent).toBe("Per request.");
   expect(tip()?.style.left).toBe("460px");

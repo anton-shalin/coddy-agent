@@ -2,8 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "../components/useConfirm";
 import { useT } from "../i18n/I18nProvider";
 import { LegendWithHint } from "../settings/FieldHint";
-import { landmarkAnchor } from "../settings/settingsSearch";
-import { SETTINGS_TEXTS } from "../settings/settingsTexts";
+import { SETTINGS_TEXTS, landmarkAnchor } from "../settings/settingsTexts";
 import { isClientDraftSessionId } from "./draftSessions";
 import {
   defaultSortOrder,

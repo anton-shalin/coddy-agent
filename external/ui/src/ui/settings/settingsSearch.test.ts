@@ -7,7 +7,6 @@ import { resetTelegramLaunchForTests } from "../telegram/launch";
 import {
   buildSettingsSearchIndex,
   descriptionLine,
-  landmarkAnchor,
   makeSearchEntry,
   markWords,
   normalizeSearchText,
@@ -27,9 +26,15 @@ import {
   type SettingsDoc,
 } from "./settingsServer.fakes";
 import { deriveSettingsSections } from "./settingsSections";
-import { SETTINGS_TEXTS } from "./settingsTexts";
+import { SETTINGS_TEXTS, landmarkAnchor } from "./settingsTexts";
 import { schemaFieldLabel } from "./schemaI18n";
-import type { JsonSchema } from "./SchemaForm";
+import {
+  entriesInSchemaOrder,
+  fieldAnchor,
+  groupAnchor,
+  type JsonSchema,
+} from "./SchemaForm";
+import { objectSectionGroups } from "./SettingsSection";
 
 beforeEach(() => {
   setLocale("en");
@@ -93,7 +98,7 @@ function only(
   return matches[0]!;
 }
 
-// ---- A1-A8: matching, on hand-made entries
+// ---- matching, on hand-made entries
 
 test("every word of the query has to occur in the own names, the config key, the surrounding names or the descriptions", () => {
   const proxy = entry({
@@ -308,11 +313,12 @@ test("a word found only in a second name is shown beside the primary name", () =
   expect(searchSettings([single], "turns").hits[0]!.secondMatched).toBeNull();
 });
 
-// ---- A9-A14: the index, on the served schemas
+// ---- the index, on the served schemas
 
 test("the index lists the tabs, their blocks and their fields in the drawer's order", () => {
   const index = indexOf(AGENT_SCHEMA);
   const sections = deriveSettingsSections(AGENT_SCHEMA);
+  const label = (id: string) => sections.find((s) => s.id === id)!.label;
 
   // the tabs, in the rail's order, each followed by what it holds
   const tabs = index.filter((e) => e.kind === "section");
@@ -329,24 +335,41 @@ test("the index lists the tabs, their blocks and their fields in the drawer's or
     expect(index.slice(at, at + own.length)).toEqual(own);
   }
 
-  // the blocks of a tab, in order, each field after the block it stands in
+  // an object tab with blocks: the blocks stand in the order the tab declares
+  // them, and each field of a block after it and before the next one
   const agent = index.filter((e) => e.section === "agent");
-  const groups = agent.filter((e) => e.kind === "group");
-  expect(groups.map((e) => e.anchor)).toEqual([
-    "group:agent:turn",
-    "group:agent:retries",
-    "group:agent:timeouts",
-    "group:agent:loop",
-    "group:agent:limits",
-  ]);
-  expect(groups[0]!.names).toEqual([translate("settings.group.agent.turn")]);
+  const declared = objectSectionGroups("agent")!;
+  const blocks = agent.filter((e) => e.kind === "group");
+  expect(blocks.map((e) => e.anchor)).toEqual(
+    declared.map((g) => groupAnchor("agent", g.id)),
+  );
+  expect(blocks.map((e) => e.names)).toEqual(declared.map((g) => [g.legend]));
+  declared.forEach((g, i) => {
+    const from = agent.indexOf(blocks[i]!);
+    const to =
+      i + 1 < blocks.length ? agent.indexOf(blocks[i + 1]!) : agent.length;
+    for (const path of g.paths!) {
+      const field = only(index, fieldAnchor("agent", path));
+      expect(agent.indexOf(field), path).toBeGreaterThan(from);
+      expect(agent.indexOf(field), path).toBeLessThan(to);
+      expect(field.where, path).toEqual([label("agent"), g.legend]);
+    }
+    // inside a block the fields keep the schema's order
+    const agentSchema = AGENT_SCHEMA.properties!["agent"]!;
+    expect(
+      agent.slice(from + 1, to).map((e) => e.keyPath),
+      g.id,
+    ).toEqual(
+      entriesInSchemaOrder(
+        agentSchema.properties!,
+        agentSchema["x-coddy-property-order"],
+      )
+        .map(([k]) => k)
+        .filter((k) => g.paths!.includes(k))
+        .map((k) => `agent.${k}`),
+    );
+  });
   const turns = only(index, "agent:max_turns");
-  expect(agent.indexOf(turns)).toBeGreaterThan(agent.indexOf(groups[0]!));
-  expect(agent.indexOf(turns)).toBeLessThan(agent.indexOf(groups[1]!));
-  expect(turns.where).toEqual([
-    sections.find((s) => s.id === "agent")!.label,
-    groups[0]!.names[0],
-  ]);
   expect(turns.keyPath).toBe("agent.max_turns");
   expect(turns.kind).toBe("field");
   expect(turns.names).toEqual([
@@ -380,8 +403,8 @@ test("the index lists the tabs, their blocks and their fields in the drawer's or
     1,
   );
 
-  // a list of objects: the list, then its children, which carry the list
-  // and no count; the entry frame is no entry
+  // a tab with a list of objects: the list, then its children, which carry the
+  // list and no count; the entry frame is no entry
   const groupsList = only(index, "gateways:telegram.user_groups");
   const groupName = only(index, "gateways:telegram.user_groups.name");
   expect(groupName).toMatchObject({
@@ -399,45 +422,66 @@ test("the index lists the tabs, their blocks and their fields in the drawer's or
     keyPath: "swarm.upstreams[].dial.proxy",
   });
 
-  // the blocks a tab draws by hand are landmarks, in the order they stand
-  const appearance = index.filter((e) => e.section === "appearance");
-  expect(appearance.map((e) => e.anchor)).toEqual([
-    null,
-    "landmark:appearance:theme",
-    "landmark:appearance:language",
-    "landmark:appearance:notifications",
+  // a list tab: each row that can be opened is an entry, then its own fields,
+  // row after row
+  const providers = index.filter((e) => e.section === "providers");
+  const rows = providers.filter((e) => e.kind === "row");
+  expect(rows.map((e) => e.row)).toEqual([
+    "openai",
+    "anthropic",
+    "neuraldeep",
+    "codex",
+    "devin",
   ]);
-  const sessions = index.filter((e) => e.section === "sessions_manager");
-  expect(sessions.map((e) => e.anchor)).toEqual([
-    null,
-    "group:sessions:sessions-storage",
-    "sessions:dir",
-    "landmark:sessions_manager:manage",
-  ]);
-  const skills = index.filter((e) => e.section === "skills");
-  expect(skills.map((e) => e.anchor)).toEqual([
-    null,
-    "landmark:skills:auto_discovery",
-    "skills:dirs",
-    "group:skills:skills-marketplace-trust",
-    "skills:project_trust",
-    "landmark:skills:marketplaces",
-    "landmark:skills:installed",
-  ]);
+  for (const row of rows) {
+    const own = providers.filter((e) => e.row === row.row);
+    expect(own[0]).toBe(row);
+    expect(
+      providers.slice(
+        providers.indexOf(row),
+        providers.indexOf(row) + own.length,
+      ),
+    ).toEqual(own);
+  }
+
+  // the blocks a tab draws by hand are landmarks, in the order they are
+  // declared: those above the tab's forms come first, those below come last
+  for (const id of [
+    "appearance",
+    "sessions_manager",
+    "skills",
+    "mcp_servers",
+  ]) {
+    const marks = (place: "before" | "after") =>
+      SETTINGS_LANDMARKS.filter(
+        (l) => l.section === id && l.row === undefined && l.place === place,
+      ).map((l) => landmarkAnchor(l.section, l.id));
+    const entries = index.filter((e) => e.section === id).slice(1);
+    const above = marks("before");
+    const below = marks("after");
+    expect(
+      entries.slice(0, above.length).map((e) => e.anchor),
+      id,
+    ).toEqual(above);
+    expect(
+      entries.slice(entries.length - below.length).map((e) => e.anchor),
+      id,
+    ).toEqual(below);
+    expect(
+      entries
+        .slice(above.length, entries.length - below.length)
+        .some((e) => e.kind === "landmark"),
+      id,
+    ).toBe(false);
+  }
   expect(only(index, "landmark:skills:auto_discovery").keyPath).toBe(
     "skills.auto_discovery",
   );
+  // the field a landmark draws by hand is not indexed a second time
   expect(entriesAt(index, "skills:auto_discovery")).toEqual([]);
   expect(only(index, "landmark:mcp_servers:discovery").keyPath).toBe(
     "mcp.project_trust",
   );
-  expect(
-    index.filter((e) => e.section === "mcp_servers").map((e) => e.anchor),
-  ).toEqual([
-    null,
-    "landmark:mcp_servers:discovery",
-    "landmark:mcp_servers:servers",
-  ]);
 
   // a folded block carries no description; the Prompts tab nests its children
   expect(
@@ -470,21 +514,19 @@ test("the index lists the tabs, their blocks and their fields in the drawer's or
       .filter((e) => e.kind === "section")
       .map((e) => e.section),
   ).toEqual(["appearance", "swarm", "logger"]);
-  // without a schema only the tabs that need none are there
+  // without a schema only the tabs that need none are there, holding nothing
+  // but their hand-drawn blocks
+  const bare = buildSettingsSearchIndex({
+    sections: deriveSettingsSections(null),
+    schema: null,
+    doc: {},
+  });
   expect(
-    buildSettingsSearchIndex({
-      sections: deriveSettingsSections(null),
-      schema: null,
-      doc: {},
-    }).map((e) => e.anchor),
-  ).toEqual([
-    null,
-    "landmark:appearance:theme",
-    "landmark:appearance:language",
-    "landmark:appearance:notifications",
-    null,
-    "landmark:sessions_manager:manage",
-  ]);
+    bare.filter((e) => e.kind === "section").map((e) => e.section),
+  ).toEqual(["appearance", "sessions_manager"]);
+  expect(bare.every((e) => e.kind === "section" || e.kind === "landmark")).toBe(
+    true,
+  );
 });
 
 test("a field of a provider or model row is indexed once per row, under that row's name", () => {
@@ -794,9 +836,9 @@ test("every landmark heading and every drawn text is a key of the default dictio
       expect(messagesRu[key], `${id}: ${key} (ru)`).toBeTruthy();
     }
   }
-  expect(() => landmarkAnchor("skills", "nope")).toThrow();
-  expect(() => landmarkAnchor("nope", "theme")).toThrow();
-  expect(() => landmarkAnchor("appearance", "installed")).toThrow();
+  // The builder is only a string: a drawn anchor the index lacks is caught by
+  // the comparison with the drawing, not by a throw in the component.
+  expect(landmarkAnchor("nope", "theme")).toBe("landmark:nope:theme");
 
   // the headings are drawn from the constants: label and the heading's (i)
   const index = indexOf(AGENT_SCHEMA);
@@ -828,7 +870,7 @@ test("the Notifications landmark is left out where the tab draws none", () => {
   ]);
 });
 
-// ---- A15: cost
+// ---- cost
 
 test("a large document builds its index and answers a query in a measured time", () => {
   const doc = configFromSchema(AGENT_SCHEMA);

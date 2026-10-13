@@ -186,36 +186,23 @@ function nameForFocus(box: HTMLElement, name: string): () => void {
  * touch-only device (no keyboard rises), as every tab, row, block and
  * landmark does. A tab has no box: the scroll area of the tab is taken to its
  * top and focused, with no ring. It gives up quietly when the budget runs out.
- * `done` is called once, when the reveal ends either way. Returns what cancels
- * it, the ring included.
+ * Returns what cancels it, the ring included.
  */
 export function revealWhenReady(
   root: HTMLElement,
   entry: SettingsSearchEntry,
   opts: { touchOnly: boolean; reducedMotion: boolean },
-  done: () => void,
 ): () => void {
-  let ended = false;
   let cancelled = false;
   let frame: number | null = null;
   let ringTimer: number | null = null;
   let ringed: HTMLElement | null = null;
   const observer = new MutationObserver(() => attempt());
-  const budget = window.setTimeout(() => {
-    stopWaiting();
-    end();
-  }, REVEAL_WAIT_MS);
+  const budget = window.setTimeout(stopWaiting, REVEAL_WAIT_MS);
 
   const isTab = entry.anchor === null;
   const locate = (): HTMLElement | null =>
     isTab ? findPane(root, entry) : findSettingsBox(root, entry);
-
-  function end() {
-    if (!ended) {
-      ended = true;
-      done();
-    }
-  }
 
   function stopWaiting() {
     observer.disconnect();
@@ -227,7 +214,7 @@ export function revealWhenReady(
   }
 
   function attempt() {
-    if (ended || cancelled || frame !== null) {
+    if (cancelled || frame !== null) {
       return;
     }
     const target = locate();
@@ -245,7 +232,7 @@ export function revealWhenReady(
     // A frame later, so the page has laid out what just opened.
     frame = window.requestAnimationFrame(() => {
       frame = null;
-      if (cancelled || ended) {
+      if (cancelled) {
         return;
       }
       const again = locate();
@@ -281,7 +268,6 @@ export function revealWhenReady(
       target.addEventListener("blur", undo, { once: true });
     }
     focused.focus({ preventScroll: true });
-    end();
   }
 
   function ring(target: HTMLElement) {

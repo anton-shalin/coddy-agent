@@ -3,8 +3,7 @@ import { useMemo, useState } from "react";
 import { formatTurnTokens } from "../chat/turnProgress";
 import { useT } from "../i18n/I18nProvider";
 import { IconCheck, IconPlus, IconSync } from "./icons";
-import { landmarkAnchor } from "./settingsSearch";
-import { SETTINGS_TEXTS } from "./settingsTexts";
+import { SETTINGS_TEXTS, landmarkAnchor } from "./settingsTexts";
 import {
   modelDisplayName,
   providerRowFetchable,

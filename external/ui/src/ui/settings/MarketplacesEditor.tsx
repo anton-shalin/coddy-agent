@@ -7,8 +7,7 @@ import {
 } from "react";
 import { IconTrash } from "./SchemaForm";
 import { LegendWithHint } from "./FieldHint";
-import { landmarkAnchor } from "./settingsSearch";
-import { SETTINGS_TEXTS } from "./settingsTexts";
+import { SETTINGS_TEXTS, landmarkAnchor } from "./settingsTexts";
 import { IconCheck, IconShield, IconSync } from "./icons";
 import { useT } from "../i18n/I18nProvider";
 import { translate } from "../i18n/i18n";

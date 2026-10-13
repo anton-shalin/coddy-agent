@@ -43,6 +43,9 @@ export type SettingsSearchState = {
   choice: number;
 };
 
+/** What a query finds: the hits shown and how many more matched. */
+type Found = { hits: SettingsSearchHit[]; more: number };
+
 export type SettingsSearchStore = {
   get: () => SettingsSearchState;
   subscribe: (listener: () => void) => () => void;
@@ -56,6 +59,13 @@ export type SettingsSearchStore = {
   move: (active: number) => void;
   /** Opens a result: the results hide, the query stays, the choice is remembered. */
   choose: (id: string) => void;
+  /**
+   * The answer to the current query over an index. The field and the results
+   * ask in the same render, so the last answer is kept: both get the very same
+   * object, which is also what tells them the hits changed. It is kept for the
+   * same index and the same words, so a space typed after them is no change.
+   */
+  answer: (index: readonly SettingsSearchEntry[]) => Found;
 };
 
 /** The state of one drawer's search; it lives and dies with the drawer. */
@@ -68,6 +78,11 @@ export function createSettingsSearch(): SettingsSearchStore {
     choice: 0,
   };
   const listeners = new Set<() => void>();
+  let last: {
+    index: readonly SettingsSearchEntry[];
+    words: string;
+    found: Found;
+  } | null = null;
   const set = (patch: Partial<SettingsSearchState>) => {
     const next = { ...state, ...patch };
     if (
@@ -98,6 +113,13 @@ export function createSettingsSearch(): SettingsSearchStore {
     move: (active) => set({ active }),
     choose: (id) =>
       set({ chosenId: id, open: false, choice: state.choice + 1 }),
+    answer: (index) => {
+      const words = searchWords(state.query).join(" ");
+      if (last === null || last.index !== index || last.words !== words) {
+        last = { index, words, found: searchSettings(index, state.query) };
+      }
+      return last.found;
+    },
   };
 }
 
@@ -126,30 +148,6 @@ export function useResultsShowing(search: SettingsSearchStore): boolean {
 export function useSettingsSearchChoice(search: SettingsSearchStore): number {
   const snapshot = () => search.get().choice;
   return useSyncExternalStore(search.subscribe, snapshot, snapshot);
-}
-
-// ---- what a query finds
-
-type Found = { hits: SettingsSearchHit[]; more: number };
-
-let lastFound: { index: unknown; query: string; found: Found } | null = null;
-
-/**
- * The answer to a query over an index. The field and the results ask for the
- * same one in the same render, so the last answer is kept: both get the very
- * same object, which is also what tells them the hits changed.
- */
-function found(index: readonly SettingsSearchEntry[], query: string): Found {
-  if (
-    lastFound !== null &&
-    lastFound.index === index &&
-    lastFound.query === query
-  ) {
-    return lastFound.found;
-  }
-  const answer = searchSettings(index, query);
-  lastFound = { index, query, found: answer };
-  return answer;
 }
 
 /** The result highlighted when the hits change: the chosen one if it is still there. */
@@ -182,8 +180,7 @@ export function SettingsSearchField(props: {
     props;
   const { t } = useT();
   const state = useSettingsSearchState(search);
-  const answer = found(index, state.query);
-  const hits = answer.hits;
+  const { hits } = search.answer(index);
   const showing = resultsShowing(state);
   const active = Math.min(state.active, hits.length - 1);
 
@@ -192,16 +189,13 @@ export function SettingsSearchField(props: {
   useLayoutEffect(() => {
     search.move(firstActive(hits, search.get().chosenId));
   }, [search, hits]);
-  // The last answer holds the whole index; it goes with the field.
-  useEffect(
-    () => () => {
-      lastFound = null;
-    },
-    [],
-  );
 
+  // A click or focus brings the results back when they are hidden; while they
+  // show it leaves the highlighted one alone.
   const bringBack = () => {
-    search.show(firstActive(hits, search.get().chosenId));
+    if (!resultsShowing(search.get())) {
+      search.show(firstActive(hits, search.get().chosenId));
+    }
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -257,7 +251,11 @@ export function SettingsSearchField(props: {
         aria-label={t("settings.search.placeholder")}
         value={state.query}
         disabled={disabled}
-        onChange={(e) => search.type(e.target.value)}
+        onChange={(e) =>
+          // An emptied field (the clear button of a search field, deleted text)
+          // is a cleared search, as Escape leaves it.
+          e.target.value === "" ? search.clear() : search.type(e.target.value)
+        }
         onFocus={bringBack}
         onClick={bringBack}
         onKeyDown={onKeyDown}
@@ -308,7 +306,7 @@ export function SettingsSearchResults(props: {
   const { id, search, index, onOpen } = props;
   const { t, tp } = useT();
   const state = useSettingsSearchState(search);
-  const { hits, more } = found(index, state.query);
+  const { hits, more } = search.answer(index);
   const words = useMemo(() => searchWords(state.query), [state.query]);
   const active = Math.min(state.active, hits.length - 1);
 
@@ -381,8 +379,11 @@ export function SettingsSearchResults(props: {
                   data-settings-target={entry.anchor ?? `tab:${entry.section}`}
                   data-settings-row={entry.row ?? undefined}
                   onMouseEnter={() => {
-                    byPointer.current = true;
-                    search.move(i);
+                    // Only a move runs the effect that takes the flag down.
+                    if (i !== active) {
+                      byPointer.current = true;
+                      search.move(i);
+                    }
                   }}
                   onClick={() => onOpen(entry)}
                 >

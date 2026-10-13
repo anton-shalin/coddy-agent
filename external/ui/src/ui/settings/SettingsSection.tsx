@@ -28,9 +28,11 @@ import {
   type SectionDescriptor,
 } from "./settingsSections";
 import {
+  hasSecondName,
   settingsTextKey,
   type BoxTexts,
   type ResolvedBoxTexts,
+  type ResolvedBoxTextsWithSecond,
   type SettingsTextId,
   type TextRef,
 } from "./settingsTexts";
@@ -72,11 +74,7 @@ type FieldOverrideContext = Parameters<FieldOverride>[0];
 // Provider types with an account-usage source server-side
 // (internal/session/provider_usage_sources.go): the usage_limits_panel switch
 // means something only for them, so the other types do not show it.
-export const USAGE_PANEL_PROVIDER_TYPES: ReadonlySet<string> = new Set([
-  "neuraldeep",
-  "codex",
-  "devin",
-]);
+const USAGE_PANEL_PROVIDER_TYPES = new Set(["neuraldeep", "codex", "devin"]);
 
 /**
  * seedLogicalModel builds a models[] row from the item schema's defaults,
@@ -359,10 +357,24 @@ function boxTextsFor(
     : resolveBoxTexts(texts, domain, ctx.path, ctx.schema);
 }
 
+/**
+ * boxTextsFor for a control that draws a second name (the proxy's switch, a
+ * model's Provider): a box that declares none is not that control's box.
+ */
+function boxTextsWithSecondFor(
+  domain: string,
+  ctx: FieldOverrideContext,
+): ResolvedBoxTextsWithSecond | false | null {
+  const texts = boxTextsFor(domain, ctx);
+  return texts === false || texts === null || hasSecondName(texts)
+    ? texts
+    : null;
+}
+
 // A bot's proxy reads like a provider's, so it gets the same switch and URL
 // field (Gateways tab, the Telegram and Pachca blocks).
 function gatewaysFieldOverride(ctx: FieldOverrideContext) {
-  const box = boxTextsFor("gateways", ctx);
+  const box = boxTextsWithSecondFor("gateways", ctx);
   if (box === false || box === null) {
     return box;
   }
@@ -379,13 +391,13 @@ function providerFieldOverride(ctx: FieldOverrideContext) {
   // Every provider type has the proxy switch and URL field, codex included: its
   // sign-in and its requests take the row's route like any other.
   if (ctx.path === "proxy") {
-    return (
+    return hasSecondName(box) ? (
       <ProxySettingField
         value={ctx.value}
         onChange={ctx.onChange}
         texts={box}
       />
-    );
+    ) : null;
   }
   if (rowText(ctx.parentObj, "type") === "codex") {
     return (
@@ -560,7 +572,7 @@ export function SettingsSection(props: {
       key === "models"
         ? (ctx) => {
             if (ctx.path === "model") {
-              const box = boxTextsFor(key, ctx);
+              const box = boxTextsWithSecondFor(key, ctx);
               if (box === false || box === null) {
                 return box;
               }

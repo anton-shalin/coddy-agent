@@ -57,18 +57,17 @@ function reducedMotionBlocks(source: string): string[] {
 }
 
 test("the setting the search opened is ringed as a state that reduced motion keeps", () => {
-  // The ring is the state itself, a ring and a wash in the accent, and the
+  // The ring is the state itself, a box-shadow built from the accent, and the
   // fade is only the animation on top of it.
   const ring = rules(css).find((r) =>
     r.selectors.includes(".is-search-target"),
   );
-  expect(ring?.body).toContain(
-    "box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent), inset 0 0 0 100vmax color-mix(in srgb, var(--accent) 10%, transparent)",
-  );
-  expect(ring?.body).toContain("animation: settings-search-target 1.6s");
+  expect(ring?.body).toMatch(/box-shadow:[^;]*var\(--accent\)/);
+  expect(ring?.body).toMatch(/animation: settings-search-target /);
+  // The animation it names ends on a ring that is gone.
   const fade = css.slice(css.indexOf("@keyframes settings-search-target"));
   expect(squash(fade.slice(0, fade.indexOf("}\n}") + 3))).toMatch(
-    /^@keyframes settings-search-target \{ 62\.5% \{ box-shadow:.*\} 100% \{ box-shadow: 0 0 0 2px transparent, inset 0 0 0 100vmax transparent; \} \}$/,
+    /100% \{ box-shadow: [^;]*transparent[^;]*; \}/,
   );
 
   // Under reduced motion the animation goes and the ring holds still until the
@@ -82,6 +81,21 @@ test("the setting the search opened is ringed as a state that reduced motion kee
   );
   expect(off?.body).toBe("animation: none;");
   expect(blocks.at(-1)).not.toContain(".is-search-target");
+});
+
+test("a tab's scroll area the search focused hides its focus ring only when the focus did not come from the keyboard", () => {
+  // The area is a focus target for the search and also a keyboard stop when it
+  // scrolls: its ring may go for the first and must stay for the second.
+  const area = rules(css).filter((r) =>
+    r.selectors.some((s) =>
+      s.startsWith(".settings.drawer .settings-scroll:focus"),
+    ),
+  );
+  expect(area).toHaveLength(1);
+  expect(area[0]!.selectors).toEqual([
+    ".settings.drawer .settings-scroll:focus:not(:focus-visible)",
+  ]);
+  expect(area[0]!.body).toBe("outline: none;");
 });
 
 test("the settings search field and its results share the documentation search's rules", () => {

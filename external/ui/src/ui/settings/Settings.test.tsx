@@ -7,7 +7,7 @@ import {
   test,
   vi,
 } from "vitest";
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import {
   act,
   cleanup,
@@ -22,10 +22,15 @@ import {
   noteSettingsConfigReloaded,
   resetSettingsConfigForTests,
 } from "./settingsConfigStore";
-import { SEARCH_TARGET_MS } from "./settingsReveal";
+import {
+  REVEAL_WAIT_MS,
+  SEARCH_TARGET_MS,
+  SETTINGS_REVEAL_EVENT,
+} from "./settingsReveal";
 import { parseAppHash } from "../scheduler/hashRoute";
 import { initLocale } from "../i18n/i18n";
 import { OpenRailScreen } from "../nav/railEscape.fakes";
+import { pinTipByTouch, placeHint, stubTipSize } from "./pinnedTip.fakes";
 import { pressBack } from "../telegram/backButton";
 import {
   AGENT_SCHEMA,
@@ -38,6 +43,22 @@ import {
   type MountOptions,
   type ServerState,
 } from "./settingsServer.fakes";
+
+// Settings calls settingsIndexRowsKey once per render, which makes the calls a
+// count of the renders of the drawer and the tab under it.
+const rowsKeyCalls = vi.hoisted(() => ({ count: 0 }));
+vi.mock("./settingsSearch", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./settingsSearch")>();
+  return {
+    ...actual,
+    settingsIndexRowsKey: (
+      doc: Parameters<typeof actual.settingsIndexRowsKey>[0],
+    ) => {
+      rowsKeyCalls.count += 1;
+      return actual.settingsIndexRowsKey(doc);
+    },
+  };
+});
 
 const schema = {
   type: "object",
@@ -1183,51 +1204,60 @@ describe("settings search", () => {
     expect(view.server.config).toEqual(saved);
   });
 
-  test.each([
-    "with results showing clears the query wherever the focus is",
-    "in the field with the results hidden clears the query",
-    "with no query takes the drawer's own step",
-  ])("Escape %s", async (scenario) => {
+  /** The drawer with a rail screen open under it, which hears the Escape nothing claims. */
+  async function drawerUnderRailScreen() {
     const closeDrawer = vi.fn();
     await drawer({
       beside: <OpenRailScreen id="settings" onClose={closeDrawer} />,
     });
-    const escape = (target: Element) =>
-      fireEvent.keyDown(target, { key: "Escape" });
+    return closeDrawer;
+  }
+  const pressEscape = (target: Element) =>
+    fireEvent.keyDown(target, { key: "Escape" });
 
-    if (scenario.startsWith("with results showing")) {
-      typeQuery("proxy");
-      escape(document.body);
-      expect(searchInput().value).toBe("");
-      expect(screen.queryByRole("listbox")).toBeNull();
+  test("Escape with results showing clears the query wherever the focus is", async () => {
+    const closeDrawer = await drawerUnderRailScreen();
 
-      typeQuery("proxy");
-      const first = options()[0]!;
-      act(() => first.focus());
-      escape(first);
-      expect(searchInput().value).toBe("");
+    typeQuery("proxy");
+    pressEscape(document.body);
+    expect(searchInput().value).toBe("");
+    expect(screen.queryByRole("listbox")).toBeNull();
 
-      typeQuery("proxy");
-      act(() => searchInput().focus());
-      escape(searchInput());
-      expect(searchInput().value).toBe("");
-      expect(screen.queryByRole("listbox")).toBeNull();
-      expect(closeDrawer).not.toHaveBeenCalled();
-    } else if (scenario.startsWith("in the field")) {
-      act(() => searchInput().focus());
-      typeQuery("max_turns");
-      fireEvent.keyDown(searchInput(), { key: "Enter" });
-      expect(screen.queryByRole("listbox")).toBeNull();
-      expect(searchInput().value).toBe("max_turns");
-      // The cursor has not left the field yet.
-      expect(document.activeElement).toBe(searchInput());
-      escape(searchInput());
-      expect(searchInput().value).toBe("");
-      expect(closeDrawer).not.toHaveBeenCalled();
-    } else {
-      escape(document.body);
-      expect(closeDrawer).toHaveBeenCalledTimes(1);
-    }
+    typeQuery("proxy");
+    const first = options()[0]!;
+    act(() => first.focus());
+    pressEscape(first);
+    expect(searchInput().value).toBe("");
+
+    typeQuery("proxy");
+    act(() => searchInput().focus());
+    pressEscape(searchInput());
+    expect(searchInput().value).toBe("");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(closeDrawer).not.toHaveBeenCalled();
+  });
+
+  test("Escape in the field with the results hidden clears the query", async () => {
+    const closeDrawer = await drawerUnderRailScreen();
+
+    act(() => searchInput().focus());
+    typeQuery("max_turns");
+    fireEvent.keyDown(searchInput(), { key: "Enter" });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(searchInput().value).toBe("max_turns");
+    // The cursor has not left the field yet.
+    expect(document.activeElement).toBe(searchInput());
+    pressEscape(searchInput());
+    expect(searchInput().value).toBe("");
+    expect(closeDrawer).not.toHaveBeenCalled();
+  });
+
+  test("Escape with no query takes the drawer's own step", async () => {
+    const closeDrawer = await drawerUnderRailScreen();
+
+    pressEscape(document.body);
+
+    expect(closeDrawer).toHaveBeenCalledTimes(1);
   });
 
   test("the Telegram back button clears shown results first, then goes back from a tab to the tiles", async () => {
@@ -1274,56 +1304,27 @@ describe("settings search", () => {
     expect(closeDrawer).toHaveBeenCalledTimes(1);
   });
 
-  test.each([
-    "a tip pinned by a touch, the results scrolled meanwhile, placed again",
-    "an open tag editor",
-    "the Skills install results",
-  ])(
-    "while results show, %s draws nothing in the page and claims no Escape, and comes back as it was",
-    async (layer) => {
-      const closeDrawer = vi.fn();
-      const beside = <OpenRailScreen id="settings" onClose={closeDrawer} />;
-      const escape = () => fireEvent.keyDown(document.body, { key: "Escape" });
-      const clearedBy = (press: () => void) => {
-        press();
-        expect(searchInput().value).toBe("");
-        expect(screen.queryByRole("listbox")).toBeNull();
-      };
+  /** What every layer under the results is checked with. */
+  type LayerKit = {
+    closeDrawer: ReturnType<typeof vi.fn>;
+    /** Rendered before the drawer, so it listens for Escape first. */
+    beside: ReactNode;
+    escape: () => void;
+    /** Presses a key that is to clear the query, and checks that it did. */
+    clearedBy: (press: () => void) => void;
+  };
 
-      if (layer.startsWith("a tip")) {
-        // jsdom lays nothing out: give the tip a size and the (i) a place.
-        const sizes = [
-          vi
-            .spyOn(HTMLElement.prototype, "offsetWidth", "get")
-            .mockReturnValue(100),
-          vi
-            .spyOn(HTMLElement.prototype, "offsetHeight", "get")
-            .mockReturnValue(40),
-        ];
-        onTestFinished(() => sizes.forEach((spy) => spy.mockRestore()));
+  // Each row carries its own layer and its own check.
+  const layersUnderResults: [string, (kit: LayerKit) => Promise<void>][] = [
+    [
+      "a tip pinned by a touch, the results scrolled meanwhile, placed again",
+      async ({ closeDrawer, beside, escape, clearedBy }) => {
+        stubTipSize();
         await drawer({ section: "agent", beside });
         const hint = screen.getAllByTestId("field-hint")[0]!;
-        const place = (left: number, top: number) => {
-          hint.getBoundingClientRect = () =>
-            ({
-              left,
-              top,
-              right: left + 20,
-              bottom: top + 20,
-              width: 20,
-              height: 20,
-              x: left,
-              y: top,
-              toJSON: () => ({}),
-            }) as DOMRect;
-        };
         const tip = () => screen.queryByTestId("field-hint-tip");
-        place(400, 300);
-        // jsdom has no PointerEvent: a plain event carries the pointer type.
-        const touch = new Event("pointerdown", { bubbles: true });
-        Object.defineProperty(touch, "pointerType", { value: "touch" });
-        fireEvent(hint, touch);
-        fireEvent.click(hint);
+        placeHint(hint, 400, 300);
+        pinTipByTouch(hint);
         expect(tip()?.style.left).toBe("360px");
         expect(tip()?.style.top).toBe("252px");
 
@@ -1338,7 +1339,7 @@ describe("settings search", () => {
         });
         fireEvent.mouseDown(screen.getByTestId("settings-search-results"));
         // The (i) moved while the results were up.
-        place(500, 100);
+        placeHint(hint, 500, 100);
         clearedBy(escape);
         expect(closeDrawer).not.toHaveBeenCalled();
 
@@ -1354,7 +1355,11 @@ describe("settings search", () => {
           document.dispatchEvent(new Event("scroll"));
         });
         expect(tip()).toBeNull();
-      } else if (layer === "an open tag editor") {
+      },
+    ],
+    [
+      "an open tag editor",
+      async ({ closeDrawer, beside, escape, clearedBy }) => {
         const { fetch } = await drawer({ beside });
         answering(fetch, {
           "/coddy/sessions": {
@@ -1393,7 +1398,11 @@ describe("settings search", () => {
         expect(
           document.body.querySelector(".sessions-filter-backdrop"),
         ).not.toBeNull();
-      } else {
+      },
+    ],
+    [
+      "the Skills install results",
+      async ({ closeDrawer, beside, escape, clearedBy }) => {
         await drawer({ section: "skills", beside });
         const installInput = (await screen.findByTestId(
           "skills-install-input",
@@ -1419,7 +1428,24 @@ describe("settings search", () => {
         expect(screen.queryByTestId("skills-install-results")).toBeNull();
         expect(installInput.value).toBe("");
         expect(closeDrawer).not.toHaveBeenCalled();
-      }
+      },
+    ],
+  ];
+
+  test.each(layersUnderResults)(
+    "while results show, %s draws nothing in the page and claims no Escape, and comes back as it was",
+    async (_layer, run) => {
+      const closeDrawer = vi.fn();
+      await run({
+        closeDrawer,
+        beside: <OpenRailScreen id="settings" onClose={closeDrawer} />,
+        escape: () => fireEvent.keyDown(document.body, { key: "Escape" }),
+        clearedBy: (press) => {
+          press();
+          expect(searchInput().value).toBe("");
+          expect(screen.queryByRole("listbox")).toBeNull();
+        },
+      });
     },
   );
 
@@ -1502,40 +1528,117 @@ describe("settings search", () => {
     expect(input.hasAttribute("aria-activedescendant")).toBe(false);
   });
 
-  test.each([
-    "a Russian page finds a setting by its Russian name and by its config key",
-    "a relay's settings are searched too",
-  ])("%s", async (scenario) => {
-    if (scenario.startsWith("a Russian")) {
-      await drawer({ lang: "ru" });
-      expect(searchInput().placeholder).toBe("Поиск по настройкам");
-      typeQuery("max_turns");
-      // The name the page draws for the setting, read from the page.
-      const name = optionOf("agent:max_turns").querySelector(
-        ".settings-hit-title",
-      )!.textContent!;
-      expect(name).toMatch(/[а-яё]/i);
+  test("a click or focus in the field while the results show keeps the highlighted result", async () => {
+    await drawer();
+    act(() => searchInput().focus());
+    typeQuery("proxy");
+    const selected = () =>
+      options().filter((o) => o.getAttribute("aria-selected") === "true");
+    fireEvent.keyDown(searchInput(), { key: "ArrowDown" });
+    fireEvent.keyDown(searchInput(), { key: "ArrowDown" });
+    expect(selected()).toEqual([options()[2]]);
 
-      typeQuery(name);
-      fireEvent.click(optionOf("agent:max_turns"));
-      await frames.settle();
-      expect(document.activeElement).toBe(screen.getByLabelText(name));
-      expect(
-        screen.getByTestId("settings-tab-agent").getAttribute("aria-current"),
-      ).toBe("page");
-    } else {
-      await drawer({ schema: RELAY_SCHEMA });
-      typeQuery("pairing");
-      fireEvent.click(optionOf("swarm:pairing_tokens"));
-      await frames.settle();
-      expect(
-        screen.getByTestId("settings-tab-swarm").getAttribute("aria-current"),
-      ).toBe("page");
-      const box = boxOf("swarm:pairing_tokens")!;
-      expect(scrolledTo()).toContain(box);
-      expect(box.classList.contains("is-search-target")).toBe(true);
-      expect(box.contains(document.activeElement)).toBe(true);
-    }
+    fireEvent.click(searchInput());
+    expect(selected()).toEqual([options()[2]]);
+    fireEvent.focus(searchInput());
+    expect(selected()).toEqual([options()[2]]);
+  });
+
+  test("a trailing space in the query is the same words: the highlight stays", async () => {
+    await drawer();
+    typeQuery("proxy");
+    fireEvent.keyDown(searchInput(), { key: "ArrowDown" });
+    fireEvent.keyDown(searchInput(), { key: "ArrowDown" });
+    const before = options()[2]!;
+
+    typeQuery("proxy ");
+
+    expect(before.getAttribute("aria-selected")).toBe("true");
+    expect(
+      options().filter((o) => o.getAttribute("aria-selected") === "true"),
+    ).toEqual([options()[2]]);
+  });
+
+  test("hovering the highlighted result does not make the next change of the highlight skip its scroll into view", async () => {
+    await drawer();
+    typeQuery("proxy");
+    const nearest = () => scrolledTo("nearest").length;
+
+    // The pointer enters the result that is already highlighted: nothing moves.
+    fireEvent.mouseEnter(options()[0]!);
+    const before = nearest();
+    typeQuery("proxy url");
+
+    expect(nearest()).toBeGreaterThan(before);
+    expect(scrolledTo("nearest").at(-1)).toBe(options()[0]);
+  });
+
+  test("emptying the field forgets the result chosen with the query, as Escape does", async () => {
+    await drawer();
+    typeQuery("proxy");
+    const first = options()[0]!.dataset["settingsTarget"];
+    const chosen = optionOf("gateways:telegram.proxy");
+    expect(chosen).not.toBe(options()[0]);
+    fireEvent.click(chosen);
+    await frames.settle();
+
+    // What the native clear button of a search field, or deleting the text,
+    // does: the field is empty.
+    typeQuery("");
+    typeQuery("proxy");
+
+    expect(
+      options().filter((o) => o.getAttribute("aria-selected") === "true"),
+    ).toEqual([options()[0]]);
+    expect(options()[0]!.dataset["settingsTarget"]).toBe(first);
+    expect(searchInput().getAttribute("aria-activedescendant")).toBe(
+      options()[0]!.id,
+    );
+  });
+
+  // Each row carries its own page and its own check.
+  const otherPages: [string, () => Promise<void>][] = [
+    [
+      "a Russian page finds a setting by its Russian name and by its config key",
+      async () => {
+        await drawer({ lang: "ru" });
+        expect(searchInput().placeholder).toBe("Поиск по настройкам");
+        typeQuery("max_turns");
+        // The name the page draws for the setting, read from the page.
+        const name = optionOf("agent:max_turns").querySelector(
+          ".settings-hit-title",
+        )!.textContent!;
+        expect(name).toMatch(/[а-яё]/i);
+
+        typeQuery(name);
+        fireEvent.click(optionOf("agent:max_turns"));
+        await frames.settle();
+        expect(document.activeElement).toBe(screen.getByLabelText(name));
+        expect(
+          screen.getByTestId("settings-tab-agent").getAttribute("aria-current"),
+        ).toBe("page");
+      },
+    ],
+    [
+      "a relay's settings are searched too",
+      async () => {
+        await drawer({ schema: RELAY_SCHEMA });
+        typeQuery("pairing");
+        fireEvent.click(optionOf("swarm:pairing_tokens"));
+        await frames.settle();
+        expect(
+          screen.getByTestId("settings-tab-swarm").getAttribute("aria-current"),
+        ).toBe("page");
+        const box = boxOf("swarm:pairing_tokens")!;
+        expect(scrolledTo()).toContain(box);
+        expect(box.classList.contains("is-search-target")).toBe(true);
+        expect(box.contains(document.activeElement)).toBe(true);
+      },
+    ],
+  ];
+
+  test.each(otherPages)("%s", async (_name, run) => {
+    await run();
   });
 
   test("a setting hidden in a folded block is found, unfolded and then revealed, never replaced by its list's box", async () => {
@@ -1622,6 +1725,159 @@ describe("settings search", () => {
     await choose();
     expect(scrolledTo().at(-1)).toBe(listBox());
     expect(listBox().classList.contains("is-search-target")).toBe(true);
+  });
+
+  test("a reveal whose setting never appears gives up quietly within a second", async () => {
+    useClockWithFrames();
+    await drawer();
+    const errors = vi.spyOn(console, "error");
+    onTestFinished(() => errors.mockRestore());
+    // The fold above the setting does not hear the request to open, so the
+    // setting stays hidden and the reveal has nothing to go to.
+    const deaf = (event: Event) => event.stopPropagation();
+    const listenDeaf = () =>
+      document.addEventListener(SETTINGS_REVEAL_EVENT, deaf, true);
+    const hearAgain = () =>
+      document.removeEventListener(SETTINGS_REVEAL_EVENT, deaf, true);
+    onTestFinished(hearAgain);
+    const choose = async () => {
+      fireEvent.click(searchInput());
+      fireEvent.click(optionOf("providers:timeout_ms", "anthropic"));
+      await frames.settle();
+    };
+    const wait = (ms: number) =>
+      act(async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+      });
+
+    listenDeaf();
+    typeQuery("timeout_ms");
+    await choose();
+    const form = rowForm("anthropic")!;
+    const fold = within(form).getByRole("button", {
+      name: "Advanced settings",
+    });
+    const box = boxOf("providers:timeout_ms", form)!;
+    expect(box.closest("[hidden]")).not.toBeNull();
+    expect(scrolledTo()).toEqual([]);
+
+    // Within the second it is still looking: let the fold hear, and the
+    // setting is gone to once the block opens.
+    await wait(REVEAL_WAIT_MS - 100);
+    hearAgain();
+    fireEvent.click(fold);
+    await frames.settle();
+    expect(scrolledTo()).toEqual([box]);
+    expect(box.classList.contains("is-search-target")).toBe(true);
+
+    // Past the second it has given up: the block opening later takes nobody
+    // anywhere, and nothing was said.
+    await wait(SEARCH_TARGET_MS);
+    fireEvent.click(fold);
+    expect(box.closest("[hidden]")).not.toBeNull();
+    listenDeaf();
+    await choose();
+    await wait(REVEAL_WAIT_MS + 50);
+    hearAgain();
+    fireEvent.click(fold);
+    await frames.settle();
+    expect(box.closest("[hidden]")).toBeNull();
+    expect(scrolledTo()).toEqual([box]);
+    expect(box.classList.contains("is-search-target")).toBe(false);
+    expect(errors).not.toHaveBeenCalled();
+  });
+
+  test("a new choice cancels the reveal before it, and closing the drawer takes the ring away", async () => {
+    const view = await drawer();
+    typeQuery("llm");
+    const first = "agent:llm_min_interval_ms";
+    const second = "agent:llm_retry_base_ms";
+    const third = "agent:llm_retry_max";
+    const ringed = () =>
+      [...document.querySelectorAll(".is-search-target")].filter(
+        (el) => el.closest("[hidden]") === null,
+      );
+
+    fireEvent.click(optionOf(first));
+    await frames.settle();
+    const firstBox = boxOf(first)!;
+    expect(ringed()).toEqual([firstBox]);
+
+    // A second choice takes the ring of the first away at once, before its own
+    // reveal has had its frame ...
+    fireEvent.click(searchInput());
+    fireEvent.click(optionOf(second));
+    expect(firstBox.classList.contains("is-search-target")).toBe(false);
+    // ... and a third, before that frame, is the only one that is revealed.
+    fireEvent.click(searchInput());
+    fireEvent.click(optionOf(third));
+    await frames.settle();
+    const thirdBox = boxOf(third)!;
+    expect(scrolledTo()).toEqual([firstBox, thirdBox]);
+    expect(ringed()).toEqual([thirdBox]);
+    expect(thirdBox.contains(document.activeElement)).toBe(true);
+
+    // Closing the drawer does not leave its ring behind.
+    view.unmount();
+    expect(thirdBox.classList.contains("is-search-target")).toBe(false);
+  });
+
+  test("Enter and Escape while an input method composes leave the search alone", async () => {
+    const closeDrawer = vi.fn();
+    await drawer({
+      beside: <OpenRailScreen id="settings" onClose={closeDrawer} />,
+    });
+    act(() => searchInput().focus());
+    typeQuery("proxy");
+    const composing: KeyboardEventInit[] = [
+      { isComposing: true },
+      // Safari reports the key that ends a composition as keyCode 229.
+      { keyCode: 229 },
+    ];
+
+    for (const init of composing) {
+      fireEvent.keyDown(searchInput(), { key: "Enter", ...init });
+      expect(screen.getByRole("listbox")).toBeTruthy();
+      expect(scrolled).not.toHaveBeenCalledWith(
+        expect.objectContaining({ block: "center" }),
+      );
+      expect(window.location.hash).toBe("#/settings");
+
+      fireEvent.keyDown(searchInput(), { key: "Escape", ...init });
+      expect(searchInput().value).toBe("proxy");
+      expect(screen.getByRole("listbox")).toBeTruthy();
+      expect(closeDrawer).not.toHaveBeenCalled();
+    }
+
+    // The same keys, the composition over, are the search's again.
+    fireEvent.keyDown(searchInput(), { key: "Escape" });
+    expect(searchInput().value).toBe("");
+    expect(closeDrawer).not.toHaveBeenCalled();
+    typeQuery("proxy");
+    fireEvent.keyDown(searchInput(), { key: "Enter" });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(window.location.hash).not.toBe("#/settings");
+  });
+
+  test("typing a query does not render the tab under the results again", async () => {
+    await drawer({ section: "agent" });
+    // The results start showing with the first word: the drawer renders for it.
+    typeQuery("p");
+    const input = searchInput();
+    const rendered = rowsKeyCalls.count;
+
+    for (const query of ["pr", "pro", "prox", "proxy", "proxy ", "proxy u"]) {
+      typeQuery(query);
+    }
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    fireEvent.mouseEnter(options()[1]!);
+    expect(options().length).toBeGreaterThan(0);
+    expect(rowsKeyCalls.count).toBe(rendered);
+
+    // The counter does see a render: putting the results away is one.
+    typeQuery("");
+    expect(rowsKeyCalls.count).toBeGreaterThan(rendered);
   });
 
   test("the number found is announced once typing pauses", async () => {

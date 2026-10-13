@@ -37,7 +37,11 @@ import {
 } from "./settingsSections";
 import { skillsFormGroups } from "./SkillsSection";
 import { subagentsFormGroups } from "./SubagentsSection";
-import { settingsTextKey, type SettingsTextId } from "./settingsTexts";
+import {
+  landmarkAnchor,
+  settingsTextKey,
+  type SettingsTextId,
+} from "./settingsTexts";
 import { translate } from "../i18n/i18n";
 import { notificationsShown } from "../pwa/NotificationsSetting";
 
@@ -370,14 +374,6 @@ export const SETTINGS_LANDMARKS: readonly SettingsLandmark[] = [
   }),
 ];
 
-/** The anchor of a landmark's root; throws for a pair no landmark is declared for. */
-export function landmarkAnchor(section: string, id: string): string {
-  if (!SETTINGS_LANDMARKS.some((l) => l.section === section && l.id === id)) {
-    throw new Error(`unknown settings landmark ${section}/${id}`);
-  }
-  return `landmark:${section}:${id}`;
-}
-
 // ---- the index
 
 type PlainObject = Record<string, unknown>;
@@ -462,16 +458,25 @@ function push(
   return entry;
 }
 
-function walkField(
-  walk: Walk,
-  name: string,
-  schema: JsonSchema,
-  path: string,
-  keyPath: string,
-  parent: PlainObject,
-  where: string[],
-  list: string | null,
-): void {
+/** A field to index and where it stands: what the recursion hands to its children. */
+type FieldFrame = {
+  walk: Walk;
+  name: string;
+  schema: JsonSchema;
+  /** The dictionary path: the anchor and the override are looked up by it. */
+  path: string;
+  /** The dotted YAML path, as the documentation spells it. */
+  keyPath: string;
+  /** The object that holds the field's value. */
+  parent: PlainObject;
+  /** The names around it. */
+  where: string[];
+  /** The anchor of the list of objects it stands in, or null. */
+  list: string | null;
+};
+
+function walkField(frame: FieldFrame): void {
+  const { walk, name, schema, path, keyPath, parent, where, list } = frame;
   const { form, section } = walk;
   const box = overrideTexts(form.domain, path, parent);
   if (box === "hidden") {
@@ -518,16 +523,15 @@ function walkField(
       schema.properties,
       schema["x-coddy-property-order"],
     )) {
-      walkField(
-        walk,
-        k,
-        sub,
-        `${path}.${k}`,
-        `${keyPath}.${k}`,
-        value,
-        inside,
-        list,
-      );
+      walkField({
+        ...frame,
+        name: k,
+        schema: sub,
+        path: `${path}.${k}`,
+        keyPath: `${keyPath}.${k}`,
+        parent: value,
+        where: inside,
+      });
     }
     return;
   }
@@ -547,16 +551,16 @@ function walkField(
       items.properties,
       items["x-coddy-property-order"],
     )) {
-      walkField(
-        walk,
-        k,
-        sub,
-        `${path}.${k}`,
-        `${keyPath}[].${k}`,
-        value,
-        inside,
-        anchor,
-      );
+      walkField({
+        ...frame,
+        name: k,
+        schema: sub,
+        path: `${path}.${k}`,
+        keyPath: `${keyPath}[].${k}`,
+        parent: value,
+        where: inside,
+        list: anchor,
+      });
     }
   }
 }
@@ -566,16 +570,16 @@ function walkForm(walk: Walk, parent: PlainObject, where: string[]): void {
   const key = (k: string) => `${form.keyRoot}.${k}`;
   for (const node of layoutSchemaForm(form.schema, form.groups)) {
     if (node.kind === "field") {
-      walkField(
+      walkField({
         walk,
-        node.key,
-        node.schema,
-        node.key,
-        key(node.key),
+        name: node.key,
+        schema: node.schema,
+        path: node.key,
+        keyPath: key(node.key),
         parent,
         where,
-        null,
-      );
+        list: null,
+      });
       continue;
     }
     const g = node.group;
@@ -591,7 +595,16 @@ function walkForm(walk: Walk, parent: PlainObject, where: string[]): void {
     });
     const inside = [...where, g.legend];
     for (const [k, sub] of node.fields) {
-      walkField(walk, k, sub, k, key(k), parent, inside, null);
+      walkField({
+        walk,
+        name: k,
+        schema: sub,
+        path: k,
+        keyPath: key(k),
+        parent,
+        where: inside,
+        list: null,
+      });
     }
   }
 }

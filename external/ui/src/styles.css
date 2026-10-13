@@ -10129,8 +10129,9 @@ html:not([data-theme="light"]) .context-usage-note--error {
   }
 }
 
-/* A tab's scroll area the search focused is a focus target, not a tab stop. */
-.settings.drawer .settings-scroll:focus {
+/* A tab's scroll area the search focused is a focus target, not a tab stop:
+   its ring goes, except where the keyboard put the focus on a scroller. */
+.settings.drawer .settings-scroll:focus:not(:focus-visible) {
   outline: none;
 }
 

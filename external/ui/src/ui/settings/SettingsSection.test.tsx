@@ -13,21 +13,23 @@ import { SettingsSection } from "./SettingsSection";
 import type { JsonSchema } from "./SchemaForm";
 import {
   buildSettingsSearchIndex,
-  landmarkAnchor,
   searchSettings,
   type SettingsSearchEntry,
 } from "./settingsSearch";
+import { landmarkAnchor } from "./settingsTexts";
 import {
   AGENT_SCHEMA,
   RELAY_SCHEMA,
   applyPage,
   configFromSchema,
-  drawingDifferences,
-  drawnBoxes,
   openSettings,
   resetPage,
-  type DrawnBox,
 } from "./settingsServer.fakes";
+import {
+  drawingDifferences,
+  drawnBoxes,
+  type DrawnBox,
+} from "./settingsDrawing.fakes";
 import {
   deriveSettingsSections,
   type SectionDescriptor,

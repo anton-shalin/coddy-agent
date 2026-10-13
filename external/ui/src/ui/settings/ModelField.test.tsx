@@ -3,7 +3,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ModelField } from "./ModelField";
 import type { ProviderRow } from "./useProviderModels";
-import type { ResolvedBoxTexts } from "./settingsTexts";
+import type { ResolvedBoxTextsWithSecond } from "./settingsTexts";
 
 afterEach(() => {
   cleanup();
@@ -16,7 +16,10 @@ const PROVIDERS: ProviderRow[] = [
   { name: "hub", type: "neuraldeep" },
 ];
 
-const TEXTS: ResolvedBoxTexts = { primary: "Model id", second: "Provider" };
+const TEXTS: ResolvedBoxTextsWithSecond = {
+  primary: "Model id",
+  second: "Provider",
+};
 
 function Harness(props: { initial?: string }) {
   const [val, setVal] = React.useState(props.initial ?? "");

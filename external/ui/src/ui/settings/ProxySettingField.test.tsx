@@ -1,11 +1,11 @@
 import { afterEach, expect, test } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ProxySettingField } from "./ProxySettingField";
-import type { ResolvedBoxTexts } from "./settingsTexts";
+import type { ResolvedBoxTextsWithSecond } from "./settingsTexts";
 
 afterEach(cleanup);
 
-const TEXTS: ResolvedBoxTexts = {
+const TEXTS: ResolvedBoxTextsWithSecond = {
   primary: "Proxy URL",
   primaryDesc: "Where the requests go",
   second: "Ignore system proxy",
