@@ -1,5 +1,5 @@
 ---
-description: BDD-style workflow, UI screenshots in the PR, HTTP OpenAPI, config schema and CLI packaging sync before lint, final checks, the comment on an issue a merge closes
+description: BDD-style workflow, UI screenshots in the PR, HTTP OpenAPI, config schema and CLI packaging sync before lint, final checks, the comment on an issue a merge closes and the cleanup after the merge
 paths:
   - "**/*.go"
   - "docs/**/*.md"
@@ -274,8 +274,14 @@ follows it has to open the pull request and work that out; issues #265 and #305 
    **`gh issue close <N> --reason completed`**; issue #368 stayed open that way after pull
    request #369.
 
+Whether or not it closes an issue, a merge ends with the cleanup of its branch: the worktree is
+removed and the branch deleted, locally and on origin, as the paired **merged branch cleanup rule**
+(**`.cursor/rules/merged-branch-cleanup.mdc`**, **`.claude/rules/merged-branch-cleanup.md`**) says.
+It is the last step, after the issue comments, and it applies to a merge the operator made too.
+
 ## Site checkout safety
 
 - Run site generation after the agent change merges when generated links depend on `main`.
 - Use an isolated site-repository worktree based explicitly on current `origin/main`; never use a shared checkout at an unknown HEAD.
 - Commit only the expected generated files and verify the diff before publication.
+- Once the site commit is pushed, remove that worktree and its local branch as the **merged branch cleanup rule** says.
