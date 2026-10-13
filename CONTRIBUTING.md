@@ -91,7 +91,7 @@ Two rules from the code review section of [AGENTS.md](AGENTS.md) come up often e
 
 ## Code style
 
-- `gofmt` before committing; `make lint` is the gate: `golangci-lint` over the untagged tree, over every tag but `ui` and over the shipped tag set (three passes that compile every Go file of the host platform once), then `tsc --noEmit` over the SPA sources (`make ui-typecheck`). `.golangci.yml` enables the `gofmt` formatter (`gofmt -s`) next to the default linters, so a file `gofmt` would change fails the run; `gofmt -w <file>` or `golangci-lint fmt` fixes it.
+- `gofmt` before committing; `make lint` is the gate: `make fmt-check` (`gofmt -s -l` over every Go file git tracks, whatever its build tags or platform), `golangci-lint` over the untagged tree, over every tag but `ui` and over the shipped tag set (three passes that compile every Go file of the host platform once, but the `http && !<tag>` stubs of `external/httpserver`), then `tsc --noEmit` over the SPA sources (`make ui-typecheck`). `.golangci.yml` enables the `gofmt` formatter (`gofmt -s`) next to the default linters, so a file `gofmt -s` would change fails the run as well; `gofmt -s -w <file>` or `golangci-lint fmt` fixes it.
 - Comments in code, and every technical Markdown file in this repository, are in English.
 - Follow the neighbouring files: import grouping, naming, error handling, table-driven tests where they clarify the cases, no real network in a test unless it is documented as integration-style.
 - The SPA is formatted with Prettier (`npm run fmt` in `external/ui`); [DESIGN.md](DESIGN.md) is its contract for tokens, layout and component behaviour, and the localization rules (every dictionary changed in the same commit) are in [AGENTS.md](AGENTS.md).
@@ -112,7 +112,7 @@ Before the push: `make test` and `make lint` green, and `make docs-check` when d
 | `Windows cross-build`, `Test suite (Windows)`, `Test suite (macOS)` | the platform halves the host run never compiles |
 | `Distribution packages` | the `.deb` and `.rpm` still build and the Homebrew templates parse |
 | `Documentation` | `make docs-check` |
-| `Lint` | `golangci-lint` on Linux and on the Windows build, plus the `cli` surface |
+| `Lint` | `make fmt-check`, then `golangci-lint` on Linux and on the Windows build, plus the `cli` surface |
 
 The description says what the change is for, which tests were added or changed, how `make test` and `make lint` went, which files moved, and carries the screenshots when the UI did.
 
