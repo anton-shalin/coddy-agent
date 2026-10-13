@@ -4,6 +4,7 @@ import {
   IconTrash,
   type JsonSchema,
   type FieldOverride,
+  type SchemaFormGroup,
 } from "./SchemaForm";
 import { LegendWithHint } from "./FieldHint";
 import { MarketplacesEditor } from "./MarketplacesEditor";
@@ -15,6 +16,27 @@ import { schemaFieldDesc } from "./schemaI18n";
 import { useT } from "../i18n/I18nProvider";
 import { translate } from "../i18n/i18n";
 import { useEscapeCloses } from "../components/useEscapeCloses";
+
+/**
+ * The field the tab draws by hand, as a fieldset of its own above the form, so
+ * the generated form leaves it out (settings search reads the same name).
+ */
+export const SKILLS_HAND_DRAWN_FIELD = "auto_discovery";
+
+/**
+ * The fieldsets of the tab's generated form: the policy for the project's
+ * marketplaces.json stands in one of its own above the list it governs.
+ */
+export function skillsFormGroups(): SchemaFormGroup[] {
+  return [
+    {
+      id: "skills-marketplace-trust",
+      legend: translate("skills.trust.legend"),
+      description: translate("skills.trust.description"),
+      paths: ["project_trust"],
+    },
+  ];
+}
 
 // Cap the install dropdown so a broad query never floods the menu; anything
 // beyond this is summarized as a "+N more" hint that invites a narrower search.
@@ -329,8 +351,8 @@ export function SkillsSection(props: {
   const fieldOverride: FieldOverride = ({ path }) => {
     // Auto-discovery is rendered as its own fieldset at the top of the section
     // (see below); suppress the default inline boolean here.
-    if (path === "auto_discovery") {
-      return <></>;
+    if (path === SKILLS_HAND_DRAWN_FIELD) {
+      return false;
     }
     return null;
   };
@@ -376,14 +398,7 @@ export function SkillsSection(props: {
         onChange={onChange}
         fieldOverride={fieldOverride}
         i18nDomain="skills"
-        groups={[
-          {
-            id: "skills-marketplace-trust",
-            legend: t("skills.trust.legend"),
-            description: t("skills.trust.description"),
-            paths: ["project_trust"],
-          },
-        ]}
+        groups={skillsFormGroups()}
       />
 
       <MarketplacesEditor

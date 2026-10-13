@@ -7,7 +7,12 @@ import {
 } from "react";
 import { Chevron } from "../components/Chevron";
 import { useT } from "../i18n/I18nProvider";
-import { SchemaForm, type JsonSchema } from "./SchemaForm";
+import { translate } from "../i18n/i18n";
+import {
+  SchemaForm,
+  type JsonSchema,
+  type SchemaFormGroup,
+} from "./SchemaForm";
 import {
   scopeBadgeKey,
   subagentDeclaredFacts,
@@ -21,6 +26,17 @@ import {
   snapshotSettingsConfig,
   subscribeSettingsConfig,
 } from "./settingsConfigStore";
+
+/** The one fieldset of the tab's generated form, over the definitions catalog. */
+export function subagentsFormGroups(): SchemaFormGroup[] {
+  return [
+    {
+      id: "subagents",
+      legend: translate("subagents.settings.legend"),
+      description: translate("subagents.settings.description"),
+    },
+  ];
+}
 
 /**
  * SubagentsSection is the Settings -> Subagents tab. Hybrid, like the Skills
@@ -111,13 +127,7 @@ export function SubagentsSection(props: {
         value={props.value}
         onChange={props.onChange}
         i18nDomain="subagents"
-        groups={[
-          {
-            id: "subagents",
-            legend: t("subagents.settings.legend"),
-            description: t("subagents.settings.description"),
-          },
-        ]}
+        groups={subagentsFormGroups()}
       />
 
       <fieldset

@@ -10,6 +10,14 @@ import {
   type NotificationSupport,
 } from "./notifications";
 
+/**
+ * Whether the block is drawn at all: inside the Telegram Mini App it is not.
+ * Settings search reads the same answer, so it offers nothing the tab omits.
+ */
+export function notificationsShown(): boolean {
+  return !telegramLaunch();
+}
+
 /** The status line under the switch: why it cannot be turned on here. */
 const STATUS_KEY: Partial<Record<NotificationSupport, string>> = {
   denied: "appearance.notifications.denied",
@@ -51,7 +59,7 @@ export function NotificationsSetting() {
     }
   }, []);
 
-  if (telegramLaunch()) {
+  if (!notificationsShown()) {
     return null;
   }
   const statusKey = STATUS_KEY[support];
