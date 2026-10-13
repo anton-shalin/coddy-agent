@@ -950,10 +950,6 @@ func TestDefinitionMayAdmitServer(t *testing.T) {
 			if got := def.MayAdmitServer("srv"); got != tc.want {
 				t.Errorf("MayAdmitServer(srv) with tools %v, denied %v = %v, want %v", tc.tools, tc.denied, got, tc.want)
 			}
-			// A models[] row asks the same rule with its own lists.
-			if got := MayAdmitServer(tc.tools, tc.denied, "srv"); got != tc.want {
-				t.Errorf("subagents.MayAdmitServer(%v, %v, srv) = %v, want %v", tc.tools, tc.denied, got, tc.want)
-			}
 		})
 	}
 	var none *Definition

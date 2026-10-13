@@ -340,46 +340,11 @@ func TestScheduledRunDialsMCPForWhatTheDefinitionCanAdmit(t *testing.T) {
 		{"agent, built-ins only", "agent", def("read", "grep"), false},
 		{"ask, an exact MCP tool", "ask", def("srv__lookup"), false},
 	} {
-		if got := scheduledRunDialsMCP(tc.mode, tc.def, nil, servers); got != tc.want {
+		if got := scheduledRunDialsMCP(tc.mode, tc.def, servers); got != tc.want {
 			t.Errorf("%s: dials MCP = %v, want %v", tc.name, got, tc.want)
 		}
 	}
-	if scheduledRunDialsMCP("agent", def("srv__lookup"), nil, nil) {
+	if scheduledRunDialsMCP("agent", def("srv__lookup"), nil) {
 		t.Error("a run with no configured server has nothing to dial")
-	}
-}
-
-// The model a scheduled run uses has a say too: it dials a server only when the
-// mode, the definition and the model's tools lists can all admit one of its
-// tools, so a model that offers nothing of the server never starts its process.
-func TestScheduledRunDialsMCPForWhatTheModelCanAdmit(t *testing.T) {
-	def := func(tools ...string) *subagents.Definition { return &subagents.Definition{Name: "job", Tools: tools} }
-	model := func(allow, deny []string) *config.ModelEntry {
-		return &config.ModelEntry{Model: "local", Tools: allow, DisallowedTools: deny}
-	}
-	servers := []string{"srv"}
-	for _, tc := range []struct {
-		name  string
-		mode  string
-		def   *subagents.Definition
-		entry *config.ModelEntry
-		want  bool
-	}{
-		{"a model with no lists", "agent", nil, model(nil, nil), true},
-		{"an allowlist naming a tool of the server", "plan", nil, model([]string{"read", "srv__lookup"}, nil), true},
-		{"an allowlist of built-ins only", "agent", nil, model([]string{"read", "grep"}, nil), false},
-		{"a denylist covering the server", "agent", nil, model(nil, []string{"srv__*"}), false},
-		{"a denylist of another server", "agent", nil, model(nil, []string{"other__*"}), true},
-		{"a definition that admits it, a model that does not", "agent", def("srv__lookup"), model([]string{"read"}, nil), false},
-		{"a model that admits it, a definition that does not", "agent", def("read"), model([]string{"srv__lookup"}, nil), false},
-		{"both admit it", "plan", def("srv__*"), model([]string{"srv__lookup"}, nil), true},
-		{"ask offers no MCP whatever the model says", "ask", nil, model([]string{"srv__lookup"}, nil), false},
-	} {
-		if got := scheduledRunDialsMCP(tc.mode, tc.def, tc.entry, servers); got != tc.want {
-			t.Errorf("%s: dials MCP = %v, want %v", tc.name, got, tc.want)
-		}
-	}
-	if scheduledRunDialsMCP("agent", nil, model([]string{"srv__lookup"}, nil), nil) {
-		t.Error("a model with tool lists and no configured server has nothing to dial")
 	}
 }

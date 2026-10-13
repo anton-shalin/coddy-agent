@@ -124,12 +124,14 @@ func RunScheduledJob(ctx context.Context, cfg *config.Config, rt SubagentRuntime
 		mode = def.Mode
 	}
 
-	// What a run never gets whatever its definition says; the set itself, and
-	// whether MCP is dialed at all, are decided below once the model is known.
+	// The tool policy decides the set once the MCP names exist, and whether
+	// MCP is dialed at all: a run under a definition that admits no tool of any
+	// configured server never starts an MCP process.
 	exclusions := append([]string(nil), subagentMandatoryExclusions...)
 	if cfg.Subagents.EffectiveMaxDepth() <= 0 {
 		exclusions = append(exclusions, tools.ToolSpawnAgent)
 	}
+	connectMCP := scheduledRunDialsMCP(mode, def, spec.MCPServerNames)
 
 	model := strings.TrimSpace(spec.Model)
 	unknownModel := ""
@@ -160,9 +162,6 @@ func RunScheduledJob(ctx context.Context, cfg *config.Config, rt SubagentRuntime
 	// nothing is refused here, as a definition that does is.
 	registryNames := registryToolNamesForMode(cfg, mode)
 	runEntry := cfg.FindModelEntry(session.ResolveModelID(cfg, model))
-	// The model is only known now, so MCP is decided here too: see
-	// scheduledRunDialsMCP.
-	connectMCP := scheduledRunDialsMCP(mode, def, runEntry, spec.MCPServerNames)
 	resolve := func(mcpTools []string) []string {
 		all := append(append([]string(nil), registryNames...), mcpTools...)
 		effective := subagents.EffectiveTools(all, modeToolNames(mode, all), def, exclusions)
@@ -261,21 +260,18 @@ func RunScheduledJob(ctx context.Context, cfg *config.Config, rt SubagentRuntime
 
 // scheduledRunDialsMCP reports whether a scheduled run dials the configured
 // MCP servers at all: only in a mode that offers MCP tools, and under a
-// definition or a model with tool lists only when both can admit a tool of one
-// of them. The tool names are not known before a server is dialed, so the
-// definition is asked about the server (MayAdmitServer) and so is the model
-// (modelMayAdmitServer), and the run's tool set then narrows by name. A run
-// whose definition or model admits nothing of any server never starts an MCP
-// process.
-func scheduledRunDialsMCP(mode string, def *subagents.Definition, entry *config.ModelEntry, servers []string) bool {
+// definition only when it can admit a tool of one of them. The tool names are
+// not known before a server is dialed, so the definition is asked about the
+// server (MayAdmitServer), and the run's tool set then narrows by name.
+func scheduledRunDialsMCP(mode string, def *subagents.Definition, servers []string) bool {
 	if !modeOffersMCP(mode) {
 		return false
 	}
-	if def == nil && !hasToolLists(entry) {
+	if def == nil {
 		return true
 	}
 	for _, server := range servers {
-		if def.MayAdmitServer(server) && modelMayAdmitServer(entry, server) {
+		if def.MayAdmitServer(server) {
 			return true
 		}
 	}

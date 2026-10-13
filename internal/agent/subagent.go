@@ -879,6 +879,13 @@ func (a *Agent) spawnSubagentInMode(ctx context.Context, req tooling.SpawnReques
 		return "", fmt.Errorf("subagent %q would have no tools at all: its allowlist %v leaves nothing of this session's tool set (after the denylist and the mandatory exclusions); fix the definition or pick another subagent",
 			def.Name, def.Tools)
 	}
+	connectMCP := false
+	for _, n := range effective {
+		if strings.Contains(n, "__") {
+			connectMCP = true
+			break
+		}
+	}
 
 	// The child inherits the parent's effective model; a definition may name
 	// a configured one instead. An unknown id falls back to the parent's and
@@ -929,18 +936,11 @@ func (a *Agent) spawnSubagentInMode(ctx context.Context, req tooling.SpawnReques
 	// disallowed_tools) narrow the set further, whichever model that is: the
 	// parent's own, the definition's, the call's. They apply while the child
 	// runs (currentToolDefinitions, toolCallRefused), so what is decided here is
-	// whether anything is left, and whether an MCP server is worth dialing.
-	offered := narrowToolNamesForModel(effective, cfg.FindModelEntry(model))
-	if len(offered) == 0 {
+	// whether anything is left. They do not decide which MCP servers are
+	// dialed: a server no model needs is switched off in its declaration.
+	if len(narrowToolNamesForModel(effective, cfg.FindModelEntry(model))) == 0 {
 		return "", fmt.Errorf("subagent %q would have no tools at all on model %s: the model's tools and disallowed_tools lists leave nothing of its effective set %v; adjust models[].tools or choose another model",
 			def.Name, model, effective)
-	}
-	connectMCP := false
-	for _, n := range offered {
-		if strings.Contains(n, "__") {
-			connectMCP = true
-			break
-		}
 	}
 
 	parentID := a.state.GetID()

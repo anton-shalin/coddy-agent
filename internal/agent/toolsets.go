@@ -358,13 +358,6 @@ func hasToolLists(entry *config.ModelEntry) bool {
 	return entry != nil && (len(entry.Tools) > 0 || len(entry.DisallowedTools) > 0)
 }
 
-// modelMayAdmitServer reports whether a model's lists could admit some tool of
-// an MCP server, for the runs that decide whether to dial it before any of its
-// tools exist: the rule a subagent definition follows (subagents.MayAdmitServer).
-func modelMayAdmitServer(entry *config.ModelEntry, server string) bool {
-	return !hasToolLists(entry) || subagents.MayAdmitServer(entry.Tools, entry.DisallowedTools, server)
-}
-
 // modelHidesTool reports whether the session's current model is not offered a
 // tool, for the parts of the system prompt that describe one.
 func (a *Agent) modelHidesTool(name string) bool {

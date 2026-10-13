@@ -687,39 +687,6 @@ func TestModelToolListsConfigReloadTakesEffectFromTheNextRequest(t *testing.T) {
 	}
 }
 
-// modelMayAdmitServer decides, before a server's tools exist, whether a model's
-// lists could ever admit one of them.
-func TestModelMayAdmitServer(t *testing.T) {
-	cases := []struct {
-		name  string
-		entry *config.ModelEntry
-		want  bool
-	}{
-		{"no entry", nil, true},
-		{"no lists", &config.ModelEntry{Model: "m"}, true},
-		{"an allowlist of built-ins", &config.ModelEntry{Tools: []string{"read", "grep"}}, false},
-		{"the server's wildcard", &config.ModelEntry{Tools: []string{"read", "srv__*"}}, true},
-		{"an exact tool of the server", &config.ModelEntry{Tools: []string{"srv__tool"}}, true},
-		{"an exact tool of another server", &config.ModelEntry{Tools: []string{"other__tool"}}, false},
-		{"a wildcard over every server", &config.ModelEntry{Tools: []string{"*"}}, true},
-		{"a shorter prefix that covers the server", &config.ModelEntry{Tools: []string{"sr*"}}, true},
-		{"a longer prefix inside the server", &config.ModelEntry{Tools: []string{"srv__to*"}}, true},
-		{"a prefix of another server", &config.ModelEntry{Tools: []string{"oth*"}}, false},
-		{"a denylist of the whole server", &config.ModelEntry{DisallowedTools: []string{"srv__*"}}, false},
-		{"a denylist of every tool", &config.ModelEntry{DisallowedTools: []string{"*"}}, false},
-		{"a denylist of one tool of the server", &config.ModelEntry{DisallowedTools: []string{"srv__tool"}}, true},
-		{"a denylist of another server", &config.ModelEntry{DisallowedTools: []string{"other__*"}}, true},
-		{"the allowlist admits it, the denylist takes the whole server", &config.ModelEntry{Tools: []string{"srv__tool"}, DisallowedTools: []string{"srv__*"}}, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := modelMayAdmitServer(tc.entry, "srv"); got != tc.want {
-				t.Fatalf("modelMayAdmitServer(%+v, srv) = %v, want %v", tc.entry, got, tc.want)
-			}
-		})
-	}
-}
-
 // spyRuntime records what the agent asks the session manager to create.
 type spyRuntime struct {
 	SubagentRuntime
@@ -796,72 +763,5 @@ func TestModelToolListsRefuseAScheduledRunTheModelLeavesNoTools(t *testing.T) {
 	scheduledRun(t, rig2, spy2, def, nil)
 	if _, createErr := spy2.last(t); createErr != nil {
 		t.Fatalf("the model without lists was refused: %v", createErr)
-	}
-}
-
-// Whether a scheduled run dials its MCP servers is decided after the model's
-// lists apply: a model that can admit none of their tools never starts them.
-func TestModelToolListsDecideWhetherAScheduledRunDialsMCP(t *testing.T) {
-	cases := []struct {
-		name  string
-		entry config.ModelEntry
-		want  bool
-	}{
-		{"no lists", config.ModelEntry{}, true},
-		{"an allowlist of built-ins", config.ModelEntry{Tools: []string{"read", "grep"}}, false},
-		{"an allowlist that names the server", config.ModelEntry{Tools: []string{"read", "srv__*"}}, true},
-		{"an exact tool of the server", config.ModelEntry{Tools: []string{"srv__tool"}}, true},
-		{"a denylist of the server", config.ModelEntry{DisallowedTools: []string{"srv__*"}}, false},
-		{"a denylist of another tool", config.ModelEntry{DisallowedTools: []string{"write"}}, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			entry := tc.entry
-			rig := newSubagentRig(t, func(cfg *config.Config) {
-				entry.Model, entry.MaxTokens = "fake/model", 100
-				cfg.Models = []config.ModelEntry{entry}
-			})
-			rig.setChildProvider(func(*session.State) llm.Provider { return scripted(answerStep("REPORT: done")) })
-			spy := &spyRuntime{SubagentRuntime: rig.mgr}
-			scheduledRun(t, rig, spy, nil, []string{"srv"})
-			// The spec is what the run asked for, whether or not the run then
-			// had a tool left (no server is running in this rig, so an exact
-			// MCP name leaves the run none).
-			spec, _ := spy.last(t)
-			if spec.ConnectMCP != tc.want {
-				t.Fatalf("ConnectMCP = %v, want %v", spec.ConnectMCP, tc.want)
-			}
-		})
-	}
-}
-
-// A spawn dials MCP for the child only when the child's model can admit one of
-// the parent's MCP tools.
-func TestModelToolListsDecideWhetherASpawnDialsMCP(t *testing.T) {
-	rig := newSubagentRig(t, func(cfg *config.Config) {
-		cfg.Models = []config.ModelEntry{
-			{Model: "fake/model", MaxTokens: 100},
-			{Model: "fake/small", MaxTokens: 100, Tools: []string{"read", "grep"}},
-		}
-	})
-	rig.setChildProvider(func(*session.State) llm.Provider { return scripted(answerStep("REPORT: done")) })
-	rig.parent.AddSessionMCPClient(mcp.NewStaticClient("srv", []mcp.ToolInfo{{Name: "tool"}}))
-	rig.approvedDefinition("on-small", "model: fake/small\ntools: read, srv__tool\n")
-	rig.approvedDefinition("on-big", "model: fake/model\ntools: read, srv__tool\n")
-
-	for _, tc := range []struct {
-		agent string
-		want  bool
-	}{{"on-small", false}, {"on-big", true}} {
-		spy := &spyRuntime{SubagentRuntime: rig.mgr}
-		ag := rig.parentAgent()
-		ag.SetSubagentRuntime(spy)
-		if _, err := ag.spawnSubagent(context.Background(), spawnReq(tc.agent)); err != nil {
-			t.Fatalf("spawn %s: %v", tc.agent, err)
-		}
-		spec, _ := spy.last(t)
-		if spec.ConnectMCP != tc.want {
-			t.Fatalf("%s: ConnectMCP = %v, want %v", tc.agent, spec.ConnectMCP, tc.want)
-		}
 	}
 }
