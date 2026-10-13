@@ -423,3 +423,47 @@ func TestTheAgentsOwnSwitchIsNotedInTheConsole(t *testing.T) {
 		return strings.Contains(transcriptText(a), "Reasoning: high for this session")
 	})
 }
+
+// The console offers a toolset only while the configuration has a preset: no
+// /toolset in the menu and no picker before, both as soon as one is added,
+// and the footer names the preset the session runs with.
+func TestToolsetInTheConsole(t *testing.T) {
+	a := newReasoningApp(t)
+	hasToolset := func() bool {
+		for _, it := range a.slashCatalog() {
+			if it.Value == "toolset" {
+				return true
+			}
+		}
+		return false
+	}
+	if hasToolset() {
+		t.Fatal("the menu offers /toolset without a preset")
+	}
+	a.dispatchSlash("/toolset")
+	if a.modal != nil {
+		t.Fatal("/toolset opened a picker without a preset")
+	}
+
+	a.config().Toolsets = []config.Toolset{{Name: "lean", Tools: []string{"read", "grep"}}}
+	if !hasToolset() {
+		t.Fatal("the menu does not offer /toolset once a preset exists")
+	}
+	a.dispatchSlash("/toolset")
+	if a.modal == nil {
+		t.Fatal("/toolset opened no picker")
+	}
+	a.closeModal()
+
+	if !a.dispatchSlash("/toolset lean") {
+		t.Fatal("/toolset lean was not handled")
+	}
+	pumpUntil(t, a, "the toolset in the footer", func() bool { return a.foot.toolset == "lean" })
+	if footer := strings.Join(a.foot.Render(100), "\n"); !strings.Contains(footer, "tools lean") {
+		t.Fatalf("footer does not name the toolset:\n%s", footer)
+	}
+	if !a.dispatchSlash("/toolset default") {
+		t.Fatal("/toolset default was not handled")
+	}
+	pumpUntil(t, a, "no toolset in the footer", func() bool { return a.foot.toolset == "" })
+}

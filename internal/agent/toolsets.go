@@ -223,7 +223,7 @@ func FilterToolDefinitions(defs []llm.ToolDefinition, set ToolSet) []llm.ToolDef
 // Toolsets: the toolsets[] presets of the configuration (config.Toolset).
 //
 // The session is offered the tools of one preset at most: the one it picked
-// (/toolset, /model <id> --toolset, kept in the session), else the one its
+// (/toolset, kept in the session), else the one its
 // model names (models[].toolset); "default" picks none. The point is context,
 // not permission: a local model with a 49k window that the work only ever asks
 // for a dozen tools should not be sent the schemas of the other forty (about

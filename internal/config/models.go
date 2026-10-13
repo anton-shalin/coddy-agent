@@ -49,9 +49,9 @@ type ModelEntry struct {
 	// finished answer in one piece, for servers and proxies that handle SSE badly.
 	Stream *bool `yaml:"stream,omitempty"`
 	// Toolset names the toolsets[] preset a session on this model is offered
-	// its tools by unless the session picks another (/toolset, /model <id>
-	// --toolset): a small-window local model that uses a dozen tools is not
-	// sent the schemas of the other forty. Empty offers every tool the mode
+	// its tools by unless the session picks another (/toolset): a
+	// small-window local model that uses a dozen tools is not sent the
+	// schemas of the other forty. Empty offers every tool the mode
 	// would. See toolsets.go and internal/agent/toolsets.go.
 	Toolset string `yaml:"toolset,omitempty"`
 }

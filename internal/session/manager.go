@@ -232,12 +232,63 @@ func (m *Manager) ReplaceConfig(next *config.Config) {
 		return
 	}
 	previous, previousTrust := m.storeConfig(next)
+	if previous != nil && toolsetsMoved(previous, next) {
+		m.republishSessionSettings()
+	}
 	if previous != nil && !mcpTrustChanged(next, previousTrust) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), mcpReloadTimeout)
 	defer cancel()
 	m.reloadConfiguredMCPServers(ctx)
+}
+
+// toolsetsMoved reports whether a new configuration changes what a session's
+// settings snapshot says of its toolset: the presets by name, or the one a
+// model names.
+func toolsetsMoved(previous, next *config.Config) bool {
+	if strings.Join(previous.ToolsetNames(), "\x00") != strings.Join(next.ToolsetNames(), "\x00") {
+		return true
+	}
+	of := func(cfg *config.Config) map[string]string {
+		out := make(map[string]string, len(cfg.Models))
+		for _, m := range cfg.Models {
+			out[m.Model] = m.Toolset
+		}
+		return out
+	}
+	a, b := of(previous), of(next)
+	if len(a) != len(b) {
+		return true
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return true
+		}
+	}
+	return false
+}
+
+// republishSessionSettings publishes the settings snapshot of every live
+// session that is not a subagent's run again, so a surface showing one - a
+// browser tab, a console, an editor - offers the toolsets a configuration
+// reload brought, or stops offering the ones it took away, without waiting for
+// the next change of the session.
+func (m *Manager) republishSessionSettings() {
+	m.mu.RLock()
+	ids := make([]string, 0, len(m.sessions))
+	states := make([]*State, 0, len(m.sessions))
+	for id, st := range m.sessions {
+		if st == nil || st.IsSubagentRun() {
+			continue
+		}
+		ids = append(ids, id)
+		states = append(states, st)
+	}
+	m.mu.RUnlock()
+	for i, st := range states {
+		m.PublishSessionSettings(ids[i], st, "", "config")
+	}
 }
 
 // mcpTrustChanged reports whether a new configuration changes which

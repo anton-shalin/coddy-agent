@@ -131,14 +131,14 @@
           },
           "toolset": {
             "type": "string",
-            "description": "Name of the toolsets[] preset a session on this model is offered its tools by, unless the session picks another with /model <id> --toolset <name> or /toolset. Absent or empty offers every tool the mode would. Use it to spare a small-context local model the schemas of tools it never calls."
+            "description": "Name of the toolsets[] preset a session on this model is offered its tools by, unless the session picks another with /toolset <name>. Absent or empty offers every tool the mode would. Use it to spare a small-context local model the schemas of tools it never calls."
           }
         }
       }
     },
     "toolsets": {
       "type": "array",
-      "description": "Named presets of tool lists. A models[] row names one with toolset, and a session can pick one with /model <id> --toolset <name> or /toolset <name>. A preset only narrows: a tool the mode, a subagent definition or a switch already hides stays hidden, and a call to a tool outside the set is refused without a permission prompt. It is a context optimization, not a security boundary.",
+      "description": "Named presets of tool lists. A models[] row names one with toolset, and a session can pick one with /toolset <name>, on its own or after /model on the same line. A preset only narrows: a tool the mode, a subagent definition or a switch already hides stays hidden, and a call to a tool outside the set is refused without a permission prompt. It is a context optimization, not a security boundary.",
       "items": {
         "type": "object",
         "additionalProperties": false,

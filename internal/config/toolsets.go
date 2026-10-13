@@ -11,8 +11,8 @@ import (
 
 // Toolset is a named preset of tool lists (toolsets[]). A models[] row names
 // one as the set a session on that model is offered (models[].toolset), and
-// the operator may pick another for one session with /toolset <name> or
-// /model <id> --toolset <name>, which the session keeps (selectedToolset).
+// the operator may pick another for one session with /toolset <name>, which
+// the session keeps (selectedToolset).
 // The point is context, not permission: a small-window local model
 // that a coding session only ever asks for a dozen tools is not sent the
 // schemas of the other forty, while a model without a toolset keeps every tool.
@@ -33,7 +33,7 @@ type Toolset struct {
 // the name of no preset.
 const ToolsetDefault = "default"
 
-// toolsetNameRE is what a preset may be called: it is typed after --toolset,
+// toolsetNameRE is what a preset may be called: it is typed after /toolset,
 // so no spaces and nothing a command line would split.
 var toolsetNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 

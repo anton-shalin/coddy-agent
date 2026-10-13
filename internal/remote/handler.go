@@ -108,6 +108,10 @@ type sessionState struct {
 	// thinking off, which the model list does not name.
 	reasoningChoices []string
 	choicesModel     string
+	// toolset and toolsetChoices mirror the last snapshot's; no choices
+	// means the server has no preset.
+	toolset        string
+	toolsetChoices []string
 	// overrides are what the last snapshot said the session changed for its
 	// running and next turns.
 	overrides []acp.TurnOverride
@@ -548,6 +552,12 @@ func (h *Handler) HandleSessionSetConfigOption(ctx context.Context, params acp.S
 			return nil, err
 		}
 		return &acp.SessionSetConfigOptionResult{ConfigOptions: h.configOptions(st)}, nil
+	case "toolset":
+		value := params.Value
+		if _, err := h.ApplySessionSettings(ctx, params.SessionID, session.SettingsChange{Toolset: &value, Source: "remote"}); err != nil {
+			return nil, err
+		}
+		return &acp.SessionSetConfigOptionResult{ConfigOptions: h.configOptions(st)}, nil
 	default:
 		return nil, fmt.Errorf("unknown config option: %q", params.ConfigID)
 	}
@@ -701,7 +711,16 @@ func (h *Handler) configOptions(st *sessionState) []acp.ConfigOption {
 	if permission == "" {
 		permission = h.serverPermission
 	}
+	toolset, toolsetChoices := st.toolset, append([]string(nil), st.toolsetChoices...)
 	h.mu.Unlock()
+	if len(toolsetChoices) > 0 {
+		opts := make([]acp.ConfigOptionValue, 0, len(toolsetChoices))
+		for _, c := range toolsetChoices {
+			opts = append(opts, acp.ConfigOptionValue{Value: c, Name: c})
+		}
+		out = append(out, acp.ConfigOption{ID: "toolset", Name: "Toolset", Category: "_toolset",
+			Type: "select", CurrentValue: toolset, Options: opts})
+	}
 	if permission != "" {
 		out = append(out, session.PermissionModeOption(permission))
 	}

@@ -1333,3 +1333,45 @@ func TestMCPServersNameTheVariablesTheServerLists(t *testing.T) {
 		})
 	}
 }
+
+// The server's snapshot decides whether there is a toolset to pick: its
+// choices become the console's toolset option, and a pick goes to the server
+// as selectedToolset.
+func TestRemoteToolsetConfigOptionFollowsTheServer(t *testing.T) {
+	var patched map[string]interface{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("PATCH /coddy/sessions/{id}", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&patched)
+		_, _ = w.Write([]byte(`{"settings":{"sessionId":"sess_x","version":9,"model":"remote/alpha","mode":"agent","permissionMode":"ask","configuredPermissionMode":"ask","toolset":"lean","toolsetChoices":["lean","default"]}}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	h, err := NewHandler(Options{BaseURL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.SetServer(&collectSender{})
+	st := h.session("sess_x")
+	for _, opt := range h.configOptions(st) {
+		if opt.ID == "toolset" {
+			t.Fatalf("a toolset option before the server named any: %+v", opt)
+		}
+	}
+	h.mirrorSettings("sess_x", acp.SessionSettings{SessionID: "sess_x", Version: 1, Model: "remote/alpha", Toolset: "default", ToolsetChoices: []string{"lean", "default"}})
+	res, err := h.HandleSessionSetConfigOption(context.Background(), acp.SessionSetConfigOptionParams{SessionID: "sess_x", ConfigID: "toolset", Value: "lean"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if patched["selectedToolset"] != "lean" {
+		t.Fatalf("PATCH body = %v", patched)
+	}
+	var opt *acp.ConfigOption
+	for i := range res.ConfigOptions {
+		if res.ConfigOptions[i].ID == "toolset" {
+			opt = &res.ConfigOptions[i]
+		}
+	}
+	if opt == nil || opt.CurrentValue != "lean" || len(opt.Options) != 2 {
+		t.Fatalf("toolset option = %+v", opt)
+	}
+}

@@ -97,6 +97,9 @@ func (a *App) dispatchSettings(trimmed string, fields []string) bool {
 		case session.SettingPermissionMode:
 			a.openPermissionSelector()
 			return true
+		case session.SettingToolset:
+			a.openToolsetSelector()
+			return true
 		}
 	}
 	line, err := session.ParseSettingsCommands(trimmed)
@@ -184,6 +187,7 @@ func (a *App) applySettingsSnapshot(snap acp.SessionSettings) {
 		a.foot.SetSession("", a.modeID)
 	}
 	a.foot.SetSettings(snap.PermissionMode, snap.Overrides)
+	a.foot.SetToolset(snap.Toolset)
 	a.refreshFooterModel()
 	a.screen.RequestRender()
 }

@@ -75,7 +75,7 @@ Named model entries the agent and UI can select.
 | `models[].reasoning_default` | string |  | Reasoning level pre-selected for new chats; must be one of the resolved levels, otherwise ignored. |
 | `models[].allow_reasoning_off` | boolean | false | Expose Off in the reasoning selector for this model. Enable it only when this provider/model deployment honours Coddy's provider-specific request that disables reasoning; Coddy cannot verify that capability automatically. |
 | `models[].stream` | boolean or null | true | Transport used to talk to this model. Omit (or true) to stream over SSE. false issues one blocking completion request and delivers the whole answer at once, for servers or proxies that handle event streams badly. Rejected for providers of type codex, whose backend is streaming-only. |
-| `models[].toolset` | string |  | Name of the toolsets[] preset a session on this model is offered its tools by, unless the session picks another with /model <id> --toolset <name> or /toolset. Absent or empty offers every tool the mode would. Use it to spare a small-context local model the schemas of tools it never calls. |
+| `models[].toolset` | string |  | Name of the toolsets[] preset a session on this model is offered its tools by, unless the session picks another with /toolset <name>. Absent or empty offers every tool the mode would. Use it to spare a small-context local model the schemas of tools it never calls. |
 
 ### `agent`
 
@@ -437,11 +437,11 @@ Checks a session goal (/goal) after every turn with a second model, continues un
 
 ### `toolsets`
 
-Named presets of tool lists. A models[] row names one with toolset, and a session can pick one with /model <id> --toolset <name> or /toolset <name>. A preset only narrows: a tool the mode, a subagent definition or a switch already hides stays hidden, and a call to a tool outside the set is refused without a permission prompt. It is a context optimization, not a security boundary.
+Named presets of tool lists. A models[] row names one with toolset, and a session can pick one with /toolset <name>, on its own or after /model on the same line. A preset only narrows: a tool the mode, a subagent definition or a switch already hides stays hidden, and a call to a tool outside the set is refused without a permission prompt. It is a context optimization, not a security boundary.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `toolsets` | list of objects |  | Named presets of tool lists. A models[] row names one with toolset, and a session can pick one with /model <id> --toolset <name> or /toolset <name>. A preset only narrows: a tool the mode, a subagent definition or a switch already hides stays hidden, and a call to a tool outside the set is refused without a permission prompt. It is a context optimization, not a security boundary. |
+| `toolsets` | list of objects |  | Named presets of tool lists. A models[] row names one with toolset, and a session can pick one with /toolset <name>, on its own or after /model on the same line. A preset only narrows: a tool the mode, a subagent definition or a switch already hides stays hidden, and a call to a tool outside the set is refused without a permission prompt. It is a context optimization, not a security boundary. |
 | `toolsets[].name` | string |  | Name of the preset: letters, digits, '.', '_' and '-'. default is reserved: a session picks it to be offered every tool the mode offers. |
 | `toolsets[].tools` | list of strings |  | Allowlist: tool names, a bare *, or a prefix* (context7__* admits every tool of that MCP server). Absent or empty admits every tool the mode would. coddy -t warns about an entry that matches no tool. |
 | `toolsets[].disallowed_tools` | list of strings |  | Denylist applied after tools, with the same names and patterns; a name in both lists is removed. coddy -t warns about an entry that matches no tool. |

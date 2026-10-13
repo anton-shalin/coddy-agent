@@ -414,7 +414,7 @@ func UISchemaMap() map[string]interface{} {
 		"toolsets": map[string]interface{}{
 			"type":        "array",
 			"title":       "Toolsets",
-			"description": "Named presets of the tools a session is offered. A model names one as its own; a session picks one with /toolset or /model <id> --toolset.",
+			"description": "Named presets of the tools a session is offered. A model names one as its own; a session picks one with /toolset.",
 			"items": objectSchema("", "", toolsetProps,
 				[]string{"name", "tools", "disallowed_tools"},
 				[]string{"name"}),
