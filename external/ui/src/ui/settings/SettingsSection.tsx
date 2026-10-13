@@ -778,7 +778,13 @@ function objectSectionGroups(key: string): SchemaFormGroup[] | undefined {
       {
         id: "checks",
         legend: translate("settings.group.supervisor.checks"),
-        paths: ["model", "verify", "max_continuations", "token_budget"],
+        paths: [
+          "model",
+          "verify",
+          "max_continuations",
+          "token_budget",
+          "max_chain_sessions",
+        ],
       },
       {
         id: "watchdog",

@@ -181,6 +181,7 @@ agent:
 #   verify: true                  # a read-only subagent confirms a met goal against the files
 #   max_continuations: 10         # automatic turns per goal, then one wrap-up turn
 #   token_budget: 0               # uncached input + output tokens per goal; 0 = no cap
+#   max_chain_sessions: 10        # sessions a goal chain (/goal --then-file) opens; 0 = chains off
 #   stall_seconds: 300            # 0 disables the stall timer
 #   max_nudges: 2                 # recovery turns after a stall, a loop or a failed turn
 #   loop_repeat: 3                # repeated identical tool operations; 0 disables

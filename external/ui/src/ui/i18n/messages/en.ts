@@ -457,6 +457,9 @@ export const messagesEn: Record<string, string> = {
   "settings.schema.supervisor.token_budget.label": "Token budget",
   "settings.schema.supervisor.token_budget.desc":
     "Uncached input plus output tokens one goal may spend. 0 means no cap.",
+  "settings.schema.supervisor.max_chain_sessions.label": "Max chain sessions",
+  "settings.schema.supervisor.max_chain_sessions.desc":
+    "Sessions one goal chain (/goal --then-file) may open one after another. 0 turns goal chains off.",
   "settings.schema.supervisor.stall_seconds.label": "Stall seconds",
   "settings.schema.supervisor.stall_seconds.desc":
     "Silence before a goal turn is cut, excluding permission prompts, running tools and background tasks. 0 disables stall detection.",

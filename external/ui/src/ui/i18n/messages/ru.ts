@@ -463,6 +463,9 @@ export const messagesRu: Record<string, string> = {
   "settings.schema.supervisor.token_budget.label": "Бюджет токенов",
   "settings.schema.supervisor.token_budget.desc":
     "Некэшированные входные и выходные токены на одну цель. 0 снимает ограничение.",
+  "settings.schema.supervisor.max_chain_sessions.label": "Сессий в цепочке",
+  "settings.schema.supervisor.max_chain_sessions.desc":
+    "Сколько сессий одна цепочка целей (/goal --then-file) может открыть одну за другой. 0 отключает цепочки.",
   "settings.schema.supervisor.stall_seconds.label": "Простой, с",
   "settings.schema.supervisor.stall_seconds.desc":
     "Тишина, после которой ход цели прерывается; ожидание разрешения, работающий инструмент и фоновые задачи не учитываются. 0 отключает сторож простоя.",

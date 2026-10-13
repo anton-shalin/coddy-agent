@@ -404,8 +404,10 @@ func UISchemaMap() map[string]interface{} {
 				"max_continuations": intProp("Max continuations", "Automatic follow-up turns one goal may use before it stops as limited."),
 				"loop_repeat":       intProp("Loop repeat", "How many times a repeating cycle of identical tool operations may come round. 0 disables loop detection."),
 				"token_budget":      intProp("Token budget", "Uncached input plus output tokens one goal may spend. 0 means no cap."),
+				"max_chain_sessions": intProp("Max chain sessions",
+					"Sessions one goal chain (/goal --then-file) may open one after another. 0 turns goal chains off."),
 			},
-			[]string{"enable", "model", "verify", "max_continuations", "token_budget", "stall_seconds", "max_nudges", "loop_repeat"}, nil),
+			[]string{"enable", "model", "verify", "max_continuations", "token_budget", "max_chain_sessions", "stall_seconds", "max_nudges", "loop_repeat"}, nil),
 		"agent": objectSchema("ReAct loop", "Defaults for the main agent loop (model id and safety caps).",
 			map[string]interface{}{
 				"queue_mode": map[string]interface{}{"type": "string", "title": "Queue mode", "description": "Preferred action for Enter while a turn runs. Choose steer for the next ReAct step or after_turn for a new turn after the answer.", "enum": []interface{}{"steer", "after_turn"}},

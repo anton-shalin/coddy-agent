@@ -440,6 +440,15 @@ type SessionGoal struct {
 	// no default, empty when it offers none.
 	CheckModel     string `json:"checkModel,omitempty"`
 	CheckReasoning string `json:"checkReasoning,omitempty"`
+	// ThenFile is the follow-up file of a goal chain (/goal --then-file):
+	// once the goal is met, its text becomes the goal of a new session.
+	// ChainIndex is the goal's place in its chain: 0 for a goal the operator
+	// set, N in the N-th session the chain opened. ContinuedFrom and
+	// ContinuedIn are the sessions on either side.
+	ThenFile      string `json:"thenFile,omitempty"`
+	ChainIndex    int    `json:"chainIndex,omitempty"`
+	ContinuedFrom string `json:"continuedFrom,omitempty"`
+	ContinuedIn   string `json:"continuedIn,omitempty"`
 }
 
 // GoalCheck is one supervisor verdict.

@@ -39,7 +39,12 @@ type Manager struct {
 	// (supervisor.go); nil judge means the model-based default.
 	goalJudge    GoalJudge
 	goalVerifier GoalVerifier
-	log          *slog.Logger
+	// goalChainStart runs the first turn of a session a goal chain opened,
+	// nil where nothing can (goal_chain.go); goalChainRetry is the schedule
+	// of its retries while that session's turn lock is held.
+	goalChainStart GoalChainStarter
+	goalChainRetry goalChainRetry
+	log            *slog.Logger
 	// defaultCWD is used when session/new passes an empty cwd (from CLI default or os.Getwd).
 	defaultCWD string
 	store      *FileStore
@@ -1272,6 +1277,27 @@ type PromptRunOpts struct {
 	// turn, started by the subagent runtime. Every other prompt against a child
 	// is refused with ErrSubagentReadOnly (see RunSubagentTurn).
 	subagentTurn bool
+	// goalKickoff marks the first turn of a session a goal chain opened
+	// (goal_chain.go). The supervisor takes it once (takeGoalKickoff), since
+	// the same options run the messages queued during that turn.
+	goalKickoff *chainKickoff
+}
+
+// chainKickoff is the first turn of a chained session: the marker its first
+// message is stored with, and the goal it was built for.
+type chainKickoff struct {
+	marker *llm.GoalTurn
+	goalID string
+}
+
+// takeGoalKickoff returns the chain's kickoff, once.
+func (o *PromptRunOpts) takeGoalKickoff() *chainKickoff {
+	if o == nil {
+		return nil
+	}
+	k := o.goalKickoff
+	o.goalKickoff = nil
+	return k
 }
 
 // turnAdmission carries what beginTurn needs to know about the caller.
@@ -1564,10 +1590,13 @@ func (m *Manager) HandleSessionPromptWithSender(ctx context.Context, params acp.
 			return nil, err
 		}
 	}
-	// A turn an operator started: not a child's task, not a wake's report.
-	// Only such a turn reads settings commands and consumes the settings
-	// armed for the next turns (settings.go).
-	operatorTurn := opts == nil || (!opts.subagentTurn && opts.BackgroundWake == nil)
+	// The first turn of a session a goal chain opened (goal_chain.go): its
+	// prompt is the supervisor's kickoff, which nobody typed.
+	chainKickoff := opts != nil && opts.goalKickoff != nil
+	// A turn an operator started: not a child's task, not a wake's report,
+	// not a chain's kickoff. Only such a turn reads settings commands and
+	// consumes the settings armed for the next turns (settings.go).
+	operatorTurn := opts == nil || (!opts.subagentTurn && opts.BackgroundWake == nil && !chainKickoff)
 	var turnSettings []SettingsChange
 	if operatorTurn {
 		if opts != nil && opts.SettingsTaken {
@@ -1708,15 +1737,16 @@ func (m *Manager) HandleSessionPromptWithSender(ctx context.Context, params acp.
 	if err != nil {
 		return nil, err
 	}
-	if sd := strings.TrimSpace(state.GetPersistedSessionDir()); sd != "" && !subagentTurn && planMentionRuns && !restricted {
+	if sd := strings.TrimSpace(state.GetPersistedSessionDir()); sd != "" && !subagentTurn && !chainKickoff && planMentionRuns && !restricted {
 		if mentionSlug := ExtractRunPlanSlugFromPromptText(contentBlocksToPlainText(hydrated)); mentionSlug != "" {
 			return m.runPlanAdmitted(turnCtx, params.SessionID, mentionSlug, state, sender)
 		}
 	}
 	// The "@" references of the prompt are resolved once, here, into
 	// attachments of this message (mentions.go). A woken turn's prompt is
-	// Coddy's own report of finished tasks, not text anybody typed.
-	if opts == nil || opts.BackgroundWake == nil {
+	// Coddy's own report of finished tasks, and a chain's kickoff the
+	// supervisor's text: neither is text anybody typed.
+	if opts == nil || (opts.BackgroundWake == nil && !chainKickoff) {
 		hydrated = m.ResolvePromptMentions(turnCtx, state, hydrated, m.mentionScope(state, subagentTurn, askMode))
 	}
 

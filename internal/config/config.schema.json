@@ -256,7 +256,8 @@
         "max_nudges": {"type": ["integer", "null"], "description": "Recovery turns after a stall, a tool loop or a failed turn, per run of the supervisor.", "default": 2, "minimum": 0},
         "max_continuations": {"type": ["integer", "null"], "description": "Automatic continuation turns one goal may use; when they run out the goal gets one wrap-up turn and stops as limited.", "default": 10, "minimum": 0},
         "loop_repeat": {"type": ["integer", "null"], "description": "How many times a repeating cycle of identical tool operations (same call, same result) may come round before the watchdog cuts the turn. 0 disables loop detection.", "default": 3, "minimum": 0},
-        "token_budget": {"type": ["integer", "null"], "description": "Uncached input plus output tokens one goal's turns may spend; 0 means no cap.", "default": 0, "minimum": 0}
+        "token_budget": {"type": ["integer", "null"], "description": "Uncached input plus output tokens one goal's turns may spend; 0 means no cap.", "default": 0, "minimum": 0},
+        "max_chain_sessions": {"type": ["integer", "null"], "description": "Sessions one goal chain (/goal --then-file) may open one after another; when the goal of the last one is met, the chain stops. 0 turns goal chains off.", "default": 10, "minimum": 0}
       }
     },
     "prompts": {
