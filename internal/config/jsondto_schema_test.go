@@ -527,3 +527,43 @@ func TestUISchemaMetricsSection(t *testing.T) {
 		t.Fatalf("metrics.token is not a write-only field: %v", token)
 	}
 }
+
+// A binary that cannot run the exporter offers no Metrics tab. The section stays
+// in the settings document, so a save from that form still writes it back.
+func TestUISchemaJSONHidingOmitsSection(t *testing.T) {
+	raw, err := config.UISchemaJSONHiding("metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]interface{}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	props := doc["properties"].(map[string]interface{})
+	if _, shown := props["metrics"]; shown {
+		t.Fatal("the hidden section is still among the properties")
+	}
+	if _, kept := props["logger"]; !kept {
+		t.Fatal("hiding metrics dropped another section")
+	}
+	for _, key := range doc["x-coddy-property-order"].([]interface{}) {
+		if key == "metrics" {
+			t.Fatalf("the hidden section is still in the tab order: %v", doc["x-coddy-property-order"])
+		}
+	}
+
+	whole, err := config.UISchemaJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(whole, []byte(`"metrics"`)) {
+		t.Fatal("the full schema lost the section")
+	}
+	none, err := config.UISchemaJSONHiding()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(none, whole) {
+		t.Fatal("hiding nothing must give the full schema")
+	}
+}

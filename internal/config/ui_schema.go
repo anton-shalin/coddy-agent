@@ -10,7 +10,26 @@ import (
 // UISchemaJSON returns a JSON Schema (draft 2020-12) document for ConfigJSON (UI editor).
 // HTTPServer is omitted; listen bind is controlled via CLI, not this form.
 func UISchemaJSON() ([]byte, error) {
+	return UISchemaJSONHiding()
+}
+
+// UISchemaJSONHiding is UISchemaJSON without the named sections: the form of a
+// binary that cannot run them. A hidden section is still part of the settings
+// document (GET and PUT /coddy/config), which the form writes back whole, so a
+// save keeps it in the file.
+func UISchemaJSONHiding(hide ...string) ([]byte, error) {
 	doc := UISchemaMap()
+	props := doc["properties"].(map[string]interface{})
+	for _, key := range hide {
+		delete(props, key)
+	}
+	var order []interface{}
+	for _, key := range doc["x-coddy-property-order"].([]interface{}) {
+		if _, shown := props[key.(string)]; shown {
+			order = append(order, key)
+		}
+	}
+	doc["x-coddy-property-order"] = order
 	return json.Marshal(doc)
 }
 
