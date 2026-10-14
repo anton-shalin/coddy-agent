@@ -19,6 +19,9 @@ type RequestOptions struct {
 	// reasoning_default); empty sends no reasoning parameter at all, which is
 	// not the same request as the level "none".
 	ReasoningEffort string
+	// SupportedParameters is what the provider's model listing says the model
+	// takes (ProviderInput.SupportedParameters); nil keeps nothing known.
+	SupportedParameters []string
 }
 
 // Validate reports the first option a provider of providerType cannot send as
@@ -71,5 +74,8 @@ func (o RequestOptions) Apply(in *ProviderInput) {
 	}
 	if o.ReasoningEffort != "" {
 		in.ReasoningEffort = o.ReasoningEffort
+	}
+	if o.SupportedParameters != nil {
+		in.SupportedParameters = o.SupportedParameters
 	}
 }

@@ -1449,6 +1449,7 @@ func (a *Agent) runReActLoop(
 						ReasoningSignature:  reasonSig,
 						ToolCalls:           response.ToolCalls,
 						ReasoningDurationMs: reasoningMs,
+						ReasoningTokens:     response.ReasoningTokens,
 						Model:               transport.model,
 						CreatedAt:           time.Now().UTC().Format(time.RFC3339),
 					}
@@ -1546,6 +1547,7 @@ func (a *Agent) runReActLoop(
 			OutputTokens:      response.OutputTokens,
 			TotalTokens:       totalInputTokens + totalOutputTokens,
 			CachedInputTokens: response.CachedInputTokens,
+			ReasoningTokens:   response.ReasoningTokens,
 		})
 		a.progress.finishCall(response.OutputTokens)
 
@@ -1624,6 +1626,7 @@ func (a *Agent) runReActLoop(
 			ReasoningSignature:  reasonSig,
 			ToolCalls:           response.ToolCalls,
 			ReasoningDurationMs: reasoningMs,
+			ReasoningTokens:     response.ReasoningTokens,
 			Truncated:           stopsPartway(response, cutCall),
 			Model:               transport.model,
 			CreatedAt:           time.Now().UTC().Format(time.RFC3339),
@@ -3115,6 +3118,12 @@ func (a *Agent) llmProviderInput(rm *config.ResolvedLLM) llm.ProviderInput {
 		Temperature:   rm.Temperature,
 		DisableStream: !rm.Stream,
 		Timeout:       time.Duration(rm.TimeoutMS) * time.Millisecond,
+	}
+	// What the provider's model listing says the model takes, read on the
+	// manager's cache: an OpenRouter-style aggregator gets the reasoning level
+	// in the form its listing names (issue #258).
+	if mp, ok := a.state.(modelParametersState); ok {
+		in.SupportedParameters = mp.ModelParameters(a.cfg, rm.ProviderName, rm.Model)
 	}
 	// The stall guard (agent.llm_stream_idle_timeout_ms) watches the gaps
 	// between the bytes of a streamed answer; a blocking answer arrives in

@@ -25,7 +25,16 @@ func (s *Server) runDirectYAMLCompletion(ctx context.Context, st *session.State,
 	if mk == nil {
 		mk = defaultMakeLLMFromYAML
 	}
-	provider, err := mk(s.activeCfg(), yamlSel, opts)
+	cfg := s.activeCfg()
+	// What the provider's model listing said the model takes, as far as the
+	// session's manager has read it: an OpenRouter-style aggregator gets the
+	// reasoning level in the form its listing names (issue #258).
+	if cfg != nil && opts.SupportedParameters == nil {
+		if ent := cfg.FindModelEntry(yamlSel); ent != nil {
+			opts.SupportedParameters = st.ModelParameters(cfg, ent.ProviderName(), ent.APIModel())
+		}
+	}
+	provider, err := mk(cfg, yamlSel, opts)
 	if err != nil {
 		return nil, err
 	}
