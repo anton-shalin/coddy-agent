@@ -3309,6 +3309,25 @@ func TestHTTPAuthExtraTokensEnableAuth(t *testing.T) {
 	}
 }
 
+// The scrape token of the metrics exporter is a credential of its own listener: the
+// API neither accepts it nor turns its gate on because one is set.
+func TestHTTPAuthIgnoresTheMetricsToken(t *testing.T) {
+	gated := cfgWithAuth("s3cret")
+	gated.Metrics.Token = "scrape-me"
+	_, ts := authTestServer(t, gated)
+	for _, path := range []string{"/v1/models", "/coddy/config", "/coddy/sessions"} {
+		if got := authGET(t, ts.URL+path, "scrape-me"); got != http.StatusUnauthorized {
+			t.Errorf("GET %s with the metrics token: %d, want 401", path, got)
+		}
+	}
+	open := cfgWithAuth("")
+	open.Metrics.Token = "scrape-me"
+	_, ts = authTestServer(t, open)
+	if got := authGET(t, ts.URL+"/v1/models", ""); got != http.StatusOK {
+		t.Errorf("a metrics token alone gated the API: %d, want 200", got)
+	}
+}
+
 func TestHTTPAuthPublicDocs(t *testing.T) {
 	srv, ts := authTestServer(t, cfgWithAuth("s3cret"))
 	if got := authGET(t, ts.URL+"/openapi.yaml", ""); got != http.StatusUnauthorized {

@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -38,6 +39,7 @@ type exporterState struct {
 	rt        *serve.Runtime
 	collector *Collector
 	model     *httptest.Server
+	asked     atomic.Int64 // requests the model received
 	cancel    context.CancelFunc
 	stopped   chan error
 
@@ -153,7 +155,11 @@ func (s *exporterState) providerWithModel(provider, model string) error {
 	stub := &llmstub.Server{Model: api, StripTags: []string{"turn_context"}, Rules: []llmstub.Rule{
 		{Match: "SECRET-PROMPT", Answer: "A scripted answer."},
 	}}
-	s.model = httptest.NewServer(stub.Handler())
+	handler := stub.Handler()
+	s.model = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.asked.Add(1)
+		handler.ServeHTTP(w, r)
+	}))
 
 	next := *s.rt.Cfg()
 	next.Providers = []config.ProviderConfig{{Name: provider, Type: "openai", APIBase: s.model.URL + "/v1", APIKey: "sk-stub"}}
@@ -235,9 +241,16 @@ func (s *exporterState) scrape(path, token string) (string, error) {
 	return string(body), nil
 }
 
+// prometheusScrapes also holds that a scrape asks the provider nothing.
 func (s *exporterState) prometheusScrapes(path, token string) (err error) {
-	s.after, err = s.scrape(path, token)
-	return err
+	asked := s.asked.Load()
+	if s.after, err = s.scrape(path, token); err != nil {
+		return err
+	}
+	if n := s.asked.Load() - asked; n != 0 {
+		return fmt.Errorf("the scrape sent %d requests to the provider", n)
+	}
+	return nil
 }
 
 // total is the value of a series, or zero when the scrape holds none.
