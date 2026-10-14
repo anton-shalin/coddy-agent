@@ -68,6 +68,33 @@ Human prose for HTTP lives in **`docs/reference/http-api.md`**. Visual spec for 
 
 All **code comments** plus **technical markdown authored for this repo** (including `docs/`, `DESIGN.md`, `AGENTS.md`) stay **English** unless an operator explicitly asks for another natural language.
 
+## Prose skills
+
+Prose this repository publishes - the pages under **`docs/`** in both languages, **`DESIGN.md`**, the dictionaries under **`external/ui/src/ui/i18n/messages/`**, commit messages, pull request and issue text, review replies - is often drafted by a coding agent, and an agent's draft carries the patterns of machine-written text: stock openers, binary contrasts, em dashes, officialese, calques from English in Russian. Whoever works on this repository with an agent installs these four skills and runs a draft through them before it is final:
+
+| Skill | What it checks | Applies to |
+| --- | --- | --- |
+| [stop-slop](https://github.com/hardikpandya/stop-slop) | the patterns of machine-written prose | any prose |
+| [humanizer-ru](https://github.com/ilyautov/humanizer-ru) | the same for Russian: officialese, calques, filler, translationese | Russian text |
+| [ru-text](https://github.com/talkstream/ru-text) | Russian info style, editing and interface copy | Russian text, the `ru` dictionary |
+| [logika](https://github.com/EvilFreelancer/logika) | whether the claims of a text agree with each other and follow from what it says | any text that explains or argues |
+
+The universal skills CLI installs each one where the agents on the machine read skills:
+
+```bash
+npx skills add hardikpandya/stop-slop
+npx skills add ilyautov/humanizer-ru
+npx skills add talkstream/ru-text
+npx skills add EvilFreelancer/logika
+```
+
+Without it, clone each repository into your agent's skill folder under the skill's name: `~/.claude/skills/<name>` (Claude Code), `~/.codex/skills/<name>` (Codex), `~/.cursor/skills/<name>` (Cursor), `~/.agents/skills/<name>` or `${CODDY_HOME:-~/.coddy}/skills/<name>` (Coddy). Coddy also installs logika by itself with **`coddy skills sync`**, from the rpa-skills catalog it ships as a built-in source.
+
+How they apply here:
+- write the draft first, then run it through the skills; humanize only what the agent wrote, never a quotation, the operator's own wording or literal text (code, keys, commands, the labels a page takes from the dictionaries);
+- documentation and interface copy are technical text for humanizer-ru: fix the critical patterns and the calques, keep the structure, the terms and the format;
+- where a skill and this repository disagree, the repository wins: typography follows the paired **documentation translation rule** (a hyphen with spaces, never an em or en dash; straight quotes, never the guillemets ru-text would put in), the glossary there and the paired **Russian wording rule** hold, and a translation still says what its English page says.
+
 ## Agent host integrations
 
 **`AGENTS.md`** is the repository-wide baseline, and **`CLAUDE.md`** remains its compatibility symlink. Cursor and Claude Code use paired native rule trees under **`.cursor/rules/`** and **`.claude/rules/`**. Their bodies and activation intent stay equivalent, but neither vendor tree is a universal policy format.

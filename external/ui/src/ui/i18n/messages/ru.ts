@@ -300,6 +300,19 @@ export const messagesRu: Record<string, string> = {
   "settings.nav.aria.sections": "Разделы настроек",
   "settings.tileGrid.aria": "Разделы настроек",
 
+  "settings.search.placeholder": "Поиск по настройкам",
+  "settings.search.results": "Найденные настройки",
+  "settings.search.empty":
+    "Ничего не нашлось. Попробуйте другие слова или уберите лишние",
+  "settings.search.found.one": "Найдена {count} настройка",
+  "settings.search.found.few": "Найдены {count} настройки",
+  "settings.search.found.many": "Найдено {count} настроек",
+  "settings.search.found.other": "Найдено {count} настройки",
+  "settings.search.more.one": "Ещё {count} совпадение, уточните запрос",
+  "settings.search.more.few": "Ещё {count} совпадения, уточните запрос",
+  "settings.search.more.many": "Ещё {count} совпадений, уточните запрос",
+  "settings.search.more.other": "Ещё {count} совпадения, уточните запрос",
+
   "settings.array.add": "Добавить",
   "settings.array.removeTitle": "Удалить",
   "settings.array.removeAria": "Удалить",
@@ -317,8 +330,6 @@ export const messagesRu: Record<string, string> = {
   "settings.map.nameAria": "{label} {n}, имя",
   "settings.map.valueAria": "{label} {n}, значение",
 
-  "settings.field.apiBaseFallback": "Базовый URL API",
-  "settings.field.modelIdFallback": "Идентификатор модели",
   "settings.field.defaultModelFallback": "Модель по умолчанию",
   "settings.field.provider": "Провайдер",
   "settings.field.providerPlaceholder": "провайдер",
@@ -1139,12 +1150,12 @@ export const messagesRu: Record<string, string> = {
   "skills.loading": "Загрузка:",
   "skills.installed.legend": "Установленные скилы",
   "skills.autoDiscovery.legend": "Автообнаружение скилов",
-  "skills.autoDiscovery.aria": "Автообнаружение скилы",
+  "skills.autoDiscovery.aria": "Автообнаружение скилов",
   "skills.autoDiscovery.fallbackDesc":
     "Позволить агенту самостоятельно загружать полные инструкции подходящего скила (инструмент load_skill под управлением модели), а не только по команде /name.",
   "skills.install.searchPlaceholder": "Поиск скилов в маркете для установки:",
   "skills.install.loadingMarketplaces": "Загрузка маркетов:",
-  "skills.install.noMatches": "Подходящие скилы в марктплейсе не найдены.",
+  "skills.install.noMatches": "Подходящие скилы в маркетплейсе не найдены.",
   "skills.install.moreHint": "+{count} ещё — уточните запрос",
   "skills.install.installTitle": "Установить {name}",
   "skills.install.installAria": "Установить {name}",

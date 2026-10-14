@@ -164,6 +164,12 @@ jobs:
         if: matrix.tags == 'http,scheduler,ui,memory,cli,swarm'
         run: CODDY_BIN="$PWD/build/coddy" npm --prefix external/ui run check:files
 
+      # The Settings search in Chromium, in English and Russian, from a desktop
+      # to a phone: a result must reveal its setting, on an agent and on a relay.
+      - name: Drive the Settings search in a browser
+        if: matrix.tags == 'http,scheduler,ui,memory,cli,swarm'
+        run: CODDY_BIN="$PWD/build/coddy" npm --prefix external/ui run check:settings-search
+
   # The integration layer against tgfake (github.com/EvilFreelancer/tgfake),
   # the fake Telegram Bot API and scripted model this repository tests its
   # bot with. The gateway suite above runs tgfake in-process at the version

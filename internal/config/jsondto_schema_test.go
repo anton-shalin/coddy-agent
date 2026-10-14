@@ -1,7 +1,9 @@
 package config_test
 
 import (
+	"bytes"
 	"encoding/json"
+	"flag"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -419,5 +421,49 @@ func TestUISchemaDescribesDefaultHeadersAsAStringMap(t *testing.T) {
 	order, _ := section["x-coddy-property-order"].([]interface{})
 	if len(order) != 2 || order[0] != "allowlist" || order[1] != "default_headers" {
 		t.Errorf("property order = %v", order)
+	}
+}
+
+var updateTestdata = flag.Bool("update", false, "rewrite testdata/ui_schema*.json from the builders")
+
+// The web UI's tests read checked copies of the schemas the settings form is
+// served (external/ui/src/ui/settings/settingsServer.fakes.ts), so a schema
+// edit that leaves them behind fails here. Regenerate them with
+//
+//	go test ./internal/config -run '^TestUISchemaTestdataIsCurrent$' -update
+func TestUISchemaTestdataIsCurrent(t *testing.T) {
+	for _, tc := range []struct {
+		file  string
+		build func() ([]byte, error)
+	}{
+		{"ui_schema.json", config.UISchemaJSON},
+		{"ui_schema_relay.json", config.RelayUISchemaJSON},
+	} {
+		t.Run(tc.file, func(t *testing.T) {
+			compact, err := tc.build()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var pretty bytes.Buffer
+			if err := json.Indent(&pretty, compact, "", "  "); err != nil {
+				t.Fatal(err)
+			}
+			pretty.WriteByte('\n')
+			path := filepath.Join("testdata", tc.file)
+			if *updateTestdata {
+				if err := os.WriteFile(path, pretty.Bytes(), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("%v\nregenerate with: go test ./internal/config -run '^TestUISchemaTestdataIsCurrent$' -update", err)
+			}
+			got := strings.ReplaceAll(string(raw), "\r\n", "\n")
+			if got != pretty.String() {
+				t.Fatalf("%s is stale; regenerate with: go test ./internal/config -run '^TestUISchemaTestdataIsCurrent$' -update", path)
+			}
+		})
 	}
 }

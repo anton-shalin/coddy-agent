@@ -298,6 +298,16 @@ export const messagesEn: Record<string, string> = {
   "settings.nav.aria.sections": "Settings sections",
   "settings.tileGrid.aria": "Settings sections",
 
+  "settings.search.placeholder": "Search settings",
+  "settings.search.results": "Matching settings",
+  "settings.search.empty": "No matching settings; try other or fewer words",
+  "settings.search.found.one": "{count} setting found",
+  "settings.search.found.other": "{count} settings found",
+  "settings.search.more.one":
+    "{count} more setting matches - add a word to narrow the list",
+  "settings.search.more.other":
+    "{count} more settings match - add a word to narrow the list",
+
   "settings.array.add": "Add",
   "settings.array.removeTitle": "Remove",
   "settings.array.removeAria": "Remove",
@@ -314,8 +324,6 @@ export const messagesEn: Record<string, string> = {
   "settings.map.nameAria": "{label} {n}: name",
   "settings.map.valueAria": "{label} {n}: value",
 
-  "settings.field.apiBaseFallback": "API base URL",
-  "settings.field.modelIdFallback": "Model id",
   "settings.field.defaultModelFallback": "Default model",
   "settings.field.provider": "Provider",
   "settings.field.providerPlaceholder": "provider",

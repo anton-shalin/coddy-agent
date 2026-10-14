@@ -1244,6 +1244,9 @@ export function App() {
   const [settingsItem, setSettingsItem] = useState<string | null>(() =>
     initialRoute.branch === "settings" ? initialRoute.item : null,
   );
+  const [settingsField, setSettingsField] = useState<string | null>(() =>
+    initialRoute.branch === "settings" ? initialRoute.field : null,
+  );
   const [schedulerEditor, setSchedulerEditor] =
     useState<SchedulerEditorState>(null);
   const [schedulerJobs, setSchedulerJobs] = useState<SchedulerJob[]>([]);
@@ -2577,6 +2580,7 @@ export function App() {
       setSettingsRoute(true);
       setSettingsSection(p.section);
       setSettingsItem(p.item);
+      setSettingsField(p.field);
       setSchedulerOpen(false);
       setSchedulerEditor(null);
       if (isStackedShell()) setTasksOpen(false);
@@ -7838,6 +7842,7 @@ export function App() {
               }}
               initialSection={settingsSection}
               initialItem={settingsItem}
+              initialField={settingsField}
               activeSessionId={sidebarActiveId}
               onSessionsDeleted={onSessionsDeletedInSettings}
               // spawn_agent resolves definitions against the session's own

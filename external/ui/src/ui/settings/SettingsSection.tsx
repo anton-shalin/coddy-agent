@@ -21,10 +21,12 @@ import { MCPSection } from "./MCPSection";
 import { schemaFieldDesc, schemaFieldLabel } from "./schemaI18n";
 import { SettingsArraySection } from "./SettingsArraySection";
 import { SessionsManager } from "../sessions/SessionsManager";
-import { SkillsSection } from "./SkillsSection";
+import { SKILLS_HAND_DRAWN_FIELD, SkillsSection } from "./SkillsSection";
 import { SubagentsSection } from "./SubagentsSection";
 import {
   SESSIONS_CONFIG_KEY,
+  SETTINGS_TEXTS,
+  type OverrideTexts,
   type SectionDescriptor,
 } from "./settingsSections";
 import { useT } from "../i18n/I18nProvider";
@@ -113,12 +115,14 @@ function stringList(v: unknown, key: string): string[] {
     .filter((s) => s.trim() !== "");
 }
 
-function NeuralDeepAPIBaseField(props: { ctx: FieldOverrideContext }) {
-  const { schema, value, onChange } = props.ctx;
+function NeuralDeepAPIBaseField(props: {
+  ctx: FieldOverrideContext;
+  texts: OverrideTexts;
+}) {
+  const { value, onChange } = props.ctx;
+  const { texts } = props;
   const { t } = useT();
-  const label =
-    schemaFieldLabel("providers", "api_base", schema.title, "api_base") ||
-    t("settings.field.apiBaseFallback");
+  const label = texts.primary;
   const stored = String(value ?? "").trim();
   const matched = matchNeuralDeepAPIBase(value);
 
@@ -131,10 +135,7 @@ function NeuralDeepAPIBaseField(props: { ctx: FieldOverrideContext }) {
   // note below explains why the stored value is not it.
   return (
     <div className="settings-row">
-      <FieldLabel
-        label={label}
-        description={t("neuralDeepApiBase.description")}
-      />
+      <FieldLabel label={label} description={texts.primaryDesc} />
       <select
         className="settings-input"
         value={matched || NEURALDEEP_DEFAULT_API_BASE}
@@ -160,22 +161,28 @@ function NeuralDeepAPIBaseField(props: { ctx: FieldOverrideContext }) {
   );
 }
 
-function neuralDeepAPIBaseOverride(ctx: FieldOverrideContext) {
-  const providerType =
-    ctx.parentObj?.type === undefined || ctx.parentObj.type === null
-      ? ""
-      : String(ctx.parentObj.type);
-  if (ctx.path !== "api_base" || providerType !== "neuraldeep") {
-    return null;
-  }
+// A row's text value as the override reads it: absent and null are empty.
+function rowText(row: Record<string, unknown> | undefined, key: string) {
+  const v = row?.[key];
+  return v === undefined || v === null ? "" : String(v);
+}
+
+// The row's unsaved proxy, so a sign-in block dials the route the form shows.
+function rowProxy(row: Record<string, unknown> | undefined) {
+  return Object.prototype.hasOwnProperty.call(row ?? {}, "proxy")
+    ? { proxy: String(row?.proxy ?? "") }
+    : {};
+}
+
+function neuralDeepAPIBaseOverride(
+  ctx: FieldOverrideContext,
+  texts: OverrideTexts,
+) {
   // The overrides stack: the endpoint picker keeps the api_base slot, and the
   // hub sign-in block renders below it. The manual api_key field above stays
   // fully functional - an explicit key wins over the stored login, which the
   // sign-in block reports instead of hiding.
-  const providerName =
-    ctx.parentObj?.name === undefined || ctx.parentObj.name === null
-      ? ""
-      : String(ctx.parentObj.name);
+  const providerName = rowText(ctx.parentObj, "name");
   const hasExplicitKey =
     String(ctx.parentObj?.api_key ?? "").trim() !== "" ||
     String(ctx.parentObj?.api_key_command ?? "").trim() !== "";
@@ -185,94 +192,141 @@ function neuralDeepAPIBaseOverride(ctx: FieldOverrideContext) {
     matchNeuralDeepAPIBase(ctx.value) || NEURALDEEP_DEFAULT_API_BASE;
   return (
     <>
-      <NeuralDeepAPIBaseField ctx={ctx} />
+      <NeuralDeepAPIBaseField ctx={ctx} texts={texts} />
       <NeuralDeepAuthField
         providerName={providerName}
         hasExplicitKey={hasExplicitKey}
         apiBase={apiBase}
-        {...(Object.prototype.hasOwnProperty.call(ctx.parentObj ?? {}, "proxy")
-          ? { proxy: String(ctx.parentObj?.proxy ?? "") }
-          : {})}
+        texts={texts}
+        {...rowProxy(ctx.parentObj)}
       />
     </>
   );
 }
 
-// Every provider type has the proxy switch and URL field, codex included: its
-// sign-in and its requests take the row's route like any other.
-function providerProxyOverride(ctx: FieldOverrideContext) {
-  return (
-    <ProxySettingField
-      value={ctx.value}
-      onChange={ctx.onChange}
-      label={schemaFieldLabel("providers", "proxy", ctx.schema.title, "proxy")}
-      description={schemaFieldDesc(
-        "providers",
-        "proxy",
-        ctx.schema.description,
-      )}
-    />
-  );
+/**
+ * What an override draws in a field's box: false (nothing), null (the
+ * schema's own control) or its texts. The overrides draw from it and the
+ * settings search indexes it, so what is searched is what is shown.
+ */
+export function overrideTexts(
+  domain: string,
+  path: string,
+  parent: Record<string, unknown> | undefined,
+  schema: JsonSchema,
+): false | null | OverrideTexts {
+  const label = () =>
+    schemaFieldLabel(
+      domain,
+      path,
+      schema.title,
+      path.slice(path.lastIndexOf(".") + 1),
+    );
+  const desc = () => schemaFieldDesc(domain, path, schema.description);
+  // The URL row speaks the schema; the switch above it, whose requests go direct.
+  const proxy = (ignore: { label: string; desc: string }) => ({
+    primary: label(),
+    primaryDesc: desc(),
+    second: translate(ignore.label),
+    secondDesc: translate(ignore.desc),
+  });
+  if (domain === "providers") {
+    if (path === "proxy") {
+      return proxy(SETTINGS_TEXTS.proxyIgnoreSystem);
+    }
+    const providerType = rowText(parent, "type");
+    if (
+      path === "usage_limits_panel" &&
+      !USAGE_PANEL_PROVIDER_TYPES.has(providerType)
+    ) {
+      return false;
+    }
+    if (providerType === "codex") {
+      if (path === "api_key" || path === "api_key_command") {
+        return false;
+      }
+      if (path === "api_base") {
+        return {
+          primary: translate(SETTINGS_TEXTS.codexAccount.label),
+          primaryDesc: translate(SETTINGS_TEXTS.codexAccount.desc),
+        };
+      }
+    }
+    if (providerType === "neuraldeep" && path === "api_base") {
+      return {
+        primary: label(),
+        primaryDesc: translate(SETTINGS_TEXTS.neuralDeepApiBase.desc),
+        second: translate(SETTINGS_TEXTS.neuralDeepAccount.label),
+        secondDesc: translate(SETTINGS_TEXTS.neuralDeepAccount.desc),
+      };
+    }
+    return null;
+  }
+  if (domain === "models") {
+    return path === "model"
+      ? {
+          primary: label(),
+          second: translate(SETTINGS_TEXTS.modelProvider.label),
+        }
+      : null;
+  }
+  if (domain === "gateways") {
+    return path === "telegram.proxy" || path === "pachca.proxy"
+      ? proxy(SETTINGS_TEXTS.gatewayProxyIgnoreSystem)
+      : null;
+  }
+  if (domain === "skills") {
+    return path === SKILLS_HAND_DRAWN_FIELD ? false : null;
+  }
+  return null;
+}
+
+// A field override's answer: false draws nothing, null leaves it to the schema.
+function boxFor(domain: string, ctx: FieldOverrideContext) {
+  return overrideTexts(domain, ctx.path, ctx.parentObj, ctx.schema);
 }
 
 // A bot's proxy reads like a provider's, so it gets the same switch and URL
 // field (Gateways tab, the Telegram and Pachca blocks).
 function gatewaysFieldOverride(ctx: FieldOverrideContext) {
-  if (ctx.path !== "telegram.proxy" && ctx.path !== "pachca.proxy") {
-    return null;
-  }
+  const box = boxFor("gateways", ctx);
   return (
-    <ProxySettingField
-      value={ctx.value}
-      onChange={ctx.onChange}
-      label={schemaFieldLabel("gateways", ctx.path, ctx.schema.title, "proxy")}
-      description={schemaFieldDesc(
-        "gateways",
-        ctx.path,
-        ctx.schema.description,
-      )}
-      switchDescriptionKey="settings.gatewayProxy.ignoreSystemDesc"
-    />
+    box && (
+      <ProxySettingField
+        value={ctx.value}
+        onChange={ctx.onChange}
+        texts={box}
+      />
+    )
   );
 }
 
 function providerFieldOverride(ctx: FieldOverrideContext) {
+  const box = boxFor("providers", ctx);
+  if (box === false || box === null) {
+    return box;
+  }
+  // Every provider type has the proxy switch and URL field, codex included: its
+  // sign-in and its requests take the row's route like any other.
   if (ctx.path === "proxy") {
-    return providerProxyOverride(ctx);
+    return (
+      <ProxySettingField
+        value={ctx.value}
+        onChange={ctx.onChange}
+        texts={box}
+      />
+    );
   }
-  const providerType =
-    ctx.parentObj?.type === undefined || ctx.parentObj.type === null
-      ? ""
-      : String(ctx.parentObj.type);
-  if (
-    ctx.path === "usage_limits_panel" &&
-    !USAGE_PANEL_PROVIDER_TYPES.has(providerType)
-  ) {
-    return false;
+  if (rowText(ctx.parentObj, "type") === "codex") {
+    return (
+      <CodexAuthField
+        providerName={rowText(ctx.parentObj, "name")}
+        texts={box}
+        {...rowProxy(ctx.parentObj)}
+      />
+    );
   }
-  if (providerType === "codex") {
-    if (ctx.path === "api_key" || ctx.path === "api_key_command") {
-      return false;
-    }
-    if (ctx.path === "api_base") {
-      const providerName =
-        ctx.parentObj?.name === undefined || ctx.parentObj.name === null
-          ? ""
-          : String(ctx.parentObj.name);
-      return (
-        <CodexAuthField
-          providerName={providerName}
-          {...(Object.prototype.hasOwnProperty.call(
-            ctx.parentObj ?? {},
-            "proxy",
-          )
-            ? { proxy: String(ctx.parentObj?.proxy ?? "") }
-            : {})}
-        />
-      );
-    }
-  }
-  return neuralDeepAPIBaseOverride(ctx);
+  return neuralDeepAPIBaseOverride(ctx, box);
 }
 
 /**
@@ -359,13 +413,7 @@ export function SettingsSection(props: {
             value={asObject(doc[SESSIONS_CONFIG_KEY])}
             onChange={(v) => setKey(SESSIONS_CONFIG_KEY, v)}
             i18nDomain={SESSIONS_CONFIG_KEY}
-            groups={[
-              {
-                id: "sessions-storage",
-                legend: t("settings.group.sessions.storage"),
-                description: t("settings.group.sessions.storageDesc"),
-              },
-            ]}
+            groups={sessionsFormGroups()}
           />
         ) : null}
         <SessionsManager
@@ -489,20 +537,20 @@ export function SettingsSection(props: {
               );
             }
             if (ctx.path === "model") {
+              const box = boxFor(key, ctx);
               return (
-                <ModelField
-                  value={
-                    ctx.value === undefined || ctx.value === null
-                      ? ""
-                      : String(ctx.value)
-                  }
-                  onChange={(v) => ctx.onChange(v)}
-                  providers={providerRows}
-                  label={
-                    schemaFieldLabel(key, "model", ctx.schema.title, "model") ||
-                    t("settings.field.modelIdFallback")
-                  }
-                />
+                box && (
+                  <ModelField
+                    value={
+                      ctx.value === undefined || ctx.value === null
+                        ? ""
+                        : String(ctx.value)
+                    }
+                    onChange={(v) => ctx.onChange(v)}
+                    providers={providerRows}
+                    texts={box}
+                  />
+                )
               );
             }
             // 0 means "whatever the provider's listing reports" at run time;
@@ -609,46 +657,9 @@ export function SettingsSection(props: {
         i18nDomain={section.id}
         groups={
           key === "providers"
-            ? [
-                { id: "provider", legend: t("settings.providers.group.main") },
-                {
-                  id: "advanced",
-                  legend: t("settings.providers.group.advanced"),
-                  paths: ["api_key_command", "proxy", "timeout_ms"],
-                  collapsible: true,
-                },
-              ]
+            ? providerFormGroups()
             : key === "models"
-              ? [
-                  // Which model it is and what it can take in, how it
-                  // answers, how hard it thinks, and which toolset it is
-                  // offered its tools by.
-                  {
-                    id: "model",
-                    legend: t("settings.models.group.model"),
-                    paths: ["model", "max_context_tokens", "multimodal"],
-                  },
-                  {
-                    id: "generation",
-                    legend: t("settings.models.group.generation"),
-                    paths: ["max_tokens", "temperature", "stream"],
-                  },
-                  {
-                    id: "reasoning",
-                    legend: t("settings.models.group.reasoning"),
-                    paths: [
-                      "reasoning_levels",
-                      "reasoning_default",
-                      "allow_reasoning_off",
-                    ],
-                  },
-                  {
-                    id: "tools",
-                    legend: t("settings.models.group.tools"),
-                    description: t("settings.models.group.toolsDesc"),
-                    paths: ["toolset"],
-                  },
-                ]
+              ? modelFormGroups()
               : undefined
         }
         itemFooter={
@@ -709,13 +720,7 @@ export function SettingsSection(props: {
               value={asObject(doc[ck])}
               onChange={(v) => setKey(ck, v)}
               i18nDomain={`system.${ck}`}
-              groups={[
-                {
-                  id: ck,
-                  legend: schemaFieldLabel("system", ck, sub.title, ck),
-                  description: schemaFieldDesc("system", ck, sub.description),
-                },
-              ]}
+              groups={systemPartGroups(ck, sub)}
             />
           );
         })}
@@ -773,13 +778,80 @@ export function SettingsSection(props: {
   );
 }
 
+export function providerFormGroups(): SchemaFormGroup[] {
+  return [
+    { id: "provider", legend: translate("settings.providers.group.main") },
+    {
+      id: "advanced",
+      legend: translate("settings.providers.group.advanced"),
+      paths: ["api_key_command", "proxy", "timeout_ms"],
+      collapsible: true,
+    },
+  ];
+}
+
+/**
+ * Which model it is and what it can take in, how it answers, how hard it
+ * thinks, and which toolset it is offered its tools by.
+ */
+export function modelFormGroups(): SchemaFormGroup[] {
+  return [
+    {
+      id: "model",
+      legend: translate("settings.models.group.model"),
+      paths: ["model", "max_context_tokens", "multimodal"],
+    },
+    {
+      id: "generation",
+      legend: translate("settings.models.group.generation"),
+      paths: ["max_tokens", "temperature", "stream"],
+    },
+    {
+      id: "reasoning",
+      legend: translate("settings.models.group.reasoning"),
+      paths: ["reasoning_levels", "reasoning_default", "allow_reasoning_off"],
+    },
+    {
+      id: "tools",
+      legend: translate("settings.models.group.tools"),
+      description: translate("settings.models.group.toolsDesc"),
+      paths: ["toolset"],
+    },
+  ];
+}
+
+export function sessionsFormGroups(): SchemaFormGroup[] {
+  return [
+    {
+      id: "sessions-storage",
+      legend: translate("settings.group.sessions.storage"),
+      description: translate("settings.group.sessions.storageDesc"),
+    },
+  ];
+}
+
+export function systemPartGroups(
+  key: string,
+  sub: JsonSchema,
+): SchemaFormGroup[] {
+  return [
+    {
+      id: key,
+      legend: schemaFieldLabel("system", key, sub.title, key),
+      description: schemaFieldDesc("system", key, sub.description),
+    },
+  ];
+}
+
 /**
  * The fieldsets an object section's form is laid out in, fields that belong
  * together side by side. A section's `enable` opens the form outside them,
  * and its lists and nested objects are blocks of their own beside them.
  * Sections not listed stand as one list of fields.
  */
-function objectSectionGroups(key: string): SchemaFormGroup[] | undefined {
+export function objectSectionGroups(
+  key: string,
+): SchemaFormGroup[] | undefined {
   if (key === "agent") {
     return [
       {

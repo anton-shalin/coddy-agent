@@ -105,6 +105,9 @@ The composer is a plain `textarea`; keys not listed here keep their browser mean
 | Escape | a menu of the composer (Mode, Model, Reasoning, Permission), the environment, folder or branch menu | close it, wherever the focus is |
 | Escape | folder browser (Open folder…) | fold the new folder row when it is open, else close the browser as Cancel does |
 | Escape | Skills install search in Settings, with a query typed | clear it and take the marketplace results away; the next Escape is the drawer's |
+| / | Settings, outside a text field or a select | put the cursor in the settings search and show its results; on a narrow screen with a section open, go back to the tiles first; a `/` badge in the empty field shows the key while the field is not focused, on every width, and a touch-only device has none ([Web UI](../surfaces/web-ui.md#settings-search)) |
+| ArrowUp / ArrowDown, Enter | settings search with results | move the highlighted result, open it |
+| Escape | settings search | with results showing, clear the query; in the field with them hidden, clear the query; the next Escape belongs to the drawer |
 | Escape | a screen the rail opened: History, Scheduler, Swarm over a chat, Docs, Settings | close it as its × does, back to what was under it; one step at a time: an open job of the scheduler or its runs, an open row of Settings and a Settings section on a phone or tablet go back first, and an open menu, picker, tip or combobox list, or a search with text in it, takes the key before the screen ([Web UI](../surfaces/web-ui.md#layout)) |
 | Enter | question prompt | send the answer, once every question has one; typed in the composer it still belongs to the composer |
 | Escape | question prompt | skip the questions, unless a screen of the rail is open over the chat or a picker of the composer took the key |
