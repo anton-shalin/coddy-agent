@@ -54,6 +54,7 @@ type instance struct {
 	done        chan struct{}
 	fingerprint string
 	restartKey  string
+	auxiliary   bool
 }
 
 // NewSupervisor prepares a supervisor over every subsystem this binary knows
@@ -127,6 +128,7 @@ func (s *Supervisor) start(ctx context.Context, sub Subsystem, cfg *config.Confi
 		done:        make(chan struct{}),
 		fingerprint: sub.fingerprint(cfg),
 		restartKey:  sub.restartKey(cfg),
+		auxiliary:   sub.Auxiliary,
 	}
 	s.mu.Lock()
 	s.running[sub.Kind] = inst
@@ -222,12 +224,13 @@ func (s *Supervisor) applyConfig(ctx context.Context, cfg *config.Config, failur
 			s.log.Info("subsystem enabled by a configuration change", "subsystem", string(sub.Kind))
 			s.start(ctx, sub, cfg, failures)
 		case inst != nil && !want:
-			// Stopping the last one would leave a process that runs nothing
+			// Stopping the last surface would leave a process that runs nothing
 			// and can no longer be reached to say otherwise - the state
 			// Resolve refuses at startup. Keep it and say so instead, the way
-			// a listener whose bind address moved is kept.
-			if s.runningCount() == 1 {
-				s.log.Error("refusing to stop the only running subsystem",
+			// a listener whose bind address moved is kept. An auxiliary
+			// subsystem can always stop, and it does not count as a surface.
+			if !sub.Auxiliary && s.runningSurfaces() == 1 {
+				s.log.Error("refusing to stop the only running surface",
 					"subsystem", string(sub.Kind), "key", sub.ConfigKey,
 					"hint", "a process with nothing enabled cannot be reached; enable another subsystem first, or restart coddy serve")
 				continue
@@ -292,11 +295,18 @@ func (s *Supervisor) canRunFresh(cfg *config.Config, kind Kind) bool {
 	return true
 }
 
-// runningCount reports how many subsystems are live right now.
-func (s *Supervisor) runningCount() int {
+// runningSurfaces reports how many subsystems that are not auxiliary are live
+// right now.
+func (s *Supervisor) runningSurfaces() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return len(s.running)
+	n := 0
+	for _, inst := range s.running {
+		if !inst.auxiliary {
+			n++
+		}
+	}
+	return n
 }
 
 // stop cancels one instance and waits for its goroutine, bounded by restartDrain.

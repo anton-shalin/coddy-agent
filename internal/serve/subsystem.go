@@ -34,6 +34,7 @@ const (
 	KindGatewayPachca Kind = "gateway.pachca"
 	KindSwarm         Kind = "swarm"
 	KindScheduler     Kind = "scheduler"
+	KindMetrics       Kind = "metrics"
 )
 
 // Subsystem describes one surface: whether the configuration asks for it,
@@ -57,6 +58,10 @@ type Subsystem struct {
 	// a bare swarm relay - opens no session store, and such a surface cannot
 	// start in it (Supervisor.Sessionless).
 	NeedsSessions bool
+	// Auxiliary marks a subsystem that serves alongside the surfaces and is
+	// never the only one: it does not count as something enabled, and it is
+	// always free to stop.
+	Auxiliary bool
 	// Enabled reports whether cfg asks for this surface.
 	Enabled func(*config.Config) bool
 	// Fingerprint returns the part of the configuration the surface is built
@@ -106,13 +111,14 @@ func (s Subsystem) restartKey(cfg *config.Config) string {
 type ErrNothingEnabled struct {
 	// Keys are the configuration keys that would have started something in
 	// this binary. A key whose build tag is missing is left out: offering it
-	// would only lead to the refusal ErrNotBuilt already explains.
+	// would only lead to the refusal ErrNotBuilt already explains. So is an
+	// auxiliary subsystem's key: it would not start anything on its own.
 	Keys []string
 }
 
 func (e *ErrNothingEnabled) Error() string {
 	if len(e.Keys) == 0 {
-		return "no subsystem is enabled, and this binary was built with none of them (rebuild with -tags \"http ui scheduler memory cli gateway swarm\")"
+		return "no subsystem is enabled, and this binary was built with none of them (rebuild with -tags \"http ui scheduler memory cli gateway swarm metrics\")"
 	}
 	return "no subsystem is enabled: set one of " + strings.Join(e.Keys, ", ") + " to true in config.yaml"
 }
@@ -131,6 +137,8 @@ func (e *ErrNotBuilt) Error() string {
 }
 
 // Resolve returns the subsystems cfg asks for, in the order they were declared.
+// An auxiliary one is returned too, but it is not enough to start on: when
+// nothing else is enabled the process has nobody to serve.
 //
 // A surface that is enabled but missing from the build is an error rather than
 // a warning: an operator who wrote `enable: true` and got a log line they never
@@ -138,9 +146,10 @@ func (e *ErrNotBuilt) Error() string {
 // command exists to remove.
 func Resolve(cfg *config.Config, all []Subsystem) ([]Subsystem, error) {
 	var out []Subsystem
+	surfaces := 0
 	keys := make([]string, 0, len(all))
 	for _, sub := range all {
-		if sub.Available {
+		if sub.Available && !sub.Auxiliary {
 			keys = append(keys, sub.ConfigKey)
 		}
 		if !sub.enabled(cfg) {
@@ -150,8 +159,11 @@ func Resolve(cfg *config.Config, all []Subsystem) ([]Subsystem, error) {
 			return nil, &ErrNotBuilt{Kind: sub.Kind, ConfigKey: sub.ConfigKey, BuildTag: sub.BuildTag}
 		}
 		out = append(out, sub)
+		if !sub.Auxiliary {
+			surfaces++
+		}
 	}
-	if len(out) == 0 {
+	if surfaces == 0 {
 		sort.Strings(keys)
 		return nil, &ErrNothingEnabled{Keys: keys}
 	}

@@ -72,8 +72,8 @@ func (s *serveFeatureState) stopSupervisor() {
 	}
 }
 
-// describe builds the same four descriptors the CLI does, over surfaces that
-// only record that they ran.
+// describe builds the same descriptors the CLI does, over surfaces that only
+// record that they ran.
 func (s *serveFeatureState) describe(gatewayAvailable bool) []Subsystem {
 	block := func(kind Kind) func(context.Context, *config.Config) error {
 		return func(ctx context.Context, cfg *config.Config) error {
@@ -115,6 +115,12 @@ func (s *serveFeatureState) describe(gatewayAvailable bool) []Subsystem {
 			Fingerprint:   func(c *config.Config) string { return c.Scheduler.Timeout },
 			Run:           block(KindScheduler),
 		},
+		{
+			Kind: KindMetrics, ConfigKey: "metrics.enable", BuildTag: "metrics", Available: true,
+			Auxiliary: true,
+			Enabled:   func(c *config.Config) bool { return c.Metrics.Enable },
+			Run:       block(KindMetrics),
+		},
 	}
 }
 
@@ -150,7 +156,7 @@ func (s *serveFeatureState) settle(cfg *config.Config) error {
 
 func (s *serveFeatureState) kind(name string) (Kind, error) {
 	switch Kind(name) {
-	case KindHTTP, KindGateway, KindSwarm, KindScheduler:
+	case KindHTTP, KindGateway, KindSwarm, KindScheduler, KindMetrics:
 		return Kind(name), nil
 	}
 	return "", fmt.Errorf("unknown subsystem %q", name)
@@ -186,6 +192,14 @@ func (s *serveFeatureState) configEnablingGateway() error {
 	return nil
 }
 
+func (s *serveFeatureState) configEnablingOnlyMetrics() error {
+	s.reset()
+	off := false
+	s.cfg.HTTPServer.Enabled = &off
+	s.cfg.Metrics.Enable = true
+	return nil
+}
+
 func (s *serveFeatureState) binaryWithoutGateway() error {
 	s.subs = s.describe(false)
 	return nil
@@ -202,6 +216,12 @@ func (s *serveFeatureState) runningRuntime() error {
 	s.reset()
 	s.cfg.Gateways.Telegram.Enabled = true
 	s.cfg.Gateways.Telegram.Token = "first-token"
+	return s.launch()
+}
+
+func (s *serveFeatureState) runningRuntimeWithMetrics() error {
+	s.reset()
+	s.cfg.Metrics.Enable = true
 	return s.launch()
 }
 
@@ -275,6 +295,11 @@ func (s *serveFeatureState) reload(mutate func(*config.Config)) *config.Config {
 func (s *serveFeatureState) schedulerEnabled() error {
 	s.reload(func(c *config.Config) { c.Scheduler.Enabled = true })
 	return waitFor(func() bool { return s.startCount(KindScheduler) == 1 })
+}
+
+func (s *serveFeatureState) metricsDisabled() error {
+	s.reload(func(c *config.Config) { c.Metrics.Enable = false })
+	return waitFor(func() bool { return !s.isRunning(KindMetrics) })
 }
 
 func (s *serveFeatureState) gatewayDisabled() error {
@@ -409,6 +434,19 @@ func (s *serveFeatureState) resolvingAsksForASubsystem() error {
 	return nil
 }
 
+func (s *serveFeatureState) suggestionsDoNotName(key string) error {
+	var nothing *ErrNothingEnabled
+	if !errors.As(s.err, &nothing) {
+		return fmt.Errorf("resolving returned %v, want the refusal that nothing is enabled", s.err)
+	}
+	for _, k := range nothing.Keys {
+		if k == key {
+			return fmt.Errorf("the suggestions %v name %s, which could not start the process alone", nothing.Keys, key)
+		}
+	}
+	return nil
+}
+
 func (s *serveFeatureState) subsystemRestarted(name string) error {
 	kind, err := s.kind(name)
 	if err != nil {
@@ -453,15 +491,18 @@ func initializeServeScenario(sc *godog.ScenarioContext) {
 	sc.Step(`^a config enabling the telegram gateway and the scheduler$`, s.configEnablingGatewayAndScheduler)
 	sc.Step(`^a config with httpserver disabled and the telegram gateway enabled$`, s.configHTTPDisabledGatewayEnabled)
 	sc.Step(`^a config enabling the telegram gateway$`, s.configEnablingGateway)
+	sc.Step(`^a config enabling only the metrics exporter$`, s.configEnablingOnlyMetrics)
 	sc.Step(`^a binary built without gateway support$`, s.binaryWithoutGateway)
 	sc.Step(`^a config with every subsystem disabled$`, s.configWithEverythingDisabled)
 	sc.Step(`^a running runtime with the httpserver and the telegram gateway enabled$`, s.runningRuntime)
 	sc.Step(`^a running runtime with only the httpserver enabled$`, s.runningRuntimeHTTPOnly)
+	sc.Step(`^a running runtime with the httpserver and the metrics exporter enabled$`, s.runningRuntimeWithMetrics)
 
 	sc.Step(`^the runtime resolves which subsystems to start$`, s.resolveSubsystems)
 	sc.Step(`^the runtime resolves the httpserver listen address$`, s.resolveListenAddress)
 	sc.Step(`^the telegram token is changed through the configuration$`, s.tokenChanged)
 	sc.Step(`^the scheduler is enabled through the configuration$`, s.schedulerEnabled)
+	sc.Step(`^the metrics exporter is disabled through the configuration$`, s.metricsDisabled)
 	sc.Step(`^the telegram gateway is disabled through the configuration$`, s.gatewayDisabled)
 	sc.Step(`^the httpserver is disabled through the configuration$`, s.httpDisabled)
 	sc.Step(`^the httpserver is turned off and back on at port (\d+) through the configuration$`, s.httpBackAtPort)
@@ -471,6 +512,7 @@ func initializeServeScenario(sc *godog.ScenarioContext) {
 	sc.Step(`^the listen address is "([^"]*)"$`, s.listenAddressIs)
 	sc.Step(`^resolving fails naming the build tag "([^"]*)"$`, s.resolvingFailsNamingTag)
 	sc.Step(`^resolving fails asking for a subsystem to be enabled$`, s.resolvingAsksForASubsystem)
+	sc.Step(`^the suggestions do not name "([^"]*)"$`, s.suggestionsDoNotName)
 	sc.Step(`^the "([^"]*)" subsystem is restarted$`, s.subsystemRestarted)
 	sc.Step(`^the "([^"]*)" subsystem keeps running$`, s.subsystemKeepsRunning)
 	sc.Step(`^the "([^"]*)" subsystem is running$`, s.subsystemRunning)
