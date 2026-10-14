@@ -114,6 +114,7 @@ export const messagesEn: Record<string, string> = {
   "settings.section.sessions_manager.label": "Sessions",
   "settings.section.providers.label": "LLM providers",
   "settings.section.models.label": "Logical models",
+  "settings.section.toolsets.label": "Toolsets",
   "settings.section.agent.label": "ReAct loop",
   "settings.section.supervisor.label": "Session goal",
   "settings.section.tools.label": "Tools and permissions",
@@ -129,6 +130,7 @@ export const messagesEn: Record<string, string> = {
   "settings.section.sessions_manager.desc": "Stored chats & cleanup",
   "settings.section.providers.desc": "LLM API connections",
   "settings.section.models.desc": "Named model configs",
+  "settings.section.toolsets.desc": "Tool presets for models",
   "settings.section.agent.desc": "Model, retries, loop guard",
   "settings.section.supervisor.desc": "Goal checks, budgets, watchdog",
   "settings.section.tools.desc": "Tool permissions & limits",
@@ -340,6 +342,10 @@ export const messagesEn: Record<string, string> = {
   "settings.models.group.model": "Model",
   "settings.models.group.generation": "Generation",
   "settings.models.group.reasoning": "Reasoning",
+  "settings.models.group.tools": "Tools",
+  "settings.models.group.toolsDesc":
+    "The toolset a session on this model is offered its tools by, a preset of the Toolsets tab. Without one the model is offered every tool the mode would. A session can pick another toolset in the composer or with /toolset.",
+  "settings.models.toolsetNone": "None: every tool",
   "settings.providerModels.legend": "Models",
   "settings.providerModels.needsNameAndType":
     "Give the provider an id and pick its type to list its models.",
@@ -448,6 +454,18 @@ export const messagesEn: Record<string, string> = {
   "settings.schema.models.stream.label": "Stream responses",
   "settings.schema.models.stream.desc":
     "Leave on to receive the answer token by token over SSE. Turn off to send one blocking request and wait for the whole answer, for servers or proxies that handle event streams badly; the transcript then fills in at once instead of typing out. Not available for codex models, whose backend is streaming-only.",
+  "settings.schema.models.toolset.label": "Toolset",
+  "settings.schema.models.toolset.desc":
+    "The toolset a session on this model is offered its tools by, unless the session picks another. Empty offers every tool the mode would. Spares a small-context local model the schemas of tools it never calls.",
+  "settings.schema.toolsets.name.label": "Name",
+  "settings.schema.toolsets.name.desc":
+    "What models and the /toolset command call it: letters, digits, '.', '_' and '-'. default is reserved: it means every tool the mode offers.",
+  "settings.schema.toolsets.tools.label": "Allowed tools",
+  "settings.schema.toolsets.tools.desc":
+    "Tools offered with this toolset: tool names, * or a prefix* (context7__* is every tool of that MCP server). Empty offers every tool the mode would. It only narrows, and a call to an unlisted tool is refused.",
+  "settings.schema.toolsets.disallowed_tools.label": "Disallowed tools",
+  "settings.schema.toolsets.disallowed_tools.desc":
+    "Tools removed from this toolset, applied after the allowed tools, with the same names and patterns. A call to a removed tool is refused.",
 
   "settings.schema.agent.model.label": "Default model",
   "settings.schema.supervisor.enable.label": "Check every turn",
@@ -465,6 +483,9 @@ export const messagesEn: Record<string, string> = {
   "settings.schema.supervisor.token_budget.label": "Token budget",
   "settings.schema.supervisor.token_budget.desc":
     "Uncached input plus output tokens one goal may spend. 0 means no cap.",
+  "settings.schema.supervisor.max_chain_sessions.label": "Max chain sessions",
+  "settings.schema.supervisor.max_chain_sessions.desc":
+    "Sessions one goal chain (/goal --then-file) may open one after another. 0 turns goal chains off.",
   "settings.schema.supervisor.stall_seconds.label": "Stall seconds",
   "settings.schema.supervisor.stall_seconds.desc":
     "Silence before a goal turn is cut, excluding permission prompts, running tools and background tasks. 0 disables stall detection.",
@@ -1456,6 +1477,11 @@ export const messagesEn: Record<string, string> = {
   "composer.modeAsk": "Ask",
   "composer.modePlan": "Plan",
   "composer.permission": "Permissions",
+  "composer.toolset": "Toolset",
+  "composer.toolsetTitle":
+    "The toolset this session is offered its tools by: a preset of the configuration, or All tools for every tool of the mode",
+  "composer.toolsetDefault": "All tools",
+  "composer.toolsetDefaultHint": "No preset: every tool the mode offers",
   "composer.permissionTitle":
     "When tools ask for approval in this session (new sessions start in: {configured})",
   "composer.permissionAsk": "Ask first",
@@ -1885,6 +1911,9 @@ export const messagesEn: Record<string, string> = {
   "messages.thinkingCompleted": "thinking",
   "messages.thinkingSummaryAriaLabel": "Thinking summary",
   "messages.thinkingContentAriaLabel": "Thinking content",
+  "messages.thinkingHidden": "The provider did not return the reasoning text.",
+  "messages.thinkingTokensTitle.one": "{shown} reasoning token",
+  "messages.thinkingTokensTitle.other": "{shown} reasoning tokens",
   "messages.compactionLabel": "context compacted",
   "messages.compactionSummaryAriaLabel": "Context compacted summary",
   "messages.compactionBodyAriaLabel": "Compacted context summary",

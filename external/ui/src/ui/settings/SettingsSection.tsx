@@ -1,5 +1,5 @@
 import { AppearanceThemePicker } from "../theme/AppearanceModal";
-import { applyModelsChange } from "./applyModelsChange";
+import { applyModelsChange, applyToolsetsChange } from "./applyModelsChange";
 import { CodexAuthField } from "./CodexAuthField";
 import { FieldLabel } from "./FieldHint";
 import { ContextWindowField } from "./ContextWindowField";
@@ -390,6 +390,7 @@ export function SettingsSection(props: {
     return type.trim() || undefined;
   };
   const modelIds = stringList(doc.models, "model");
+  const toolsetNames = stringList(doc.toolsets, "name");
 
   const setKey = (key: string, value: unknown) =>
     setDoc({ ...doc, [key]: value });
@@ -489,6 +490,52 @@ export function SettingsSection(props: {
     const override: FieldOverride | undefined =
       key === "models"
         ? (ctx) => {
+            // A model names one of the presets of the Toolsets tab, or none.
+            if (ctx.path === "toolset") {
+              const current =
+                ctx.value === undefined || ctx.value === null
+                  ? ""
+                  : String(ctx.value);
+              const label =
+                schemaFieldLabel(key, "toolset", ctx.schema.title, "toolset") ||
+                "toolset";
+              // A name the presets no longer have stays on offer, so the
+              // form never changes it behind the operator's back.
+              const names =
+                current && !toolsetNames.includes(current)
+                  ? [...toolsetNames, current]
+                  : toolsetNames;
+              return (
+                <div className="settings-row">
+                  <FieldLabel
+                    label={label}
+                    description={schemaFieldDesc(
+                      key,
+                      "toolset",
+                      ctx.schema.description,
+                    )}
+                  />
+                  <select
+                    className="settings-input"
+                    value={current}
+                    aria-label={label}
+                    data-testid="model-toolset"
+                    onChange={(e) =>
+                      ctx.onChange(
+                        e.target.value === "" ? undefined : e.target.value,
+                      )
+                    }
+                  >
+                    <option value="">{t("settings.models.toolsetNone")}</option>
+                    {names.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              );
+            }
             if (ctx.path === "model") {
               const box = boxFor(key, ctx);
               return (
@@ -578,10 +625,14 @@ export function SettingsSection(props: {
     // Renaming a logical model id must follow through to the default-model
     // references (agent.model / memory.model), or the saved config becomes
     // invalid ("not found in models list"). applyModelsChange reconciles them.
+    // A preset renamed on the Toolsets tab is renamed on the models that
+    // name it too (applyToolsetsChange).
     const onArrayChange =
       key === "models"
         ? (v: unknown[]) => setDoc(applyModelsChange(doc, v))
-        : (v: unknown[]) => setKey(key, v);
+        : key === "toolsets"
+          ? (v: unknown[]) => setDoc(applyToolsetsChange(doc, v))
+          : (v: unknown[]) => setKey(key, v);
     const newItem =
       key === "models" ? () => seedLogicalModel(sub.items, "") : undefined;
     // Keyed by section: the list and row form are one component for every
@@ -739,7 +790,10 @@ export function providerFormGroups(): SchemaFormGroup[] {
   ];
 }
 
-/** Which model it is and what it can take in, how it answers, how hard it thinks. */
+/**
+ * Which model it is and what it can take in, how it answers, how hard it
+ * thinks, and which toolset it is offered its tools by.
+ */
 export function modelFormGroups(): SchemaFormGroup[] {
   return [
     {
@@ -756,6 +810,12 @@ export function modelFormGroups(): SchemaFormGroup[] {
       id: "reasoning",
       legend: translate("settings.models.group.reasoning"),
       paths: ["reasoning_levels", "reasoning_default", "allow_reasoning_off"],
+    },
+    {
+      id: "tools",
+      legend: translate("settings.models.group.tools"),
+      description: translate("settings.models.group.toolsDesc"),
+      paths: ["toolset"],
     },
   ];
 }
@@ -848,7 +908,13 @@ export function objectSectionGroups(
       {
         id: "checks",
         legend: translate("settings.group.supervisor.checks"),
-        paths: ["model", "verify", "max_continuations", "token_budget"],
+        paths: [
+          "model",
+          "verify",
+          "max_continuations",
+          "token_budget",
+          "max_chain_sessions",
+        ],
       },
       {
         id: "watchdog",

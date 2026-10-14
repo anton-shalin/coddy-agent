@@ -21,9 +21,8 @@ import (
 // Raised from 1_850_000 for the session goal's chip, popover and rows, which
 // are application code every chat may show, and from 1_900_000 when main sat
 // 182 bytes under it and the per-session composer settings (#489) needed
-// about a kilobyte, and from 1_950_000 for the Settings search (its index,
-// field, results and reveal: about 22 KB of application code the drawer runs,
-// with main 2.5 KB under the old budget).
+// about a kilobyte, and from 1_950_000 for the composer's toolset chip and
+// menu and the Toolsets settings tab (#513), which went 7 KB over it.
 const appJSBudget = 2_000_000
 
 // Strings only the renderers' own code carries: their error messages.

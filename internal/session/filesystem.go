@@ -396,6 +396,7 @@ type SessionMeta struct {
 	Mode              string `json:"mode"`
 	SelectedModelID   string `json:"selectedModelId,omitempty"`
 	SelectedReasoning string `json:"selectedReasoning,omitempty"`
+	SelectedToolset   string `json:"selectedToolset,omitempty"`
 	AgentMemory       string `json:"agentMemory,omitempty"`
 	// HookContext is what SessionStart hooks handed to the session.
 	HookContext string     `json:"hookContext,omitempty"`
@@ -1242,6 +1243,7 @@ func (f *FileStore) Save(state *State) error {
 		Mode:              state.GetMode(),
 		SelectedModelID:   state.GetSelectedModelID(),
 		SelectedReasoning: state.GetSelectedReasoning(),
+		SelectedToolset:   state.GetSelectedToolset(),
 		HookContext:       state.GetHookContext(),
 		AgentMemory:       state.GetAgentMemory(),
 		Title:             title,
@@ -1415,6 +1417,13 @@ func deriveSessionTitle(s *State) string {
 // its first line.
 func titleFromMessages(msgs []llm.Message) string {
 	for _, msg := range msgs {
+		if msg.Role == llm.RoleUser && msg.GoalTurn != nil && msg.GoalTurn.Kind == acp.GoalTurnKickoff {
+			// The supervisor's kickoff text is nobody's words: the objective
+			// it carries is what the session is about.
+			if objective := strings.TrimSpace(msg.GoalTurn.Objective); objective != "" {
+				return truncateRunes(objective, 120)
+			}
+		}
 		if msg.Role == llm.RoleUser && strings.TrimSpace(msg.Content) != "" {
 			text := stripCoddySessionAssetsXML(strings.TrimSpace(msg.Content))
 			// A hydrated @mention turn also carries <coddy_attachment> file bodies;

@@ -367,6 +367,11 @@ type SessionSettings struct {
 	PermissionMode           string         `json:"permissionMode"`
 	ConfiguredPermissionMode string         `json:"configuredPermissionMode"`
 	Overrides                []TurnOverride `json:"overrides,omitempty"`
+	// Toolset is the toolsets[] preset the session runs with, "default" for
+	// none; empty, with ToolsetChoices, when the configuration has no preset.
+	Toolset string `json:"toolset,omitempty"`
+	// ToolsetChoices are the presets by name, then "default".
+	ToolsetChoices []string `json:"toolsetChoices,omitempty"`
 }
 
 // SessionSettingsUpdate announces a change of a session's settings with the
@@ -440,6 +445,15 @@ type SessionGoal struct {
 	// no default, empty when it offers none.
 	CheckModel     string `json:"checkModel,omitempty"`
 	CheckReasoning string `json:"checkReasoning,omitempty"`
+	// ThenFile is the follow-up file of a goal chain (/goal --then-file):
+	// once the goal is met, its text becomes the goal of a new session.
+	// ChainIndex is the goal's place in its chain: 0 for a goal the operator
+	// set, N in the N-th session the chain opened. ContinuedFrom and
+	// ContinuedIn are the sessions on either side.
+	ThenFile      string `json:"thenFile,omitempty"`
+	ChainIndex    int    `json:"chainIndex,omitempty"`
+	ContinuedFrom string `json:"continuedFrom,omitempty"`
+	ContinuedIn   string `json:"continuedIn,omitempty"`
 }
 
 // GoalCheck is one supervisor verdict.
@@ -616,6 +630,10 @@ type TokenUsageUpdate struct {
 	OutputTokens      int    `json:"outputTokens"`
 	TotalTokens       int    `json:"totalTokens"`
 	CachedInputTokens int    `json:"cachedInputTokens,omitempty"`
+	// ReasoningTokens is the part of OutputTokens the call spent reasoning, when
+	// the provider breaks it out; a client shows it on the reasoning row of the
+	// call that just finished.
+	ReasoningTokens int `json:"reasoningTokens,omitempty"`
 }
 
 // TurnProgressUpdate reports how far the running turn has come: when it was

@@ -110,6 +110,7 @@ export const messagesRu: Record<string, string> = {
   "settings.section.sessions_manager.label": "Сессии",
   "settings.section.providers.label": "Провайдеры LLM",
   "settings.section.models.label": "Логические модели",
+  "settings.section.toolsets.label": "Наборы инструментов",
   "settings.section.agent.label": "Цикл ReAct",
   "settings.section.supervisor.label": "Цель сессии",
   "settings.section.tools.label": "Инструменты и разрешения",
@@ -125,6 +126,7 @@ export const messagesRu: Record<string, string> = {
   "settings.section.sessions_manager.desc": "Сохранённые чаты и очистка",
   "settings.section.providers.desc": "Подключения LLM API",
   "settings.section.models.desc": "Именованные конфигурации моделей",
+  "settings.section.toolsets.desc": "Пресеты инструментов для моделей",
   "settings.section.agent.desc": "Модель, повторы, защита от зацикливания",
   "settings.section.supervisor.desc": "Проверки цели, бюджеты, сторож",
   "settings.section.tools.desc": "Разрешения и лимиты инструментов",
@@ -350,6 +352,10 @@ export const messagesRu: Record<string, string> = {
   "settings.models.group.model": "Модель",
   "settings.models.group.generation": "Генерация",
   "settings.models.group.reasoning": "Рассуждение",
+  "settings.models.group.tools": "Инструменты",
+  "settings.models.group.toolsDesc":
+    "Набор, из которого сессия на этой модели получает инструменты: пресет с вкладки наборов инструментов. Без него модели доступны все инструменты, которые даёт режим. Сессия может выбрать другой набор в композере или командой /toolset.",
+  "settings.models.toolsetNone": "Нет: все инструменты",
   "settings.providerModels.legend": "Модели",
   "settings.providerModels.needsNameAndType":
     "Укажите ID и тип провайдера, чтобы получить список его моделей.",
@@ -461,6 +467,18 @@ export const messagesRu: Record<string, string> = {
   "settings.schema.models.stream.label": "Потоковые ответы",
   "settings.schema.models.stream.desc":
     "Оставьте включённым, чтобы получать ответ токен за токеном по SSE. Выключите, чтобы отправлять один блокирующий запрос и ждать ответ целиком — для серверов и прокси, которые плохо работают с потоками событий; транскрипт тогда заполнится разом, а не по мере набора. Недоступно для моделей codex: их бэкенд работает только в потоковом режиме.",
+  "settings.schema.models.toolset.label": "Набор инструментов",
+  "settings.schema.models.toolset.desc":
+    "Набор, из которого сессия на этой модели получает инструменты, если сама не выбрала другой. Пусто - все инструменты, которые даёт режим. Избавляет локальную модель с небольшим контекстом от схем инструментов, которые она не вызывает.",
+  "settings.schema.toolsets.name.label": "Имя",
+  "settings.schema.toolsets.name.desc":
+    "Как набор называют модели и команда /toolset: латинские буквы, цифры, '.', '_' и '-'. Имя default зарезервировано: оно значит все инструменты режима.",
+  "settings.schema.toolsets.tools.label": "Разрешённые инструменты",
+  "settings.schema.toolsets.tools.desc":
+    "Инструменты этого набора: имена, * или префикс* (context7__* - все инструменты этого MCP-сервера). Пусто - все инструменты, которые даёт режим. Список только сужает набор, а вызов инструмента не из списка отклоняется.",
+  "settings.schema.toolsets.disallowed_tools.label": "Запрещённые инструменты",
+  "settings.schema.toolsets.disallowed_tools.desc":
+    "Инструменты, которые убираются из набора после разрешённых; имена и шаблоны те же. Вызов убранного инструмента отклоняется.",
 
   "settings.schema.agent.model.label": "Модель по умолчанию",
   "settings.schema.supervisor.enable.label": "Проверять каждый ход",
@@ -478,6 +496,9 @@ export const messagesRu: Record<string, string> = {
   "settings.schema.supervisor.token_budget.label": "Бюджет токенов",
   "settings.schema.supervisor.token_budget.desc":
     "Некэшированные входные и выходные токены на одну цель. 0 снимает ограничение.",
+  "settings.schema.supervisor.max_chain_sessions.label": "Сессий в цепочке",
+  "settings.schema.supervisor.max_chain_sessions.desc":
+    "Сколько сессий одна цепочка целей (/goal --then-file) может открыть одну за другой. 0 отключает цепочки.",
   "settings.schema.supervisor.stall_seconds.label": "Простой, с",
   "settings.schema.supervisor.stall_seconds.desc":
     "Тишина, после которой ход цели прерывается; ожидание разрешения, работающий инструмент и фоновые задачи не учитываются. 0 отключает сторож простоя.",
@@ -1501,6 +1522,11 @@ export const messagesRu: Record<string, string> = {
   "composer.modeAsk": "Чат",
   "composer.modePlan": "План",
   "composer.permission": "Разрешения",
+  "composer.toolset": "Набор инструментов",
+  "composer.toolsetTitle":
+    "Набор, из которого сессия получает инструменты: пресет из конфигурации или Все инструменты, то есть всё, что даёт режим",
+  "composer.toolsetDefault": "Все инструменты",
+  "composer.toolsetDefaultHint": "Без пресета: все инструменты режима",
   "composer.permissionTitle":
     "Когда инструменты спрашивают одобрение в этой сессии (режим новых сессий: {configured})",
   "composer.permissionAsk": "Спрашивать",
@@ -1939,6 +1965,11 @@ export const messagesRu: Record<string, string> = {
   "messages.thinkingCompleted": "размышляю",
   "messages.thinkingSummaryAriaLabel": "Сводка размышления",
   "messages.thinkingContentAriaLabel": "Содержимое размышления",
+  "messages.thinkingHidden": "Провайдер не вернул текст размышлений.",
+  "messages.thinkingTokensTitle.one": "{shown} токен размышлений",
+  "messages.thinkingTokensTitle.few": "{shown} токена размышлений",
+  "messages.thinkingTokensTitle.many": "{shown} токенов размышлений",
+  "messages.thinkingTokensTitle.other": "{shown} токена размышлений",
   "messages.compactionLabel": "контекст сжат",
   "messages.compactionSummaryAriaLabel": "Сводка сжатого контекста",
   "messages.compactionBodyAriaLabel": "Содержимое сжатого контекста",

@@ -1428,6 +1428,9 @@ func llmMsgsToCoddyOpenAIForSession(sessionID, assetsDir string, msgs []llm.Mess
 		if m.ReasoningDurationMs > 0 {
 			item["reasoning_duration_ms"] = m.ReasoningDurationMs
 		}
+		if m.ReasoningTokens > 0 {
+			item["reasoning_tokens"] = m.ReasoningTokens
+		}
 		if m.Role == llm.RoleTool && m.ToolCallID != "" {
 			item["tool_call_id"] = m.ToolCallID
 		}
@@ -1871,6 +1874,8 @@ func (s *Server) coddySessionPatch(w http.ResponseWriter, r *http.Request) {
 		MarkActivityRead  bool    `json:"markActivityRead"`
 		SelectedModelID   *string `json:"selectedModelId"`
 		SelectedReasoning *string `json:"selectedReasoning"`
+		// SelectedToolset is a toolsets[] preset by name, or "default".
+		SelectedToolset *string `json:"selectedToolset"`
 		// Mode and PermissionMode are the operating mode and the permission
 		// mode; Turns > 0 changes the settings of this request for that many
 		// turns instead of for the session (the --count of a command).
@@ -1923,6 +1928,7 @@ func (s *Server) coddySessionPatch(w http.ResponseWriter, r *http.Request) {
 		}
 		change.Reasoning = &level
 	}
+	change.Toolset = body.SelectedToolset
 	change.Mode = body.Mode
 	change.PermissionMode = body.PermissionMode
 	if clearModel {
@@ -1959,6 +1965,9 @@ func (s *Server) coddySessionPatch(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.SelectedReasoning != nil {
 			resp["selectedReasoning"] = strings.TrimSpace(st.GetSelectedReasoning())
+		}
+		if body.SelectedToolset != nil {
+			resp["selectedToolset"] = st.GetSelectedToolset()
 		}
 	}
 	if body.MarkActivityRead {

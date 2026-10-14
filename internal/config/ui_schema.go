@@ -255,6 +255,23 @@ func UISchemaMap() map[string]interface{} {
 		"stream": boolPropDefault("Stream responses",
 			"Leave on to receive the answer token by token over SSE. Turn off to send one blocking request and wait for the whole answer, for servers or proxies that handle event streams badly; the transcript then fills in at once instead of typing out. Not available for codex models, whose backend is streaming-only.",
 			true),
+		"toolset": strProp("Toolset",
+			"The toolset a session on this model is offered its tools by, unless the session picks another. Empty offers every tool the mode would. Spares a small-context local model the schemas of tools it never calls."),
+	}
+	toolsetProps := map[string]interface{}{
+		"name": strProp("Name", "What models and the /toolset command call it: letters, digits, '.', '_' and '-'. default is reserved: it means every tool the mode offers."),
+		"tools": map[string]interface{}{
+			"type":        "array",
+			"title":       "Allowed tools",
+			"description": "Tools offered with this toolset: tool names, * or a prefix* (context7__* is every tool of that MCP server). Empty offers every tool the mode would. It only narrows, and a call to an unlisted tool is refused.",
+			"items":       map[string]interface{}{"type": "string"},
+		},
+		"disallowed_tools": map[string]interface{}{
+			"type":        "array",
+			"title":       "Disallowed tools",
+			"description": "Tools removed from this toolset, applied after the allowed tools, with the same names and patterns. A call to a removed tool is refused.",
+			"items":       map[string]interface{}{"type": "string"},
+		},
 	}
 	isolationEnum := []string{string(IsolationIndividual), string(IsolationShared), string(IsolationAdmin)}
 	telegramUserGroupProps := map[string]interface{}{
@@ -391,8 +408,16 @@ func UISchemaMap() map[string]interface{} {
 			"title":       "Logical models",
 			"description": "Named model entries the agent and UI can select; ids reference provider prefixes.",
 			"items": objectSchema("", "", modelProps,
-				[]string{"model", "max_tokens", "temperature", "max_context_tokens", "multimodal", "stream", "reasoning_levels", "reasoning_default", "allow_reasoning_off"},
+				[]string{"model", "max_tokens", "temperature", "max_context_tokens", "multimodal", "stream", "reasoning_levels", "reasoning_default", "allow_reasoning_off", "toolset"},
 				[]string{"model"}),
+		},
+		"toolsets": map[string]interface{}{
+			"type":        "array",
+			"title":       "Toolsets",
+			"description": "Named presets of the tools a session is offered. A model names one as its own; a session picks one with /toolset.",
+			"items": objectSchema("", "", toolsetProps,
+				[]string{"name", "tools", "disallowed_tools"},
+				[]string{"name"}),
 		},
 		"supervisor": objectSchema("Session supervisor", "Checks goals with a second model and watches for stalled or looping turns.",
 			map[string]interface{}{
@@ -404,8 +429,10 @@ func UISchemaMap() map[string]interface{} {
 				"max_continuations": intProp("Max continuations", "Automatic follow-up turns one goal may use before it stops as limited."),
 				"loop_repeat":       intProp("Loop repeat", "How many times a repeating cycle of identical tool operations may come round. 0 disables loop detection."),
 				"token_budget":      intProp("Token budget", "Uncached input plus output tokens one goal may spend. 0 means no cap."),
+				"max_chain_sessions": intProp("Max chain sessions",
+					"Sessions one goal chain (/goal --then-file) may open one after another. 0 turns goal chains off."),
 			},
-			[]string{"enable", "model", "verify", "max_continuations", "token_budget", "stall_seconds", "max_nudges", "loop_repeat"}, nil),
+			[]string{"enable", "model", "verify", "max_continuations", "token_budget", "max_chain_sessions", "stall_seconds", "max_nudges", "loop_repeat"}, nil),
 		"agent": objectSchema("ReAct loop", "Defaults for the main agent loop (model id and safety caps).",
 			map[string]interface{}{
 				"queue_mode": map[string]interface{}{"type": "string", "title": "Queue mode", "description": "Preferred action for Enter while a turn runs. Choose steer for the next ReAct step or after_turn for a new turn after the answer.", "enum": []interface{}{"steer", "after_turn"}},
@@ -802,7 +829,7 @@ func UISchemaMap() map[string]interface{} {
 	// process (the logger, then prompts and instructions, which the web UI
 	// folds into one System tab). The sessions key belongs to the Sessions tab.
 	rootOrder := []string{
-		"providers", "models",
+		"providers", "models", "toolsets",
 		"agent", "supervisor", "compaction", "memory", "decisions",
 		"tools", "skills", "subagents", "hooks",
 		"scheduler", "gateways",

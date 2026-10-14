@@ -923,6 +923,11 @@
             "description": "Sampling temperature for this logical model (0 = deterministic, higher = more random).",
             "title": "Temperature",
             "type": "number"
+          },
+          "toolset": {
+            "description": "The toolset a session on this model is offered its tools by, unless the session picks another. Empty offers every tool the mode would. Spares a small-context local model the schemas of tools it never calls.",
+            "title": "Toolset",
+            "type": "string"
           }
         },
         "required": [
@@ -938,7 +943,8 @@
           "stream",
           "reasoning_levels",
           "reasoning_default",
-          "allow_reasoning_off"
+          "allow_reasoning_off",
+          "toolset"
         ]
       },
       "title": "Logical models",
@@ -1247,6 +1253,12 @@
           "title": "Loop repeat",
           "type": "integer"
         },
+        "max_chain_sessions": {
+          "default": 10,
+          "description": "Sessions one goal chain (/goal --then-file) may open one after another. 0 turns goal chains off.",
+          "title": "Max chain sessions",
+          "type": "integer"
+        },
         "max_continuations": {
           "default": 10,
           "description": "Automatic follow-up turns one goal may use before it stops as limited.",
@@ -1291,6 +1303,7 @@
         "verify",
         "max_continuations",
         "token_budget",
+        "max_chain_sessions",
         "stall_seconds",
         "max_nudges",
         "loop_repeat"
@@ -1550,6 +1563,47 @@
         "websearch",
         "http_request"
       ]
+    },
+    "toolsets": {
+      "default": [],
+      "description": "Named presets of the tools a session is offered. A model names one as its own; a session picks one with /toolset.",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "disallowed_tools": {
+            "description": "Tools removed from this toolset, applied after the allowed tools, with the same names and patterns. A call to a removed tool is refused.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Disallowed tools",
+            "type": "array"
+          },
+          "name": {
+            "description": "What models and the /toolset command call it: letters, digits, '.', '_' and '-'. default is reserved: it means every tool the mode offers.",
+            "title": "Name",
+            "type": "string"
+          },
+          "tools": {
+            "description": "Tools offered with this toolset: tool names, * or a prefix* (context7__* is every tool of that MCP server). Empty offers every tool the mode would. It only narrows, and a call to an unlisted tool is refused.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed tools",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object",
+        "x-coddy-property-order": [
+          "name",
+          "tools",
+          "disallowed_tools"
+        ]
+      },
+      "title": "Toolsets",
+      "type": "array"
     }
   },
   "title": "Coddy config",
@@ -1557,6 +1611,7 @@
   "x-coddy-property-order": [
     "providers",
     "models",
+    "toolsets",
     "agent",
     "supervisor",
     "compaction",

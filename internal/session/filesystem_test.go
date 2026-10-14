@@ -107,6 +107,7 @@ func TestFileStoreRoundTripMessages(t *testing.T) {
 		Content:             "hello",
 		Reasoning:           "step one",
 		ReasoningDurationMs: 42,
+		ReasoningTokens:     17,
 	})
 
 	if err := fs.Save(st); err != nil {
@@ -123,7 +124,7 @@ func TestFileStoreRoundTripMessages(t *testing.T) {
 	if snap.Messages[1].Role != llm.RoleAssistant {
 		t.Fatalf("second role %+v", snap.Messages[1].Role)
 	}
-	if snap.Messages[1].Reasoning != "step one" || snap.Messages[1].ReasoningDurationMs != 42 {
+	if snap.Messages[1].Reasoning != "step one" || snap.Messages[1].ReasoningDurationMs != 42 || snap.Messages[1].ReasoningTokens != 17 {
 		t.Fatalf("reasoning roundtrip %+v", snap.Messages[1])
 	}
 }
@@ -534,6 +535,21 @@ func TestDeriveSessionTitleStripsAttachmentBlocks(t *testing.T) {
 	})
 	if got := deriveSessionTitle(st); got != "@Dockerfile:21-31 почему медленно?" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+// A session started by /goal opens with the supervisor's kickoff text, which
+// nobody typed: the title is the objective it carries. A goal chain opens such
+// a session on the server, where no client names it (#512).
+func TestDeriveSessionTitleOfAGoalKickoffIsTheObjective(t *testing.T) {
+	st := &State{ID: "sess_title_goal", CWD: "/tmp", Mode: ModeAgent}
+	st.AddMessage(llm.Message{
+		Role:     llm.RoleUser,
+		Content:  "[Goal set] Start working toward this goal now.\n\n<goal_objective>\nwrite the release notes\n</goal_objective>",
+		GoalTurn: &llm.GoalTurn{Kind: acp.GoalTurnKickoff, Objective: "write the release notes"},
+	})
+	if got := deriveSessionTitle(st); got != "write the release notes" {
+		t.Fatalf("got %q, want the goal objective", got)
 	}
 }
 

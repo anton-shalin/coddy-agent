@@ -39,7 +39,12 @@ type Manager struct {
 	// (supervisor.go); nil judge means the model-based default.
 	goalJudge    GoalJudge
 	goalVerifier GoalVerifier
-	log          *slog.Logger
+	// goalChainStart runs the first turn of a session a goal chain opened,
+	// nil where nothing can (goal_chain.go); goalChainRetry is the schedule
+	// of its retries while that session's turn lock is held.
+	goalChainStart GoalChainStarter
+	goalChainRetry goalChainRetry
+	log            *slog.Logger
 	// defaultCWD is used when session/new passes an empty cwd (from CLI default or os.Getwd).
 	defaultCWD string
 	store      *FileStore
@@ -227,12 +232,67 @@ func (m *Manager) ReplaceConfig(next *config.Config) {
 		return
 	}
 	previous, previousTrust := m.storeConfig(next)
+	if previous != nil && toolsetsMoved(previous, next) {
+		m.republishSessionSettings()
+	}
 	if previous != nil && !mcpTrustChanged(next, previousTrust) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), mcpReloadTimeout)
 	defer cancel()
 	m.reloadConfiguredMCPServers(ctx)
+}
+
+// toolsetsMoved reports whether a new configuration changes what a session's
+// settings snapshot says of its toolset: the presets by name, or the one a
+// model names.
+func toolsetsMoved(previous, next *config.Config) bool {
+	if strings.Join(previous.ToolsetNames(), "\x00") != strings.Join(next.ToolsetNames(), "\x00") {
+		return true
+	}
+	of := func(cfg *config.Config) map[string]string {
+		out := make(map[string]string, len(cfg.Models))
+		for _, m := range cfg.Models {
+			out[m.Model] = m.Toolset
+		}
+		return out
+	}
+	a, b := of(previous), of(next)
+	if len(a) != len(b) {
+		return true
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return true
+		}
+	}
+	return false
+}
+
+// republishSessionSettings publishes the settings snapshot of every live
+// session that is not a subagent's run again, with the ACP config options an
+// editor shows, so a surface showing one - a browser tab, a console, an
+// editor - offers the toolsets a configuration reload brought, or stops
+// offering the ones it took away, without waiting for the next change of the
+// session.
+func (m *Manager) republishSessionSettings() {
+	m.mu.RLock()
+	ids := make([]string, 0, len(m.sessions))
+	states := make([]*State, 0, len(m.sessions))
+	for id, st := range m.sessions {
+		if st == nil || st.IsSubagentRun() {
+			continue
+		}
+		ids = append(ids, id)
+		states = append(states, st)
+	}
+	m.mu.RUnlock()
+	for i, st := range states {
+		m.PublishSessionSettings(ids[i], st, "", "config")
+		if m.server != nil {
+			m.sendConfigOptionUpdate(ids[i], st)
+		}
+	}
 }
 
 // mcpTrustChanged reports whether a new configuration changes which
@@ -898,6 +958,7 @@ func (m *Manager) loadSessionFromDisk(ctx context.Context, params acp.SessionLoa
 		mode = ModeAgent
 	}
 	st.RestoreMetaWithoutPersist(mode, snap.Meta.SelectedModelID, snap.Meta.SelectedReasoning, snap.Meta.AgentMemory)
+	st.RestoreToolsetWithoutPersist(snap.Meta.SelectedToolset)
 	if snap.Meta.Goal != nil {
 		st.RestoreGoalWithoutPersist(*snap.Meta.Goal)
 	}
@@ -1272,6 +1333,27 @@ type PromptRunOpts struct {
 	// turn, started by the subagent runtime. Every other prompt against a child
 	// is refused with ErrSubagentReadOnly (see RunSubagentTurn).
 	subagentTurn bool
+	// goalKickoff marks the first turn of a session a goal chain opened
+	// (goal_chain.go). The supervisor takes it once (takeGoalKickoff), since
+	// the same options run the messages queued during that turn.
+	goalKickoff *chainKickoff
+}
+
+// chainKickoff is the first turn of a chained session: the marker its first
+// message is stored with, and the goal it was built for.
+type chainKickoff struct {
+	marker *llm.GoalTurn
+	goalID string
+}
+
+// takeGoalKickoff returns the chain's kickoff, once.
+func (o *PromptRunOpts) takeGoalKickoff() *chainKickoff {
+	if o == nil {
+		return nil
+	}
+	k := o.goalKickoff
+	o.goalKickoff = nil
+	return k
 }
 
 // turnAdmission carries what beginTurn needs to know about the caller.
@@ -1564,10 +1646,13 @@ func (m *Manager) HandleSessionPromptWithSender(ctx context.Context, params acp.
 			return nil, err
 		}
 	}
-	// A turn an operator started: not a child's task, not a wake's report.
-	// Only such a turn reads settings commands and consumes the settings
-	// armed for the next turns (settings.go).
-	operatorTurn := opts == nil || (!opts.subagentTurn && opts.BackgroundWake == nil)
+	// The first turn of a session a goal chain opened (goal_chain.go): its
+	// prompt is the supervisor's kickoff, which nobody typed.
+	chainKickoff := opts != nil && opts.goalKickoff != nil
+	// A turn an operator started: not a child's task, not a wake's report,
+	// not a chain's kickoff. Only such a turn reads settings commands and
+	// consumes the settings armed for the next turns (settings.go).
+	operatorTurn := opts == nil || (!opts.subagentTurn && opts.BackgroundWake == nil && !chainKickoff)
 	var turnSettings []SettingsChange
 	if operatorTurn {
 		if opts != nil && opts.SettingsTaken {
@@ -1708,15 +1793,16 @@ func (m *Manager) HandleSessionPromptWithSender(ctx context.Context, params acp.
 	if err != nil {
 		return nil, err
 	}
-	if sd := strings.TrimSpace(state.GetPersistedSessionDir()); sd != "" && !subagentTurn && planMentionRuns && !restricted {
+	if sd := strings.TrimSpace(state.GetPersistedSessionDir()); sd != "" && !subagentTurn && !chainKickoff && planMentionRuns && !restricted {
 		if mentionSlug := ExtractRunPlanSlugFromPromptText(contentBlocksToPlainText(hydrated)); mentionSlug != "" {
 			return m.runPlanAdmitted(turnCtx, params.SessionID, mentionSlug, state, sender)
 		}
 	}
 	// The "@" references of the prompt are resolved once, here, into
 	// attachments of this message (mentions.go). A woken turn's prompt is
-	// Coddy's own report of finished tasks, not text anybody typed.
-	if opts == nil || opts.BackgroundWake == nil {
+	// Coddy's own report of finished tasks, and a chain's kickoff the
+	// supervisor's text: neither is text anybody typed.
+	if opts == nil || (opts.BackgroundWake == nil && !chainKickoff) {
 		hydrated = m.ResolvePromptMentions(turnCtx, state, hydrated, m.mentionScope(state, subagentTurn, askMode))
 	}
 
@@ -1876,6 +1962,8 @@ func (m *Manager) SetConfigOptionFrom(ctx context.Context, params acp.SessionSet
 		ch.Model = &value
 	case "reasoning":
 		ch.Reasoning = &value
+	case "toolset":
+		ch.Toolset = &value
 	case "permission_mode":
 		ch.PermissionMode = &value
 	default:
