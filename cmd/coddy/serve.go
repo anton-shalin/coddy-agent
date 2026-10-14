@@ -214,6 +214,7 @@ func runServe(args []string) error {
 	httpTokens := outOfBandTokens(*authToken, httpserver.TokenEnvVar)
 
 	rt := &serve.Runtime{}
+	wiring := newMetricsWiring(rt)
 	all := subsystems(rt, subsystemDeps{
 		httpListenAddr:  httpListenAddr,
 		swarmListenAddr: swarmListenAddr,
@@ -222,6 +223,7 @@ func runServe(args []string) error {
 		httpLogin:       outOfBandLogin(),
 		swarmAuthTokens: outOfBandTokens(*swarmAuthToken, swarm.TokenEnvVar),
 		adjust:          applyProcessOverrides,
+		metrics:         wiring,
 	})
 	// Resolve is the pre-flight: it refuses a configuration this binary cannot
 	// honour before a single listener is opened, and reports what will run.
@@ -279,6 +281,9 @@ func runServe(args []string) error {
 	}); err != nil {
 		return err
 	}
+	// The registry counts for the whole process, whether or not the listener
+	// is enabled: enabling it later shows what happened before.
+	defer wiring.Start()()
 
 	log.Info("starting coddy serve", "version", version.Get(), "config", paths.ConfigPath, "workspace", paths.CWD)
 	printServeBanner(cfg, enabled, httpAddr, swarmAddr, len(httpTokens) > 0, outOfBandLogin().IsSet())
@@ -326,6 +331,7 @@ func runServe(args []string) error {
 	// The supervisor is handed every descriptor, not just the enabled ones, so
 	// a later configuration change can turn a surface on as well as off.
 	sup := serve.NewSupervisor(log, all)
+	rt.SetSupervisor(sup)
 	// Only a process with something waiting to start it again may end itself
 	// over a configuration change. In the foreground the operator is the only
 	// one who would bring it back, so they are told instead.
@@ -465,6 +471,36 @@ type subsystemDeps struct {
 	// adjust re-applies the command-line overrides to a configuration loaded
 	// from the file, the way the file watcher does, before it is installed.
 	adjust func(*config.Config) error
+	// metrics is the exporter of this build; its descriptor ends the list.
+	metrics metricsWiring
+}
+
+// metricsWiring is what coddy serve needs of the Prometheus exporter, so this
+// file imports nothing of it: metrics.go carries the exporter in a build with
+// the metrics tag, metrics_stub.go the refusal in one without.
+type metricsWiring interface {
+	// Subsystem describes the exporter; Available says whether this build can
+	// run it.
+	Subsystem(deps subsystemDeps) serve.Subsystem
+	// Start begins counting, once the runtime is initialised, and returns what
+	// ends it.
+	Start() (stop func())
+	// Built reports whether this binary carries the exporter, which is what
+	// the settings form of the Metrics section depends on.
+	Built() bool
+}
+
+// metricsDescriptor is the exporter's descriptor in every build. A build with
+// the tag completes it with what runs it. The exporter is auxiliary: it serves
+// alongside the surfaces and keeps no process up on its own.
+func metricsDescriptor() serve.Subsystem {
+	return serve.Subsystem{
+		Kind:      serve.KindMetrics,
+		ConfigKey: "metrics.enable",
+		BuildTag:  "metrics",
+		Auxiliary: true,
+		Enabled:   func(c *config.Config) bool { return c.Metrics.Enable },
+	}
 }
 
 // subsystems describes every surface this binary knows about, available or not.
@@ -473,6 +509,10 @@ type subsystemDeps struct {
 // that asks for a surface this binary cannot run is refused by name instead of
 // starting a daemon that quietly does less than it was told to.
 func subsystems(rt *serve.Runtime, deps subsystemDeps) []serve.Subsystem {
+	var unbuilt []string
+	if !deps.metrics.Built() {
+		unbuilt = []string{"metrics"}
+	}
 	return []serve.Subsystem{
 		{
 			Kind:          serve.KindHTTP,
@@ -496,6 +536,7 @@ func subsystems(rt *serve.Runtime, deps subsystemDeps) []serve.Subsystem {
 					DefaultCWD: rt.Paths.CWD, Home: deps.home,
 					ListenAddr: deps.httpListenAddr(cfg), ExtraAuthTokens: deps.httpAuthTokens,
 					ExtraLogin: deps.httpLogin, DetachedPrompts: rt, Wakes: rt,
+					UnbuiltSections: unbuilt,
 					OnServer: func(s *httpserver.Server) {
 						if s == nil {
 							rt.SetTurnMirror(nil)
@@ -598,6 +639,7 @@ func subsystems(rt *serve.Runtime, deps subsystemDeps) []serve.Subsystem {
 				})
 			},
 		},
+		deps.metrics.Subsystem(deps),
 	}
 }
 

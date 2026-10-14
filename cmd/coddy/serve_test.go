@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"slices"
 	"testing"
 
 	"github.com/EvilFreelancer/coddy-agent/external/gateway"
@@ -120,7 +122,7 @@ func TestGatewayFingerprintsAreIndependent(t *testing.T) {
 // supervisor refuses by name in a build without the tag.
 func TestServeRunsThePachcaBotAsASubsystemOfItsOwn(t *testing.T) {
 	var found bool
-	for _, sub := range subsystems(nil, subsystemDeps{}) {
+	for _, sub := range subsystems(nil, subsystemDeps{metrics: newMetricsWiring(nil)}) {
 		if sub.Kind != serve.KindGatewayPachca {
 			continue
 		}
@@ -170,5 +172,49 @@ func TestWebUIAccessDecidesWhatTheBotMayAdvertise(t *testing.T) {
 	elsewhere := &config.Config{HTTPServer: config.HTTPServerConfig{Enabled: &off}}
 	if got := webUIAccess(elsewhere, false, false); got != gateway.WebUIElsewhere {
 		t.Fatalf("httpserver.enable: false: %v", got)
+	}
+}
+
+// The exporter is a subsystem of its own in every build, so a configuration
+// that asks for one a binary cannot run is refused by name; it is auxiliary, so
+// it is never what keeps a process up.
+func TestServeRunsTheExporterAsAnAuxiliarySubsystem(t *testing.T) {
+	wiring := newMetricsWiring(&serve.Runtime{})
+	all := subsystems(&serve.Runtime{}, subsystemDeps{metrics: wiring})
+	sub := all[len(all)-1]
+	if sub.Kind != serve.KindMetrics || sub.ConfigKey != "metrics.enable" || sub.BuildTag != "metrics" {
+		t.Fatalf("exporter descriptor: %+v", sub)
+	}
+	if !sub.Auxiliary || sub.NeedsSessions || sub.RestartKey != nil {
+		t.Fatalf("the exporter is auxiliary, needs no sessions and has no restart key: %+v", sub)
+	}
+	if sub.Available != wiring.Built() {
+		t.Fatalf("Available = %v, Built() = %v", sub.Available, wiring.Built())
+	}
+	c := &config.Config{}
+	if sub.Enabled(c) {
+		t.Fatal("metrics enabled by an empty config")
+	}
+	c.Metrics.Enable = true
+	if !sub.Enabled(c) {
+		t.Fatal("metrics.enable does not enable the exporter")
+	}
+
+	// Enabled alone it starts nothing; in a binary without the tag it is
+	// refused naming the tag.
+	off := false
+	c.HTTPServer.Enabled = &off
+	_, err := serve.Resolve(c, all)
+	var notBuilt *serve.ErrNotBuilt
+	var nothing *serve.ErrNothingEnabled
+	switch {
+	case wiring.Built():
+		if !errors.As(err, &nothing) || slices.Contains(nothing.Keys, "metrics.enable") {
+			t.Fatalf("metrics alone: %v, want ErrNothingEnabled that does not suggest metrics.enable", err)
+		}
+	default:
+		if !errors.As(err, &notBuilt) || notBuilt.BuildTag != "metrics" || notBuilt.ConfigKey != "metrics.enable" {
+			t.Fatalf("metrics in a binary without the tag: %v, want ErrNotBuilt naming the tag", err)
+		}
 	}
 }
