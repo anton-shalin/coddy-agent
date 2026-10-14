@@ -1,6 +1,5 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { Chevron } from "../components/Chevron";
-import { ThinkingIcon } from "../components/ThinkingIcon";
 import { Markdown } from "../markdown/Markdown";
 import { useT } from "../i18n/I18nProvider";
 import { getLocale } from "../i18n/i18n";
@@ -89,7 +88,6 @@ export const ThinkingMessage = memo(function ThinkingMessage(props: {
         >
           <span className="thinking-left">
             <Chevron className="thinking-chevron" />
-            <ThinkingIcon className="thinking-icon" />
             <span className="thinking-label">{label}</span>
             {durationLabel ? (
               <span className="thinking-dur" aria-hidden="true">

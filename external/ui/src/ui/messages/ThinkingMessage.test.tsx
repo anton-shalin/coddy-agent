@@ -82,25 +82,8 @@ test("a closed reasoning row renders its body only once it is opened", async () 
   expect(await screen.findByText("Weighing")).toBeInTheDocument();
 });
 
-// Issue #258: the row says what the reasoning cost, carries a mark of its own,
-// and stands for reasoning a provider kept to itself.
-
-test("the row carries the reasoning mark before its label", () => {
-  const { container } = render(
-    <ThinkingMessage status="completed" content="x" durationMs={1200} />,
-  );
-  const left = container.querySelector(".thinking-left")!;
-  const icon = left.querySelector(".thinking-icon");
-  expect(icon).toBeTruthy();
-  expect(icon?.getAttribute("aria-hidden")).toBe("true");
-  // Chevron, mark, label, then the duration right beside the label.
-  const order = Array.from(left.children).map(
-    (el) => el.getAttribute("class") ?? "",
-  );
-  expect(order.findIndex((c) => c.includes("thinking-icon"))).toBeLessThan(
-    order.findIndex((c) => c.includes("thinking-label")),
-  );
-});
+// Issue #258: the row says what the reasoning cost and stands for reasoning a
+// provider kept to itself.
 
 test("a counted reasoning step shows its tokens after the duration", () => {
   const { container } = render(
