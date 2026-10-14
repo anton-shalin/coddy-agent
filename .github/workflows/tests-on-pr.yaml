@@ -442,7 +442,7 @@ jobs:
           cache: true
 
       - name: Build deb and rpm
-        run: make deb rpm PKG_TAGS="http scheduler memory cli gateway swarm"
+        run: make deb rpm PKG_TAGS="http scheduler memory cli gateway swarm metrics"
 
       # The unit is rendered by internal/serve and held to the source file by a
       # Go test; this checks that both package formats carry that file byte for
