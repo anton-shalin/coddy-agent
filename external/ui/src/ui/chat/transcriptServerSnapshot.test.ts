@@ -32,12 +32,14 @@ const thinking = (
   content: string,
   status: "in_progress" | "completed",
   durationMs?: number,
+  reasoningTokens?: number,
 ): TranscriptItem => ({
   id,
   type: "thinking",
   status,
   content,
   ...(durationMs !== undefined ? { durationMs } : {}),
+  ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
 });
 
 describe("dedupeAdjacentDuplicateThinkingCompleted", () => {
@@ -55,6 +57,27 @@ describe("dedupeAdjacentDuplicateThinkingCompleted", () => {
       content: " reasoning ",
       durationMs: 2803,
     });
+  });
+
+  // Issue #258: a row with no text stands for reasoning a provider kept to
+  // itself. Two such steps in a row are two costs, not one row seen twice.
+  it("keeps rows of hidden reasoning apart, each with its own tokens", () => {
+    const items: TranscriptItem[] = [
+      thinking("a", "", "completed", undefined, 10),
+      thinking("b", "", "completed", undefined, 20),
+    ];
+    const out = dedupeAdjacentDuplicateThinkingCompleted(items);
+    expect(out.map((it) => it.id)).toEqual(["a", "b"]);
+  });
+
+  it("keeps the tokens of a row it collapses", () => {
+    const items: TranscriptItem[] = [
+      thinking("a", "same", "completed", 100),
+      thinking("b", "same", "completed", undefined, 42),
+    ];
+    const out = dedupeAdjacentDuplicateThinkingCompleted(items);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ id: "a", reasoningTokens: 42 });
   });
 
   it("does not collapse when content differs", () => {

@@ -86,7 +86,11 @@ export function transcriptItemsLooselyEqual(
   }
 }
 
-/** Collapse consecutive identical completed reasoning rows (e.g. after reload merge). */
+/**
+ * Collapse consecutive identical completed reasoning rows (e.g. after reload merge).
+ * A row with no text stands for reasoning a provider kept to itself, and two
+ * of them in a row are two steps, never one row seen twice.
+ */
 export function dedupeAdjacentDuplicateThinkingCompleted(
   items: TranscriptItem[],
 ): TranscriptItem[] {
@@ -98,6 +102,7 @@ export function dedupeAdjacentDuplicateThinkingCompleted(
       it.type === "thinking" &&
       prev.status === "completed" &&
       it.status === "completed" &&
+      prev.content.trim() !== "" &&
       prev.content.trim() === it.content.trim()
     ) {
       let durationMs: number | undefined;
@@ -116,9 +121,11 @@ export function dedupeAdjacentDuplicateThinkingCompleted(
       if (pd !== undefined || cd !== undefined) {
         durationMs = Math.max(pd ?? 0, cd ?? 0);
       }
+      const reasoningTokens = prev.reasoningTokens ?? it.reasoningTokens;
       out[out.length - 1] = {
         ...prev,
         ...(durationMs !== undefined ? { durationMs } : {}),
+        ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
       };
       continue;
     }

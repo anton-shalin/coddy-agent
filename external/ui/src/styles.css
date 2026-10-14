@@ -4128,6 +4128,41 @@ a.rail-brand {
   font-variant-numeric: tabular-nums;
 }
 
+/* The mark of a reasoning row (ThinkingIcon), before its label, in the label's
+   muted ink (issue #258). */
+.thinking-icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: color-mix(in srgb, var(--text) 48%, var(--coddy-blend-base));
+}
+
+/* What the reasoning cost, after the duration and in the same type: the count
+   the live line and the Tasks panel show, the exact number in its title. */
+.thinking-tokens {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  font-size: 12px;
+  line-height: 20px;
+  color: color-mix(in srgb, var(--text) 40%, var(--coddy-blend-base));
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* After a duration the count reads like the live line's: "4s · 312 tokens". */
+.thinking-dur + .thinking-tokens::before {
+  content: "\00b7";
+  margin-right: 6px;
+  color: color-mix(in srgb, var(--text) 40%, var(--coddy-blend-base));
+}
+
+/* Reasoning the provider kept to itself: the body says so instead of a text. */
+.thinking-body--hidden {
+  font-size: 13px;
+  color: color-mix(in srgb, var(--text) 52%, var(--coddy-blend-base));
+}
+
 .thinking-body {
   margin: 8px 0 0 12px;
   padding: 6px 12px;
