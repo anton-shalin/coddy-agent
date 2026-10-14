@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/EvilFreelancer/coddy-agent/internal/acp"
 	"github.com/EvilFreelancer/coddy-agent/internal/agent"
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
+	"github.com/EvilFreelancer/coddy-agent/internal/status"
 )
 
 type recordingBroker struct {
@@ -254,5 +256,186 @@ func TestRuntimeConnectsANewSessionsServersInTheBackground(t *testing.T) {
 	}
 	if rt.Mgr.BackgroundMCPConnect() {
 		t.Fatal("coddy serve starts a stored session's MCP servers when it is loaded to be read")
+	}
+}
+
+// launched starts a supervisor over the harness descriptors and waits until it
+// has applied the configuration it started with, the point from which
+// Status(that configuration) reads "applied".
+func launched(t *testing.T, s *serveFeatureState) {
+	t.Helper()
+	if err := s.launch(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.stopSupervisor)
+	if err := waitFor(func() bool {
+		s.sup.mu.Lock()
+		defer s.sup.mu.Unlock()
+		return s.sup.applied == s.cfg
+	}); err != nil {
+		t.Fatalf("the supervisor never applied its starting configuration: %v", err)
+	}
+}
+
+func statusRow(t *testing.T, rows []status.Subsystem, kind Kind) status.Subsystem {
+	t.Helper()
+	for _, row := range rows {
+		if row.Kind == string(kind) {
+			return row
+		}
+	}
+	t.Fatalf("no row for %s in %+v", kind, rows)
+	return status.Subsystem{}
+}
+
+// A listener's new address is pending as soon as the configuration says so:
+// a read right after a save sees it before the supervisor has been handed the
+// configuration, and moving the address back clears it. Whether anyone has to
+// restart the process depends on a dispatcher being behind it.
+func TestSupervisorStatusPendingBeforeApply(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		restartable  bool
+		wantRequired bool
+	}{
+		{"a foreground process waits for a manual restart", false, true},
+		{"a process under a dispatcher restarts by itself", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &serveFeatureState{}
+			s.reset()
+			s.restartable = tc.restartable
+			launched(t, s)
+
+			moved := *s.cfg
+			moved.HTTPServer.Port = 23456
+			rows, required, refused := s.sup.Status(&moved)
+			row := statusRow(t, rows, KindHTTP)
+			if row.State != status.StateRunning || row.Address != "12345" || row.PendingAddress != "23456" {
+				t.Errorf("http row = %+v, want running on 12345 with 23456 pending", row)
+			}
+			if required != tc.wantRequired || refused != "" {
+				t.Errorf("restartRequired = %v, refused = %q; want %v and none", required, refused, tc.wantRequired)
+			}
+
+			rows, required, _ = s.sup.Status(s.cfg)
+			if row := statusRow(t, rows, KindHTTP); row.PendingAddress != "" || required {
+				t.Errorf("moving the address back left %+v, restartRequired = %v", row, required)
+			}
+		})
+	}
+}
+
+// A dispatcher restarts the process only into a configuration its pre-flight
+// accepts. When it would not, the change waits for a manual restart that would
+// fail the same way, and the read says why.
+func TestSupervisorStatusRestartRefused(t *testing.T) {
+	s := &serveFeatureState{}
+	s.reset()
+	s.subs = s.describe(false) // no gateway in this build
+	s.restartable = true
+	launched(t, s)
+
+	unrunnable := *s.cfg
+	unrunnable.Gateways.Telegram.Enabled = true
+	unrunnable.HTTPServer.Port = 23456
+	_, required, refused := s.sup.Status(&unrunnable)
+	if !required || !strings.Contains(refused, "gateways.telegram.enable") || !strings.Contains(refused, "-tags gateway") {
+		t.Errorf("restartRequired = %v, refused = %q; want the pre-flight's refusal naming the key and the tag", required, refused)
+	}
+
+	// With no address to move there is nothing to restart for, runnable or not.
+	unrunnable.HTTPServer.Port = 0
+	if _, required, refused := s.sup.Status(&unrunnable); required || refused != "" {
+		t.Errorf("without a pending address: restartRequired = %v, refused = %q", required, refused)
+	}
+
+	// Without a dispatcher the change just waits, whatever the pre-flight says.
+	s.sup.Restartable = false
+	unrunnable.HTTPServer.Port = 23456
+	if _, required, refused := s.sup.Status(&unrunnable); !required || refused != "" {
+		t.Errorf("foreground: restartRequired = %v, refused = %q; want a manual restart and no refusal", required, refused)
+	}
+}
+
+// Before the supervisor has applied a configuration every surface it enables
+// is starting, never stopped; once it has, an enabled one that is not running
+// is stopped.
+func TestSupervisorStatusStartingBeforeLaunch(t *testing.T) {
+	s := &serveFeatureState{}
+	s.reset()
+	s.cfg.Gateways.Telegram.Enabled = true
+	idle := NewSupervisor(nil, s.subs)
+	rows, required, _ := idle.Status(s.cfg)
+	if len(rows) != 2 || required {
+		t.Fatalf("an unstarted supervisor reads %+v, restartRequired = %v; want the two enabled surfaces", rows, required)
+	}
+	for i, kind := range []Kind{KindHTTP, KindGateway} {
+		if rows[i].Kind != string(kind) || rows[i].State != status.StateStarting || rows[i].Address != "" {
+			t.Errorf("row %d = %+v, want %s starting with no address, in declaration order", i, rows[i], kind)
+		}
+	}
+
+	s.cfg.Gateways.Telegram.Enabled = false
+	launched(t, s)
+	wider := *s.cfg
+	wider.Scheduler.Enabled = true
+	rows, _, _ = s.sup.Status(&wider)
+	if got := statusRow(t, rows, KindScheduler).State; got != status.StateStarting {
+		t.Errorf("a surface the configuration enabled, before the supervisor saw it: %q, want starting", got)
+	}
+	s.reloads <- &wider
+	if err := s.settle(&wider); err != nil {
+		t.Fatal(err)
+	}
+	rows, _, _ = s.sup.Status(&wider)
+	if got := statusRow(t, rows, KindScheduler).State; got != status.StateRunning {
+		t.Errorf("after the supervisor applied it: %q, want running", got)
+	}
+}
+
+// An enabled surface the supervisor applied and did not start (this binary
+// has no support for it) is stopped, and it has no address.
+func TestSupervisorStatusStoppedWhenAppliedButNotRunning(t *testing.T) {
+	s := &serveFeatureState{}
+	s.reset()
+	s.subs = s.describe(false)
+	launched(t, s)
+
+	next := *s.cfg
+	next.Gateways.Telegram.Enabled = true
+	s.reloads <- &next
+	if err := s.settle(&next); err != nil {
+		t.Fatal(err)
+	}
+	rows, required, refused := s.sup.Status(&next)
+	if row := statusRow(t, rows, KindGateway); row.State != status.StateStopped || row.Address != "" {
+		t.Errorf("gateway row = %+v, want stopped with no address", row)
+	}
+	if required || refused != "" {
+		t.Errorf("restartRequired = %v, refused = %q; want neither", required, refused)
+	}
+}
+
+// A listener the configuration turns off is retained until the supervisor
+// stops it, and it may simply stop: a new address for it is no reason to
+// restart anything.
+func TestSupervisorStatusDisabledListenerHasNoPending(t *testing.T) {
+	s := &serveFeatureState{}
+	s.reset()
+	s.restartable = false
+	launched(t, s)
+
+	off := false
+	disabled := *s.cfg
+	disabled.HTTPServer.Enabled = &off
+	disabled.HTTPServer.Port = 23456
+	rows, required, refused := s.sup.Status(&disabled)
+	row := statusRow(t, rows, KindHTTP)
+	if row.State != status.StateRetained || row.Address != "12345" || row.PendingAddress != "" {
+		t.Errorf("http row = %+v, want retained on 12345 with nothing pending", row)
+	}
+	if required || refused != "" {
+		t.Errorf("restartRequired = %v, refused = %q; want neither", required, refused)
 	}
 }

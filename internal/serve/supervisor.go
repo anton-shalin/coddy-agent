@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
+	"github.com/EvilFreelancer/coddy-agent/internal/status"
 )
 
 // restartDrain bounds how long a surface may take to stop before the supervisor
@@ -45,6 +46,10 @@ type Supervisor struct {
 
 	mu      sync.Mutex
 	running map[Kind]*instance
+	// applied is the configuration the running set was last brought in line
+	// with, nil until the surfaces of the first one have been started. Status
+	// reads a configuration the supervisor has not applied yet as pending.
+	applied *config.Config
 }
 
 // instance is one live subsystem: the context that stops it, the goroutine that
@@ -92,6 +97,7 @@ func (s *Supervisor) Run(ctx context.Context, cfg *config.Config, reloads <-chan
 			s.start(ctx, sub, cfg, failures)
 		}
 	}
+	s.markApplied(cfg)
 
 	var runErr error
 	for {
@@ -181,6 +187,8 @@ func (s *Supervisor) applyConfig(ctx context.Context, cfg *config.Config, failur
 	if cfg == nil {
 		return false
 	}
+	// A refused change counts as applied: the process stays as it is.
+	defer s.markApplied(cfg)
 	// What only a fresh process can adopt is weighed before anything moves.
 	// Applying the rest first would leave a refused change half done - a
 	// surface it turned off already stopped, the others as they were - and a
@@ -255,6 +263,67 @@ func (s *Supervisor) applyConfig(ctx context.Context, cfg *config.Config, failur
 		}
 	}
 	return false
+}
+
+// markApplied records cfg as the configuration the running set was last
+// brought in line with.
+func (s *Supervisor) markApplied(cfg *config.Config) {
+	s.mu.Lock()
+	s.applied = cfg
+	s.mu.Unlock()
+}
+
+// Status reads the subsystem table off the running set and live, the
+// configuration in force. Nothing is recorded as a change comes in, so a read
+// right after a save sees a listener's new address before the supervisor has
+// been handed the configuration, and moving the address back clears it.
+//
+// A listener whose address live moved is pending; it needs a manual restart
+// unless a dispatcher would restart the process by itself, which it does only
+// into a configuration the pre-flight accepts (the check applyConfig makes).
+// When it would not, refused says why, in the pre-flight's own words: keys and
+// build tags, never values. A listener live no longer enables may simply stop,
+// so it has no pending address.
+func (s *Supervisor) Status(live *config.Config) (subs []status.Subsystem, restartRequired bool, refused string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pending := false
+	for _, sub := range s.subs {
+		inst := s.running[sub.Kind]
+		want := sub.enabled(live)
+		if inst == nil && !want {
+			continue
+		}
+		row := status.Subsystem{Kind: string(sub.Kind)}
+		switch {
+		case inst != nil && want:
+			row.State = status.StateRunning
+		case inst != nil:
+			row.State = status.StateRetained
+		case s.applied != live:
+			row.State = status.StateStarting
+		default:
+			row.State = status.StateStopped
+		}
+		if inst != nil {
+			row.Address = inst.restartKey
+			if next := sub.restartKey(live); want && sub.RestartKey != nil && next != inst.restartKey {
+				row.PendingAddress = next
+				pending = true
+			}
+		}
+		subs = append(subs, row)
+	}
+	if !pending {
+		return subs, false, ""
+	}
+	if !s.Restartable {
+		return subs, true, ""
+	}
+	if _, err := Resolve(live, s.subs); err != nil {
+		return subs, true, err.Error()
+	}
+	return subs, false, ""
 }
 
 // needsFreshProcess names a surface cfg asks for that this process cannot
