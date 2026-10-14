@@ -16,7 +16,6 @@ import {
   searchSettings,
   type SettingsSearchEntry,
 } from "./settingsSearch";
-import { landmarkAnchor } from "./settingsTexts";
 import {
   AGENT_SCHEMA,
   RELAY_SCHEMA,
@@ -35,6 +34,7 @@ import {
 } from "./settingsDrawing.fakes";
 import {
   deriveSettingsSections,
+  landmarkAnchor,
   type SectionDescriptor,
 } from "./settingsSections";
 import { initLocale, setLocale, translate } from "../i18n/i18n";

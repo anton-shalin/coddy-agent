@@ -25,9 +25,10 @@ import { SKILLS_HAND_DRAWN_FIELD, SkillsSection } from "./SkillsSection";
 import { SubagentsSection } from "./SubagentsSection";
 import {
   SESSIONS_CONFIG_KEY,
+  SETTINGS_TEXTS,
+  type OverrideTexts,
   type SectionDescriptor,
 } from "./settingsSections";
-import { SETTINGS_TEXTS, type OverrideTexts } from "./settingsTexts";
 import { useT } from "../i18n/I18nProvider";
 import { translate } from "../i18n/i18n";
 
@@ -204,7 +205,7 @@ function neuralDeepAPIBaseOverride(
 }
 
 /**
- * What an override draws in a field's box: "hidden" (nothing), null (the
+ * What an override draws in a field's box: false (nothing), null (the
  * schema's own control) or its texts. The overrides draw from it and the
  * settings search indexes it, so what is searched is what is shown.
  */
@@ -213,7 +214,7 @@ export function overrideTexts(
   path: string,
   parent: Record<string, unknown> | undefined,
   schema: JsonSchema,
-): "hidden" | null | OverrideTexts {
+): false | null | OverrideTexts {
   const label = () =>
     schemaFieldLabel(
       domain,
@@ -238,11 +239,11 @@ export function overrideTexts(
       path === "usage_limits_panel" &&
       !USAGE_PANEL_PROVIDER_TYPES.has(providerType)
     ) {
-      return "hidden";
+      return false;
     }
     if (providerType === "codex") {
       if (path === "api_key" || path === "api_key_command") {
-        return "hidden";
+        return false;
       }
       if (path === "api_base") {
         return {
@@ -275,15 +276,14 @@ export function overrideTexts(
       : null;
   }
   if (domain === "skills") {
-    return path === SKILLS_HAND_DRAWN_FIELD ? "hidden" : null;
+    return path === SKILLS_HAND_DRAWN_FIELD ? false : null;
   }
   return null;
 }
 
 // A field override's answer: false draws nothing, null leaves it to the schema.
 function boxFor(domain: string, ctx: FieldOverrideContext) {
-  const box = overrideTexts(domain, ctx.path, ctx.parentObj, ctx.schema);
-  return box === "hidden" ? false : box;
+  return overrideTexts(domain, ctx.path, ctx.parentObj, ctx.schema);
 }
 
 // A bot's proxy reads like a provider's, so it gets the same switch and URL

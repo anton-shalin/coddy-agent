@@ -4,8 +4,11 @@ import { FieldHint, LegendWithHint } from "./FieldHint";
 import { IconShield, IconSync } from "./icons";
 import { liveSessionId } from "./marketplaces";
 import { IconTrash } from "./SchemaForm";
-import { MCP_SECTION_ID } from "./settingsSections";
-import { SETTINGS_TEXTS, landmarkAnchor } from "./settingsTexts";
+import {
+  MCP_SECTION_ID,
+  SETTINGS_TEXTS,
+  landmarkAnchor,
+} from "./settingsSections";
 import { Switch } from "./Switch";
 import { useT } from "../i18n/I18nProvider";
 import { translate } from "../i18n/i18n";

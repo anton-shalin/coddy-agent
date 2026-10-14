@@ -19,7 +19,6 @@ import {
   SettingsSearchField,
   SettingsSearchResults,
   useResultsShowing,
-  useSettingsSearchChoice,
 } from "./SettingsSearchView";
 import {
   buildSettingsSearchIndex,
@@ -292,10 +291,9 @@ export function Settings(props: {
   const { locale, t } = useT();
   // The query lives in a store outside the render, so typing never re-renders
   // the tab under the results: this component hears only when the results
-  // start or stop showing and when a result is opened.
+  // start or stop showing.
   const [search] = useState(createSettingsSearch);
   const showing = useResultsShowing(search);
-  const choice = useSettingsSearchChoice(search);
   const inputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLElement>(null);
   const resultsId = useId();
@@ -443,18 +441,18 @@ export function Settings(props: {
             : null,
   );
 
+  // A trip to a setting: a result opened or an address that names one. Each
+  // request is a new object, so choosing the same result again goes again.
   // Opening a result opens its tab and row through the address, which also
   // names the setting; the effect below then takes the operator to it.
-  const revealing = useRef<SettingsSearchEntry | null>(null);
+  const [trip, setTrip] = useState<{ entry: SettingsSearchEntry } | null>(null);
   // The setting last taken to: the address read back after a choice names it
   // again and is no second trip.
   const takenTo = useRef<string | null>(null);
-  // Counts the trips an address asked for, as `choice` counts the search's.
-  const [addressTrips, setAddressTrips] = useState(0);
   const openResult = useCallback(
     (entry: SettingsSearchEntry) => {
       search.choose(entry.id);
-      revealing.current = entry;
+      setTrip({ entry });
       takenTo.current =
         entry.anchor === null
           ? null
@@ -468,16 +466,15 @@ export function Settings(props: {
     [search, selectSection],
   );
   useEffect(() => {
-    const entry = revealing.current;
     const root = rootRef.current;
-    if (entry === null || root === null) {
+    if (trip === null || root === null) {
       return undefined;
     }
-    return revealWhenReady(root, entry, {
+    return revealWhenReady(root, trip.entry, {
       touchOnly: snapshotTouchOnly(),
       reducedMotion: prefersReducedMotion(),
     });
-  }, [choice, addressTrips]);
+  }, [trip]);
 
   // An address that names a setting (a pasted link, a reload, the Mini App's
   // launch) is followed like a choice. The index may not hold it yet, so this
@@ -506,9 +503,11 @@ export function Settings(props: {
       return;
     }
     takenTo.current = routeSetting;
-    revealing.current = entry;
-    setAddressTrips((n) => n + 1);
-  }, [routeSetting, routeField, routeSection, routeItem, index]);
+    // A link followed while results show puts them away, as a choice does,
+    // or the setting would wait under them until the reveal gives up.
+    search.hide();
+    setTrip({ entry });
+  }, [routeSetting, routeField, routeSection, routeItem, index, search]);
 
   // "/" puts the cursor in the search unless a field has it or a dialog is
   // open. On the narrow shell with a tab open the field is not drawn: go back

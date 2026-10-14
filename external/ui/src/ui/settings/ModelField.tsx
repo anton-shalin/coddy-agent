@@ -1,5 +1,5 @@
 import { Combobox } from "./Combobox";
-import type { OverrideTexts } from "./settingsTexts";
+import type { OverrideTexts } from "./settingsSections";
 import type { ProviderRow } from "./useProviderModels";
 import { useT } from "../i18n/I18nProvider";
 

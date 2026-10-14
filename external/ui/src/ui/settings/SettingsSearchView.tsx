@@ -39,8 +39,6 @@ export type SettingsSearchState = {
   active: number;
   /** The result last opened, highlighted when the results come back. */
   chosenId: string | null;
-  /** Counts the results opened, so choosing the same one again is a new request. */
-  choice: number;
 };
 
 type Found = { hits: SettingsSearchHit[]; more: number };
@@ -68,7 +66,6 @@ export function createSettingsSearch(): SettingsSearchStore {
     open: false,
     active: 0,
     chosenId: null,
-    choice: 0,
   };
   const listeners = new Set<() => void>();
   let last: {
@@ -82,8 +79,7 @@ export function createSettingsSearch(): SettingsSearchStore {
       next.query === state.query &&
       next.open === state.open &&
       next.active === state.active &&
-      next.chosenId === state.chosenId &&
-      next.choice === state.choice
+      next.chosenId === state.chosenId
     ) {
       return;
     }
@@ -104,8 +100,7 @@ export function createSettingsSearch(): SettingsSearchStore {
     hide: () => set({ open: false }),
     clear: () => set({ query: "", open: false, active: 0, chosenId: null }),
     move: (active) => set({ active }),
-    choose: (id) =>
-      set({ chosenId: id, open: false, choice: state.choice + 1 }),
+    choose: (id) => set({ chosenId: id, open: false }),
     answer: (index) => {
       const words = searchWords(state.query).join(" ");
       if (last === null || last.index !== index || last.words !== words) {
@@ -129,12 +124,6 @@ function resultsShowing(state: SettingsSearchState): boolean {
 /** Settings reads only this while it renders: not the query as it is typed. */
 export function useResultsShowing(search: SettingsSearchStore): boolean {
   const snapshot = () => resultsShowing(search.get());
-  return useSyncExternalStore(search.subscribe, snapshot, snapshot);
-}
-
-/** The number of results opened so far; a new one is a new reveal request. */
-export function useSettingsSearchChoice(search: SettingsSearchStore): number {
-  const snapshot = () => search.get().choice;
   return useSyncExternalStore(search.subscribe, snapshot, snapshot);
 }
 

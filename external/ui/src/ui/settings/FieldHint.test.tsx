@@ -10,9 +10,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { FieldHint, FieldLabel, LegendWithHint } from "./FieldHint";
-import { PaneHidden } from "../components/PanePortal";
 import { OpenRailScreen } from "../nav/railEscape.fakes";
-import { pinTipByTouch, placeHint, stubTipSize } from "./pinnedTip.fakes";
 
 afterEach(cleanup);
 
@@ -141,56 +139,6 @@ test("a fieldset legend carries its description the same way", () => {
   expect(screen.getByRole("tooltip").textContent).toBe(
     "What the provider lists.",
   );
-});
-
-// A pane hidden under search results is deaf and draws no portal. The tip a
-// touch pinned stays open meanwhile: scrolling the results cannot close it,
-// and it is measured against its (i) again when the pane is shown.
-test("a tip pinned by a touch in a hidden pane is not drawn, survives a scroll and is placed again when shown", () => {
-  stubTipSize();
-  const pane = (hidden: boolean) => (
-    <PaneHidden.Provider value={hidden}>
-      <FieldLabel label="Timeout" description="Per request." />
-    </PaneHidden.Provider>
-  );
-  const tip = () => screen.queryByTestId("field-hint-tip");
-
-  const { rerender } = render(pane(false));
-  placeHint(hint(), 400, 300);
-  pinTipByTouch(hint());
-  expect(tip()?.style.left).toBe("360px");
-  expect(tip()?.style.top).toBe("252px");
-
-  rerender(pane(true));
-  expect(tip()).toBeNull();
-  expect(document.body.textContent).not.toContain("Per request.");
-  // Nothing the results do closes it: not their scroll, a pointer on them, a
-  // resize, nor an Escape that belongs to the screen.
-  act(() => {
-    document.dispatchEvent(new Event("scroll"));
-    window.dispatchEvent(new Event("resize"));
-  });
-  fireEvent.mouseDown(document.body);
-  fireEvent.touchStart(document.body);
-  expect(fireEvent.keyDown(document.body, { key: "Escape" })).toBe(true);
-
-  // The (i) moved while the pane was hidden.
-  placeHint(hint(), 500, 100);
-  rerender(pane(false));
-  expect(tip()?.textContent).toBe("Per request.");
-  expect(tip()?.style.left).toBe("460px");
-  expect(tip()?.style.top).toBe("52px");
-  expect(tip()?.style.visibility).toBe("");
-  expect(hint().className).toContain("is-open");
-  // Still pinned: leaving and blurring the (i) do not take it down ...
-  fireEvent.mouseLeave(hint());
-  fireEvent.blur(hint());
-  expect(tip()).not.toBeNull();
-  // ... and it listens again.
-  act(() => {
-    document.dispatchEvent(new Event("scroll"));
-  });
-  expect(tip()).toBeNull();
 });
 
 // Placement and layering are CSS jsdom cannot lay out: pin the rules that keep

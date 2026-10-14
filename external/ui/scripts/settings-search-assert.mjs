@@ -68,13 +68,16 @@ function cursorHolder() {
   };
 }
 
-/** The results' options, scoped to the list the field controls (aria-controls). */
+/**
+ * The results' options, in the list the field controls (aria-controls). A field
+ * that names no list is a broken combobox, not a reason to take any listbox.
+ */
 async function optionsOf(target) {
-  const id = await searchField(target)
-    .getAttribute("aria-controls")
-    .catch(() => null);
-  const scope = id ? `[id=${JSON.stringify(id)}]` : '[role="listbox"]';
-  return target.locator(`${scope} button[role="option"]`);
+  const id = await searchField(target).getAttribute("aria-controls");
+  if (!id) {
+    throw new Error("The search field names no listbox in aria-controls.");
+  }
+  return target.locator(`[id=${JSON.stringify(id)}] button[role="option"]`);
 }
 
 /**

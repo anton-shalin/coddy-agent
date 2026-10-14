@@ -10,6 +10,7 @@ import {
   entriesInSchemaOrder,
   fieldAnchor,
   groupAnchor,
+  isBlockField,
   isScalarItem,
   layoutSchemaForm,
   type JsonSchema,
@@ -26,18 +27,16 @@ import {
 } from "./SettingsSection";
 import {
   ARRAY_LABEL_FIELDS,
+  landmarkAnchor,
   MCP_SECTION_ID,
   SESSIONS_CONFIG_KEY,
+  SETTINGS_TEXTS,
+  type DrawnText,
   type SectionDescriptor,
+  type SettingsTextId,
 } from "./settingsSections";
 import { skillsFormGroups } from "./SkillsSection";
 import { subagentsFormGroups } from "./SubagentsSection";
-import {
-  landmarkAnchor,
-  SETTINGS_TEXTS,
-  type DrawnText,
-  type SettingsTextId,
-} from "./settingsTexts";
 import { translate } from "../i18n/i18n";
 import { notificationsShown } from "../pwa/NotificationsSetting";
 
@@ -45,7 +44,8 @@ export const SETTINGS_SEARCH_LIMIT = 50;
 /** How much of a description shows before the word that matched. */
 export const SNIPPET_LEAD = 40;
 
-type EntryKind = "section" | "row" | "group" | "field" | "landmark";
+/** A block is a field drawn as a fieldset of its own: a nested object, a list, a map. */
+type EntryKind = "section" | "row" | "group" | "block" | "field" | "landmark";
 
 export type SettingsSearchEntry = {
   id: string;
@@ -173,7 +173,12 @@ function secondNameFor(
 }
 
 // A tab, a block or a landmark leads the first tier; the rest follows.
-const LEADS: ReadonlySet<EntryKind> = new Set(["section", "group", "landmark"]);
+const LEADS: ReadonlySet<EntryKind> = new Set([
+  "section",
+  "group",
+  "block",
+  "landmark",
+]);
 
 /**
  * The entries every word of the query occurs in, best first: by tier (see
@@ -396,7 +401,7 @@ function walkField(frame: FieldFrame): void {
   const { walk, name, schema, path, keyPath, parent, where, list } = frame;
   const { form, section } = walk;
   const box = overrideTexts(form.domain, path, parent, schema);
-  if (box === "hidden") {
+  if (box === false) {
     return;
   }
   const texts = box ?? {
@@ -410,7 +415,7 @@ function walkField(frame: FieldFrame): void {
   const anchor = fieldAnchor(form.domain, path);
   walk.out.push(
     makeSearchEntry({
-      kind: "field",
+      kind: box === null && isBlockField(schema) ? "block" : "field",
       section: section.id,
       row: walk.row,
       anchor,

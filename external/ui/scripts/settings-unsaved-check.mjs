@@ -683,7 +683,10 @@ async function searchOnRelay(browser, c, where) {
         await openSearch(page, { narrow });
         await searchFor(page, "pairing");
         const name = await revealResult(page, { ...pairing, focus });
-        await assertAddress(page, { tab: "swarm" });
+        await assertAddress(page, {
+          tab: "swarm",
+          field: "swarm:pairing_tokens",
+        });
         return name;
       },
     );

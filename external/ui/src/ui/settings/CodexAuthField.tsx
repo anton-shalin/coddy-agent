@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { FieldLabel } from "./FieldHint";
-import type { OverrideTexts } from "./settingsTexts";
+import type { OverrideTexts } from "./settingsSections";
 import { useT } from "../i18n/I18nProvider";
 import { translate } from "../i18n/i18n";
 

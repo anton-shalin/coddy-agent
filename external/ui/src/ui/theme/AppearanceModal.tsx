@@ -13,7 +13,7 @@ import { isUiLocale, UI_LOCALES, UI_LOCALE_IDS } from "../i18n/locales";
 import { UI_THEME_IDS, LIGHT_THEMES, type UiThemeMode } from "./themeCookie";
 import { readAppliedUiTheme, setUiTheme } from "./uiTheme";
 import { NotificationsSetting } from "../pwa/NotificationsSetting";
-import { SETTINGS_TEXTS, landmarkAnchor } from "../settings/settingsTexts";
+import { SETTINGS_TEXTS, landmarkAnchor } from "../settings/settingsSections";
 
 function subscribeTheme(onStoreChange: () => void): () => void {
   const obs = new MutationObserver(onStoreChange);

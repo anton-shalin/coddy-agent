@@ -3,7 +3,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ModelField } from "./ModelField";
 import type { ProviderRow } from "./useProviderModels";
-import type { OverrideTexts } from "./settingsTexts";
+import type { OverrideTexts } from "./settingsSections";
 
 afterEach(() => {
   cleanup();

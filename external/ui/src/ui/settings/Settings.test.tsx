@@ -30,7 +30,6 @@ import {
 import { parseAppHash } from "../scheduler/hashRoute";
 import { initLocale } from "../i18n/i18n";
 import { OpenRailScreen } from "../nav/railEscape.fakes";
-import { pinTipByTouch, placeHint, stubTipSize } from "./pinnedTip.fakes";
 import { pressBack } from "../telegram/backButton";
 import {
   AGENT_SCHEMA,
@@ -781,6 +780,53 @@ const rowForm = (row: string) =>
 const headTitle = () =>
   document.querySelector(".sessions-head")!.firstElementChild!.textContent;
 
+/**
+ * What a test needs to place a (i)'s tip, which jsdom cannot lay out: the tip
+ * gets a size, the (i) a place, and a touch pins the tip the way a phone does.
+ * A tip of 100 x 40 opens above a 20px (i) at (left, top), centred on it: for
+ * an (i) at (400, 300) its style is left 360px, top 252px.
+ */
+const TIP = { width: 100, height: 40, hint: 20 } as const;
+
+/** Gives every element the size of a tip until the test finishes. */
+function stubTipSize(): void {
+  const sizes = [
+    vi
+      .spyOn(HTMLElement.prototype, "offsetWidth", "get")
+      .mockReturnValue(TIP.width),
+    vi
+      .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+      .mockReturnValue(TIP.height),
+  ];
+  onTestFinished(() => sizes.forEach((spy) => spy.mockRestore()));
+}
+
+/** Puts the (i) at a place in the viewport. */
+function placeHint(hint: HTMLElement, left: number, top: number): void {
+  const size = TIP.hint;
+  hint.getBoundingClientRect = () =>
+    ({
+      left,
+      top,
+      right: left + size,
+      bottom: top + size,
+      width: size,
+      height: size,
+      x: left,
+      y: top,
+      toJSON: () => ({}),
+    }) as DOMRect;
+}
+
+/** A touch on the (i), which pins its tip open. */
+function pinTipByTouch(hint: HTMLElement): void {
+  // jsdom has no PointerEvent: a plain event carries the pointer type.
+  const touch = new Event("pointerdown", { bubbles: true });
+  Object.defineProperty(touch, "pointerType", { value: "touch" });
+  fireEvent(hint, touch);
+  fireEvent.click(hint);
+}
+
 const isRinged = (el: Element) => el.classList.contains("is-search-target");
 
 const tabIsOpen = (id: string) =>
@@ -1287,6 +1333,18 @@ describe("settings search", () => {
     expect(warnings).not.toHaveBeenCalled();
   });
 
+  test("a link followed while results show puts them away and reveals its setting", async () => {
+    await drawer({ section: "agent" });
+    typeQuery("proxy");
+    expect(screen.queryByTestId("settings-search-results")).not.toBeNull();
+    await goTo("#/settings/agent?field=agent%3Amax_turns");
+    expect(screen.queryByTestId("settings-search-results")).toBeNull();
+    const box = boxOf("agent:max_turns")!;
+    expect(scrolledTo()).toEqual([box]);
+    expect(isRinged(box)).toBe(true);
+    expectCursor(screen.getByLabelText("Max turns"));
+  });
+
   test("the setting leaves the address when the operator goes elsewhere, and a new choice replaces it", async () => {
     const view = await drawer({
       section: "providers",
@@ -1623,6 +1681,7 @@ describe("settings search", () => {
           window.dispatchEvent(new Event("resize"));
         });
         fireEvent.mouseDown(results);
+        fireEvent.touchStart(results);
         placeHint(hint, 500, 100); // the (i) moved while the results were up
         clearResults();
         // As it was: open, placed against the (i) where it is now, pinned until something outside it moves.

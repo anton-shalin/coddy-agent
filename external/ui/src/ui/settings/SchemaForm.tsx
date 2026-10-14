@@ -1,12 +1,5 @@
 import type { ChangeEvent, ReactNode } from "react";
-import {
-  Fragment,
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
+import { Fragment, useId, useLayoutEffect, useRef, useState } from "react";
 
 import { Chevron } from "../components/Chevron";
 
@@ -749,7 +742,7 @@ function StringMapField(props: {
 }
 
 /** A field that renders as a fieldset of its own: a list, a map or a nested object. */
-function isBlockField(sub: JsonSchema): boolean {
+export function isBlockField(sub: JsonSchema): boolean {
   return (
     (sub.type === "object" && sub.properties !== undefined) ||
     (sub.type === "array" && sub.items !== undefined) ||

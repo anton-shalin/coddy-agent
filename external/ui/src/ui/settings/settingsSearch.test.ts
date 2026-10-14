@@ -25,8 +25,11 @@ import {
   launchAsTelegram,
   type SettingsDoc,
 } from "./settingsServer.fakes";
-import { deriveSettingsSections } from "./settingsSections";
-import { SETTINGS_TEXTS, landmarkAnchor } from "./settingsTexts";
+import {
+  deriveSettingsSections,
+  SETTINGS_TEXTS,
+  landmarkAnchor,
+} from "./settingsSections";
 import { schemaFieldLabel } from "./schemaI18n";
 import {
   entriesInSchemaOrder,
@@ -177,6 +180,27 @@ test("own names and config keys come first with tabs and blocks ahead, then matc
       h.tier,
     ]),
   ).toEqual([["Needs both", 3]]);
+});
+
+test("a nested object, a list and a map are blocks: they lead the first tier ahead of the fields", () => {
+  const index = indexOf(AGENT_SCHEMA);
+  const kindOf = (anchor: string) =>
+    index.find((e) => e.anchor === anchor)?.kind;
+  expect(kindOf(fieldAnchor("tools", "websearch"))).toBe("block");
+  expect(kindOf(fieldAnchor("tools", "command_allowlist"))).toBe("block");
+  expect(kindOf(fieldAnchor("tools", "http_request.default_headers"))).toBe(
+    "block",
+  );
+  expect(kindOf(fieldAnchor("tools", "output_limits.websearch"))).toBe("field");
+  // a field an override draws stays a field, whatever its schema
+  expect(kindOf(fieldAnchor("providers", "proxy"))).toBe("field");
+  const hits = searchSettings(index, "web search").hits;
+  const at = (anchor: string) =>
+    hits.findIndex((h) => h.entry.anchor === anchor);
+  expect(at(fieldAnchor("tools", "websearch"))).toBeGreaterThanOrEqual(0);
+  expect(at(fieldAnchor("tools", "websearch"))).toBeLessThan(
+    at(fieldAnchor("tools", "output_limits.websearch")),
+  );
 });
 
 test("case and ё do not matter, and nothing fuzzy matches", () => {

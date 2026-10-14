@@ -2,7 +2,7 @@ import React, { type ChangeEvent } from "react";
 
 import { FieldLabel } from "./FieldHint";
 import { SwitchField } from "./SwitchField";
-import type { OverrideTexts } from "./settingsTexts";
+import type { OverrideTexts } from "./settingsSections";
 import { useT } from "../i18n/I18nProvider";
 
 /** Whether a proxy setting is the keyword kw, in any case. */

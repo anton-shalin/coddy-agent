@@ -12,7 +12,7 @@ import { sessionHeaders } from "./marketplaces";
 import { Switch } from "./Switch";
 import { SwitchField } from "./SwitchField";
 import { filterInstallableMatches } from "./installableMatches";
-import { SETTINGS_TEXTS, landmarkAnchor } from "./settingsTexts";
+import { SETTINGS_TEXTS, landmarkAnchor } from "./settingsSections";
 import { schemaFieldDesc } from "./schemaI18n";
 import { useT } from "../i18n/I18nProvider";
 import { translate } from "../i18n/i18n";

@@ -21,7 +21,7 @@ import {
 } from "./subagentCatalog";
 import { fetchSubagentCatalog, setSubagentTrust } from "./subagentsApi";
 import { LegendWithHint } from "./FieldHint";
-import { SETTINGS_TEXTS, landmarkAnchor } from "./settingsTexts";
+import { SETTINGS_TEXTS, landmarkAnchor } from "./settingsSections";
 import { IconShield } from "./icons";
 import {
   snapshotSettingsConfig,
