@@ -624,9 +624,9 @@ SSE payloads
   - `tool_call`
   - `tool_call_update`
   - `plan`
-  - `token_usage`
+  - `token_usage` (the counters of a finished model call; **`reasoningTokens`** is the part of its output spent reasoning, when the provider reports it)
   - `usage_update` (`used` / `size` for the current model context; emitted again after compaction)
-  - Default (no `event:`): chat completion chunk deltas, including `delta.content` and optional `delta.reasoning_content`
+  - Default (no `event:`): chat completion chunk deltas, including `delta.content` and optional `delta.reasoning_content`, which carries the model's reasoning whichever field the provider sent it in (`reasoning_content`, `reasoning` or `thinking`)
 
 ## Long sessions
 
@@ -910,9 +910,11 @@ The chat transcript renders a flat list of UI message blocks. Each block has a `
   - The first row of a turn nobody typed: background tasks the model started ended and the server woke the agent (**`notify_on_finish`**, on by default) ([Background tasks](../features/background-tasks.md#what-the-woken-turn-looks-like)). It renders as **nothing**, neither a user bubble nor a note: the agent's answer follows the previous turn as the work carrying on, and the bell on the task's card in the Tasks panel says what woke it (*Woke the agent when it ended*).
   - Built from the **`background_wake`** frame of the relay while the turn streams and from the **`background_wake`** field of the message after a reload (**`parseBackgroundWakeTasks`** in **`chat/backgroundWake.ts`** reads both shapes). It opens a turn like a user message: the live status line counts from it, the next edit counts it the way the server counts user messages, and a failed woken turn offers no retry - nothing typed to send again.
 - `thinking`
-  - Renders model reasoning as a lightweight disclosure row.
+  - Renders model reasoning as a lightweight disclosure row, a light bulb before its label.
   - Status `in_progress` shows label `thinking...` and a running clock.
   - Status `completed` shows label `thinking` with the measured duration (none when nothing was measured) and preserves the text for review.
+  - When the provider reports what the reasoning cost, the tokens follow the duration: the short count the live status line uses, the exact number in its tooltip. The count comes from **`reasoningTokens`** of the **`token_usage`** event that ends the model call while the turn streams, and from **`reasoning_tokens`** of the assistant message after a reload. An OpenAI-compatible server reports it as **`usage.completion_tokens_details.reasoning_tokens`** and the Codex backend as **`output_tokens_details.reasoning_tokens`**; Anthropic and Devin do not break it out, and their rows show no count.
+  - A provider that keeps the reasoning text to itself and reports only its cost (an OpenAI `o`-series model behind an aggregator) gets a row too, with the count and no text. It appears when the turn ends and the transcript is read from the server; opened, it says the provider did not return the reasoning text.
   - Multiple `thinking` blocks may appear in one turn (reasoning can resume after tool calls).
 - `tool_call`
   - A single tool execution row, same disclosure chrome as **thinking** / **memory** (**chevron**, **`thinking-label`**, **`thinking-dur`** for duration or **`-`**).
