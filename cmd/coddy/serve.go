@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/signal"
@@ -286,7 +287,7 @@ func runServe(args []string) error {
 	defer wiring.Start()()
 
 	log.Info("starting coddy serve", "version", version.Get(), "config", paths.ConfigPath, "workspace", paths.CWD)
-	printServeBanner(cfg, enabled, httpAddr, swarmAddr, len(httpTokens) > 0, outOfBandLogin().IsSet())
+	printServeBanner(os.Stderr, cfg, enabled, httpAddr, swarmAddr, len(httpTokens) > 0, outOfBandLogin().IsSet())
 
 	if rt.Mgr != nil {
 		// The servers of the global configuration start with the process and
@@ -717,30 +718,38 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// printServeBanner says on stderr what this process actually started.
+// printServeBanner says on w (stderr, from a start) what this process actually
+// started.
 //
 // One command that starts a different set of surfaces per config file is only
 // as clear as what it reports, so the reachable addresses and whether the API
 // is open are stated rather than left to be inferred from the logs.
-func printServeBanner(cfg *config.Config, enabled []serve.Subsystem, httpAddr, swarmAddr string, extraAuth, extraLogin bool) {
-	fmt.Fprintf(os.Stderr, "coddy serve %s\n", version.Get())
+func printServeBanner(w io.Writer, cfg *config.Config, enabled []serve.Subsystem, httpAddr, swarmAddr string, extraAuth, extraLogin bool) {
+	_, _ = fmt.Fprintf(w, "coddy serve %s\n", version.Get())
 	for _, sub := range enabled {
 		switch sub.Kind {
 		case serve.KindHTTP:
-			fmt.Fprintf(os.Stderr, "  httpserver  http://%s  (%s)\n", httpAddr,
+			_, _ = fmt.Fprintf(w, "  httpserver  http://%s  (%s)\n", httpAddr,
 				httpAuthSummary(cfg, extraAuth, extraLogin))
 		case serve.KindSwarm:
 			scheme := "http"
 			if cfg.Swarm.TLS.Enabled() {
 				scheme = "https"
 			}
-			fmt.Fprintf(os.Stderr, "  swarm       %s://%s  (relay)\n", scheme, swarmAddr)
+			_, _ = fmt.Fprintf(w, "  swarm       %s://%s  (relay)\n", scheme, swarmAddr)
 		case serve.KindGateway:
-			fmt.Fprintf(os.Stderr, "  gateway     telegram\n")
+			_, _ = fmt.Fprintf(w, "  gateway     telegram\n")
 		case serve.KindGatewayPachca:
-			fmt.Fprintf(os.Stderr, "  gateway     pachca\n")
+			_, _ = fmt.Fprintf(w, "  gateway     pachca\n")
 		case serve.KindScheduler:
-			fmt.Fprintf(os.Stderr, "  scheduler   %s\n", cfg.SchedulerUserDir())
+			_, _ = fmt.Fprintf(w, "  scheduler   %s\n", cfg.SchedulerUserDir())
+		case serve.KindMetrics:
+			// Whether a scrape needs a credential, never the credential.
+			auth := "no token"
+			if cfg.Metrics.Token != "" {
+				auth = "bearer token"
+			}
+			_, _ = fmt.Fprintf(w, "  metrics     http://%s/metrics  (%s)\n", cfg.Metrics.ListenAddr(), auth)
 		}
 	}
 }

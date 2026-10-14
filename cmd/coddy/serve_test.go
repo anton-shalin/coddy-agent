@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"slices"
 	"strings"
@@ -224,5 +225,51 @@ func TestServeRunsTheExporterAsAnAuxiliarySubsystem(t *testing.T) {
 		if !errors.As(err, &notBuilt) || notBuilt.BuildTag != "metrics" || notBuilt.ConfigKey != "metrics.enable" {
 			t.Fatalf("metrics in a binary without the tag: %v, want ErrNotBuilt naming the tag", err)
 		}
+	}
+}
+
+// The banner says what the process started, the exporter included: where it
+// listens and whether a scrape needs a token, never the token itself.
+func TestServeBannerListsTheExporter(t *testing.T) {
+	const secret = "scrape-secret-value"
+	surface := serve.Subsystem{Kind: serve.KindHTTP}
+	exporter := serve.Subsystem{Kind: serve.KindMetrics}
+	banner := func(cfg *config.Config, enabled ...serve.Subsystem) string {
+		var out bytes.Buffer
+		printServeBanner(&out, cfg, enabled, "127.0.0.1:12345", "127.0.0.1:12346", false, false)
+		return out.String()
+	}
+
+	cfg := &config.Config{}
+	cfg.Metrics.Enable = true
+	cfg.Metrics.Host, cfg.Metrics.Port = "127.0.0.1", 12999
+
+	got := banner(cfg, surface, exporter)
+	if !strings.Contains(got, "  metrics     http://127.0.0.1:12999/metrics  (no token)\n") {
+		t.Errorf("exporter without a token:\n%s", got)
+	}
+
+	cfg.Metrics.Token = secret
+	got = banner(cfg, surface, exporter)
+	if !strings.Contains(got, "  metrics     http://127.0.0.1:12999/metrics  (bearer token)\n") {
+		t.Errorf("exporter with a token:\n%s", got)
+	}
+	if strings.Contains(got, secret) {
+		t.Errorf("the banner prints the scrape token:\n%s", got)
+	}
+
+	// The default address is the one the listener binds, not a blank.
+	cfg.Metrics.Host, cfg.Metrics.Port = "", 0
+	if got = banner(cfg, exporter); !strings.Contains(got, "http://127.0.0.1:12347/metrics") {
+		t.Errorf("exporter on its default address:\n%s", got)
+	}
+
+	// An exporter the process did not start is not announced, whatever the
+	// configuration holds.
+	if got = banner(cfg, surface); strings.Contains(got, "metrics") || strings.Contains(got, secret) {
+		t.Errorf("exporter announced although it was not started:\n%s", got)
+	}
+	if !strings.Contains(got, "  httpserver  http://127.0.0.1:12345  (no auth)\n") {
+		t.Errorf("the surface line is gone:\n%s", got)
 	}
 }
