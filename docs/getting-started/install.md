@@ -91,7 +91,7 @@ lists it under *Suggested packages*; add it with **`sudo apt-get install tmux`**
 
 | Path | What |
 |------|------|
-| **`/usr/bin/coddy`** | The full binary (**`http`**, **`ui`**, **`scheduler`**, **`memory`**, **`cli`**, **`gateway`**, **`swarm`**) |
+| **`/usr/bin/coddy`** | The full binary (**`http`**, **`ui`**, **`scheduler`**, **`memory`**, **`cli`**, **`gateway`**, **`swarm`**, **`metrics`**) |
 | **`/usr/share/man/man1/coddy.1.gz`** | **`man coddy`** |
 | **`/usr/share/bash-completion/completions/coddy`** | bash completion |
 | **`/usr/share/zsh/site-functions/_coddy`** | zsh completion |

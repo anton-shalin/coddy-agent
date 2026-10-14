@@ -1,6 +1,6 @@
 # Docker
 
-Run Coddy as **`coddy serve`** inside a minimal **`scratch`** image. The default image ships the embedded web UI (**`ui`** build tag), OpenAI-compatible REST (**`http`**), scheduler (**`scheduler`**), long-term memory (**`memory`**), the console (**`cli`**), the messenger gateways (**`gateway`**) and the swarm relay (**`swarm`**).
+Run Coddy as **`coddy serve`** inside a minimal **`scratch`** image. The default image ships the embedded web UI (**`ui`** build tag), OpenAI-compatible REST (**`http`**), scheduler (**`scheduler`**), long-term memory (**`memory`**), the console (**`cli`**), the messenger gateways (**`gateway`**), the swarm relay (**`swarm`**) and the Prometheus exporter (**`metrics`**).
 
 Related files:
 
@@ -264,7 +264,7 @@ For a local **`Dockerfile`** build, use **`docker-compose.dev.yml`** - see [Dock
 - **`gateway`** - the Telegram and Pachca bots (**[docs/surfaces/gateway.md](../surfaces/gateway.md)**), each under its own **`enable`** key.
 - **`cli`** - the interactive console (**[docs/surfaces/console.md](../surfaces/console.md)**), for **`docker run -it ... coddy`**.
 - **`swarm`** - the relay that aggregates nodes (**[docs/operate/swarm.md](../operate/swarm.md)**), under **`swarm.enable`**.
-- **`metrics`** - the Prometheus exporter, off until **`metrics.enable`** is set. It listens on loopback, which a published container port cannot reach: to scrape it from outside the container, set **`metrics.host`** to **`0.0.0.0`** together with **`metrics.token`**, and publish **`metrics.port`** (12347 by default).
+- **`metrics`** - the Prometheus exporter (**[docs/operate/monitoring.md](../operate/monitoring.md)**), off until **`metrics.enable`** is set. It listens on loopback, which a published container port cannot reach: to scrape it from outside the container, set **`metrics.host`** to **`0.0.0.0`** together with **`metrics.token`**, and publish **`metrics.port`** (12347 by default).
 
 To build an image **without** memory or the embedded UI, override **`BUILD_TAGS`** (for example **`http,scheduler,ui`** or **`http,scheduler`**) via **`docker compose` `args`** or **`docker build --build-arg`**.
 

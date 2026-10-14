@@ -66,6 +66,7 @@ agent:
 | Pachca | `coddy serve` with `gateways.pachca.enable` | A Pachca (Пачка) integration bot for direct chats, groups and threads; reads its events history, so no public address is needed | [Pachca gateway](docs/surfaces/pachca.md) |
 | Scheduler | `coddy serve` with `scheduler.enable` | Cron jobs as Markdown files, each run a session of its own | [Scheduler](docs/operate/scheduler.md) |
 | Swarm | `coddy serve` with `swarm.enable` | A relay that lists and reaches many Coddy nodes, including ones that can only dial out | [Swarm](docs/operate/swarm.md), [video](docs/assets/video/swarm.mp4) |
+| Metrics | `coddy serve` with `metrics.enable` | A Prometheus exporter on a port of its own: provider calls and tokens, turns, background tasks and the session disk, with alert rules for the common failures | [Monitoring](docs/operate/monitoring.md) |
 | Remote | `coddy --remote host:port` | The console, an editor or the browser driving a `coddy serve` on another machine | [Remote mode](docs/operate/remote.md) |
 
 `coddy serve` runs whatever `config.yaml` enables in one process. On Linux, `coddy serve install` runs it as a systemd user service of your account, working in `~/Coddy` (`coddy serve uninstall` removes it); elsewhere `coddy serve --daemon` keeps it running in the background with `status`, `stop` and `restart` ([coddy serve and the daemon](docs/operate/serve.md)).
