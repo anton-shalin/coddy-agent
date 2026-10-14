@@ -130,6 +130,61 @@ describe("mergeTranscriptPreferLocalSuffix", () => {
     const local = [u("1", "b"), a("2", "x", false)];
     expect(mergeTranscriptPreferLocalSuffix(server, local)).toEqual(server);
   });
+
+  // Issue #258: a step whose provider kept its reasoning to itself is a row
+  // of the history (a count, no text) that the live stream never draws. A
+  // reload in the middle of a turn - answering a permission prompt - must
+  // keep the text still streaming after it, not drop it for the snapshot.
+  it("keeps the streaming tail past a row of hidden reasoning only the server has", () => {
+    const toolCall: TranscriptItem = {
+      id: "t1",
+      type: "tool_call",
+      toolCallId: "call_1",
+      title: "read",
+      status: "completed",
+    } as TranscriptItem;
+    const server = [
+      u("1", "go"),
+      thinking("r", "", "completed", undefined, 40),
+      toolCall,
+    ];
+    const local = [u("1", "go"), toolCall, a("a", "Reading the file", true)];
+    const out = mergeTranscriptPreferLocalSuffix(server, local);
+    expect(out.map((it) => it.type)).toEqual([
+      "user_message",
+      "thinking",
+      "tool_call",
+      "assistant_message",
+    ]);
+    expect(out[1]).toMatchObject({ reasoningTokens: 40 });
+    expect(out[3]).toMatchObject({ content: "Reading the file" });
+  });
+
+  it("keeps the longer local answer behind a row of hidden reasoning", () => {
+    const server = [
+      u("1", "go"),
+      thinking("r", "", "completed", undefined, 40),
+      a("s", "ab", false),
+    ];
+    const local = [u("1", "go"), a("l", "abcd", true)];
+    const out = mergeTranscriptPreferLocalSuffix(server, local);
+    expect(out.map((it) => it.type)).toEqual([
+      "user_message",
+      "thinking",
+      "assistant_message",
+    ]);
+    expect(out[2]).toMatchObject({ content: "abcd", streaming: false });
+  });
+
+  it("still takes the snapshot when a row past the hidden reasoning differs", () => {
+    const server = [
+      u("1", "go"),
+      thinking("r", "", "completed", undefined, 40),
+      a("s", "server text", false),
+    ];
+    const local = [u("1", "go"), a("l", "other text", true)];
+    expect(mergeTranscriptPreferLocalSuffix(server, local)).toEqual(server);
+  });
 });
 
 describe("keepLocalTranscriptIfServerEmpty", () => {

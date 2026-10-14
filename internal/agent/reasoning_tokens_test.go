@@ -150,3 +150,55 @@ func TestProviderInputCarriesTheListedParameters(t *testing.T) {
 		t.Fatalf("provider input parameters = %v, want %v (asked for %v)", got, listed, st.asked)
 	}
 }
+
+// awaitingParamsState knows a model's listed parameters only once the turn
+// waited for that model's provider listing, as a manager-built session does
+// when the listing has not been read yet.
+type awaitingParamsState struct {
+	*session.State
+	params  map[string][]string
+	awaited map[string]bool
+}
+
+func (s *awaitingParamsState) AwaitContextWindow(_ context.Context, _ *config.Config, modelRef string) {
+	s.awaited[modelRef] = true
+}
+
+func (s *awaitingParamsState) ModelParameters(_ *config.Config, providerName, apiModel string) []string {
+	ref := providerName + "/" + apiModel
+	if !s.awaited[ref] {
+		return nil
+	}
+	return s.params[ref]
+}
+
+// A switch to another model in the middle of a turn reads that model's listing
+// before its transport is built, so the very next request already sends the
+// reasoning level the way the listing names it.
+func TestMidTurnSwitchReadsTheListingBeforeBuildingTheProvider(t *testing.T) {
+	base, st, client := modelToolsAgent(t, session.ModeAgent, "fake/a",
+		toolRow{Model: "fake/a"}, toolRow{Model: "fake/qwen/qwen3.8-flash"})
+	listed := []string{"max_tokens", "reasoning", "tools"}
+	ws := &awaitingParamsState{
+		State:   st,
+		params:  map[string][]string{"fake/qwen/qwen3.8-flash": listed},
+		awaited: map[string]bool{},
+	}
+	ag := NewAgent(base.cfg, ws, client, nil)
+	provider := &switchingProvider{st: st, to: "fake/qwen/qwen3.8-flash"}
+	provider.toolCall = &llm.ToolCall{ID: "call_read", Name: "read", InputJSON: `{"path":"missing.txt"}`}
+	var inputs []llm.ProviderInput
+	ag.providerFactory = func(in llm.ProviderInput) (llm.Provider, error) {
+		inputs = append(inputs, in)
+		return provider, nil
+	}
+	if _, err := ag.Run(context.Background(), []acp.ContentBlock{{Type: acp.ContentTypeText, Text: "look around"}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(inputs) != 2 || inputs[1].Model != "qwen/qwen3.8-flash" {
+		t.Fatalf("providers built for %+v, want the switch to qwen/qwen3.8-flash", inputs)
+	}
+	if got := inputs[1].SupportedParameters; !slices.Equal(got, listed) {
+		t.Fatalf("the provider after the switch was built with %v, want %v", got, listed)
+	}
+}

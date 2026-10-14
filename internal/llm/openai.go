@@ -139,7 +139,13 @@ func (p *openAIProvider) buildParams(messages []Message, tools []ToolDefinition,
 		if p.reasoningEffort == reasoningOff {
 			reasoning = map[string]any{"enabled": false}
 		}
-		params.SetExtraFields(map[string]any{"reasoning": reasoning})
+		extra := map[string]any{"reasoning": reasoning}
+		// Here the listing is known, so the Qwen3 switch goes only where it
+		// names it, and follows the level.
+		if p.sendsQwenTemplateSwitch() {
+			extra["chat_template_kwargs"] = map[string]any{"enable_thinking": p.reasoningEffort != reasoningOff}
+		}
+		params.SetExtraFields(extra)
 		if p.maxTokens > 0 {
 			params.MaxTokens = openai.Int(int64(p.maxTokens))
 		}

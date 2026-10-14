@@ -328,3 +328,30 @@ func TestListModelsReadsTheSupportedParameters(t *testing.T) {
 		t.Errorf("served entry = %s, want the parameters left out", b)
 	}
 }
+
+// A listing that names both the reasoning object and the Qwen3 template switch
+// (and not reasoning_effort) gets both: the switch follows the level.
+func TestBuildParamsReasoningObjectKeepsAListedTemplateSwitch(t *testing.T) {
+	params := []string{"chat_template_kwargs", "max_tokens", "reasoning", "tools"}
+	for _, tc := range []struct {
+		effort string
+		on     bool
+	}{{"high", true}, {"off", false}} {
+		p := newOpenAIProvider("qwen/qwen3.8-flash", "", "", nil, 1024, 0, tc.effort)
+		p.modelParams = params
+		b := marshalParams(t, p)
+		r := gjson.GetBytes(b, "chat_template_kwargs.enable_thinking")
+		if !r.Exists() || r.Bool() != tc.on {
+			t.Errorf("%s: chat_template_kwargs.enable_thinking = %s, want %v: %s", tc.effort, r.Raw, tc.on, b)
+		}
+		if !gjson.GetBytes(b, "reasoning").Exists() || gjson.GetBytes(b, "reasoning_effort").Exists() {
+			t.Errorf("%s: want the reasoning object and no reasoning_effort: %s", tc.effort, b)
+		}
+	}
+	// A model that is not Qwen3 never gets the switch, listed or not.
+	p := newOpenAIProvider("openai/o4-mini", "", "", nil, 1024, 0, "high")
+	p.modelParams = params
+	if b := marshalParams(t, p); gjson.GetBytes(b, "chat_template_kwargs").Exists() {
+		t.Errorf("o4-mini: %s", b)
+	}
+}

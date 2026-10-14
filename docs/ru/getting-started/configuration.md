@@ -768,7 +768,7 @@ models:
 Используйте **`type: openai`** и задайте в **`api_base`** OpenAI-совместимый базовый URL, который уже включает **`/v1`**, например **`http://localhost:11434/v1`** для Ollama.
 
 ### Агрегаторы по образцу OpenRouter (OpenRouter, RouterAI)
-Агрегатор, повторяющий API OpenRouter, - это строка **`type: openai`** со своим **`api_base`** (**`https://openrouter.ai/api/v1`** у OpenRouter, **`https://routerai.ru/api/v1`** у RouterAI). id моделей у него начинаются с автора модели.
+Агрегатор, который повторяет API OpenRouter, подключается строкой **`type: openai`** со своим **`api_base`** (**`https://openrouter.ai/api/v1`** у OpenRouter, **`https://routerai.ru/api/v1`** у RouterAI). id моделей у него начинаются с автора модели.
 
 ```yaml
 providers:
