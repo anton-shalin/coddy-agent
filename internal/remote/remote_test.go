@@ -1375,3 +1375,37 @@ func TestRemoteToolsetConfigOptionFollowsTheServer(t *testing.T) {
 		t.Fatalf("toolset option = %+v", opt)
 	}
 }
+
+// A session the server has not created yet has no snapshot of its own, so the
+// console offers the presets GET /coddy/info names and shows the toolset the
+// session's model names until another is picked.
+func TestRemoteToolsetBeforeTheFirstPrompt(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/models", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"object":"list","data":[
+			{"id":"agent","owned_by":"coddy"},
+			{"id":"remote/small","default":true,"owned_by":"remote","toolset":"lean"}]}`))
+	})
+	mux.HandleFunc("GET /coddy/info", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"object":"coddy.info","toolsets":["lean","wide"]}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	h, err := NewHandler(Options{BaseURL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.ensureModels(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var opt *acp.ConfigOption
+	for _, o := range h.configOptions(h.session("sess_new")) {
+		if o.ID == "toolset" {
+			oo := o
+			opt = &oo
+		}
+	}
+	if opt == nil || opt.CurrentValue != "lean" || len(opt.Options) != 3 || opt.Options[2].Value != "default" {
+		t.Fatalf("toolset option = %+v", opt)
+	}
+}

@@ -226,7 +226,8 @@ func TestToolsetConfigOption(t *testing.T) {
 // settings again, so a surface that shows one offers the toolset at once; a
 // reload that leaves the presets alone publishes nothing.
 func TestConfigReloadRepublishesTheToolsetChoice(t *testing.T) {
-	m := session.NewManager(settingsTestConfig(), noopSender{}, noopRunner, slog.Default(), "", nil)
+	sender := &captureSender{}
+	m := session.NewManager(settingsTestConfig(), sender, noopRunner, slog.Default(), "", nil)
 	res, err := m.HandleSessionNew(context.Background(), acp.SessionNewParams{CWD: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -239,9 +240,28 @@ func TestConfigReloadRepublishesTheToolsetChoice(t *testing.T) {
 	if len(seen) != 0 {
 		t.Fatalf("a reload without a toolset change published %+v", seen)
 	}
+	sender.mu.Lock()
+	sender.ups = nil
+	sender.mu.Unlock()
 	m.ReplaceConfig(toolsetTestConfig())
 	if len(seen) != 1 || seen[0].SessionID != res.SessionID || strings.Join(seen[0].ToolsetChoices, ",") != "coding,no-net,default" {
 		t.Fatalf("after adding presets = %+v", seen)
+	}
+	// An editor's selectors follow too: the config options carry the toolset.
+	offered := false
+	sender.mu.Lock()
+	for _, u := range sender.ups {
+		if up, ok := u.(acp.ConfigOptionUpdate); ok {
+			for _, o := range up.ConfigOptions {
+				if o.ID == "toolset" && len(o.Options) == 3 {
+					offered = true
+				}
+			}
+		}
+	}
+	sender.mu.Unlock()
+	if !offered {
+		t.Fatal("the editor was not sent a toolset config option")
 	}
 	m.ReplaceConfig(settingsTestConfig())
 	if len(seen) != 2 || len(seen[1].ToolsetChoices) != 0 {

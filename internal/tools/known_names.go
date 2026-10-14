@@ -9,7 +9,7 @@ import (
 // KnownToolNames lists every built-in tool name this build can offer, the
 // optional ones included (switch_model, which a configuration with nothing to
 // switch to leaves out, and the scheduler's tools in a build that has them):
-// the names models[].tools and models[].disallowed_tools may mean. MCP tools
+// the names toolsets[].tools and toolsets[].disallowed_tools may mean. MCP tools
 // are not in it, a server's tools being known only while it is connected.
 //
 // The config check cannot import this package (config sits below it), so

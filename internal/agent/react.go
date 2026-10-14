@@ -2583,9 +2583,9 @@ func (a *Agent) callMCPTool(ctx context.Context, serverName, toolName, argsJSON 
 }
 
 // currentToolDefinitions is the tool set a request carries: what the session
-// could call in the mode (sessionToolDefinitions), narrowed by the lists of the
-// models[] row the session runs on (toolsets.go). The row is read on every
-// call, so a switch of the model changes the set from the next request.
+// could call in the mode (sessionToolDefinitions), narrowed by the toolset the
+// session runs with (toolsets.go). It is resolved on every call, so a switch of
+// the model or of the toolset changes the set from the next request.
 func (a *Agent) currentToolDefinitions(mode string) []llm.ToolDefinition {
 	return filterToolDefsByToolset(a.sessionToolDefinitions(mode), a.activeToolset())
 }

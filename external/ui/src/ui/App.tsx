@@ -1509,15 +1509,21 @@ export function App() {
     choices: string[];
   }>({ sid: "", toolset: "", choices: [] });
   /**
-   * A toolset picked on the start screen: it rides in as metadata.toolset of
-   * the message that creates the session, and is forgotten once the server
-   * took that message.
+   * A toolset picked on the start screen, the way a permission mode picked
+   * there is held: `sid` is empty on the start screen and names the session
+   * the first send creates from then on. It rides in as metadata.toolset of
+   * every message into that session until the server has taken one, so a
+   * first send that never reached it does not lose the pick, and it is
+   * dropped when a new chat starts over.
    */
-  const pendingToolsetRef = useRef("");
-  const [pendingToolset, setPendingToolsetState] = useState("");
-  const setPendingToolset = useCallback((name: string) => {
-    pendingToolsetRef.current = name;
-    setPendingToolsetState(name);
+  const pendingToolsetRef = useRef({ name: "", sid: "" });
+  const [pendingToolset, setPendingToolsetState] = useState({
+    name: "",
+    sid: "",
+  });
+  const setPendingToolset = useCallback((name: string, sid = "") => {
+    pendingToolsetRef.current = { name, sid };
+    setPendingToolsetState({ name, sid });
   }, []);
   const pendingPermissionModeRef = useRef({ mode: "", sid: "" });
   const [pendingPermissionMode, setPendingPermissionModeState] = useState("");
@@ -4248,6 +4254,7 @@ export function App() {
     // The start screen's chip names the configured mode again (or a mode
     // picked there): it is derived, so nothing of the session left is shown.
     setPendingPermissionMode("");
+    setPendingToolset("");
     setSettingsOverrides([]);
     if (llmModelIds.length > 0) {
       const model = pickDefaultLlmModelForNewChat({
@@ -5494,6 +5501,12 @@ export function App() {
       }
 
       if (isNewChatFirstSend) {
+        // The toolset picked on the start screen now belongs to the session
+        // this send creates, before anything here waits: a new chat started
+        // meanwhile must not hand its own pick to this one.
+        if (pendingToolsetRef.current.name) {
+          setPendingToolset(pendingToolsetRef.current.name, sid);
+        }
         // The start screen's pick now belongs to the session this send
         // creates, and the chip keeps naming what the start screen showed
         // until that session's own snapshot arrives. With no pick and no word
@@ -5653,10 +5666,12 @@ export function App() {
       if (sendReasoning) meta.reasoning = reasoningSel;
       if (runSlug) meta.runPlanSlug = runSlug;
       if (heldVersion > 0) meta.settingsVersion = String(heldVersion);
-      // A toolset picked on the start screen goes with the message that
-      // creates the session.
-      const toolsetPick = isNewChatFirstSend ? pendingToolsetRef.current : "";
-      if (toolsetPick) meta.toolset = toolsetPick;
+      // A toolset picked on the start screen goes with the messages of the
+      // session it was bound to until the server has taken one.
+      const toolsetPick = pendingToolsetRef.current;
+      if (toolsetPick.name && toolsetPick.sid === sid.trim()) {
+        meta.toolset = toolsetPick.name;
+      }
       reqBody.metadata = meta;
       // A permission mode picked before the chat had a session goes first,
       // as the command that asks for it; the server takes it off the text.
@@ -5685,7 +5700,7 @@ export function App() {
       if (res.ok && pendingPermissionModeRef.current.sid === sid.trim()) {
         setPendingPermissionMode("");
       }
-      if (res.ok && toolsetPick && pendingToolsetRef.current === toolsetPick) {
+      if (res.ok && pendingToolsetRef.current.sid === sid.trim()) {
         setPendingToolset("");
       }
       if (!ownsPost() || abortCtl.signal.aborted) return;
@@ -6416,9 +6431,16 @@ export function App() {
       }
       const sid = sessionId.trim();
       if (!sid) {
-        // No session yet: the pick rides in with the first message.
-        setPendingToolset(name);
+        // No session yet: the pick rides in with the first message, keeping
+        // the binding of a first send already under way.
+        setPendingToolset(name, pendingToolsetRef.current.sid);
         return;
+      }
+      if (pendingToolsetRef.current.sid === sid) {
+        // A session whose first message the server has not taken yet: the
+        // pick rides in with the next try, and the PATCH applies it at once
+        // should the server have taken it after all.
+        setPendingToolset(name, sid);
       }
       void patchSessionSettings(sid, { selectedToolset: name });
     },
@@ -6444,8 +6466,10 @@ export function App() {
       return undefined;
     }
     const modelOwn = modelInfos.find((m) => m.id === llmModel)?.toolset ?? "";
-    const value =
-      (sid ? own?.toolset : pendingToolset) || modelOwn || "default";
+    // A pick held for this session (its first message not taken yet) or for
+    // the start screen names the chip until the session's snapshot does.
+    const held = pendingToolset.sid === sid ? pendingToolset.name : "";
+    const value = own?.toolset || held || modelOwn || "default";
     return { value, choices, onChange: onToolsetChange };
   }, [
     sessionId,

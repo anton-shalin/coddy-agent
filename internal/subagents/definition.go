@@ -317,8 +317,8 @@ func (d *Definition) Allows(tool string) bool {
 // allowlist admits everything and a non-empty one admits only what it
 // matches. Patterns are the MatchTool syntax - an exact name, a bare *, or a
 // prefix ending in * (context7__*). A subagent definition's tools and
-// disallowed_tools and a models[] row's tools and disallowed_tools both read
-// through it, so the two cannot drift apart.
+// disallowed_tools and a toolsets[] preset's both read through it, so the two
+// cannot drift apart.
 func AllowsTool(allow, deny []string, tool string) bool {
 	for _, p := range deny {
 		if MatchTool(p, tool) {

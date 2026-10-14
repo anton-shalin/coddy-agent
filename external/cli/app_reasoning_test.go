@@ -467,3 +467,29 @@ func TestToolsetInTheConsole(t *testing.T) {
 	}
 	pumpUntil(t, a, "no toolset in the footer", func() bool { return a.foot.toolset == "" })
 }
+
+// noLocalSessions hides the manager's sessions, as a console over --remote
+// sees them: everything it knows of a session comes from the server.
+type noLocalSessions struct{ backend }
+
+func (noLocalSessions) SessionByID(string) *session.State { return nil }
+
+// Over --remote the picker reads the toolset option, and the server's
+// settings snapshots keep it current: a preset a reload brings is offered, a
+// pick moves the current value, and the option goes with the last preset.
+func TestRemoteConsoleToolsetFollowsTheServersSnapshot(t *testing.T) {
+	a := newReasoningAppOver(t, func(b backend) backend { return noLocalSessions{b} })
+	if a.toolsetOption() != nil {
+		t.Fatal("a toolset option before the server named a preset")
+	}
+	a.applySettingsSnapshot(acp.SessionSettings{SessionID: a.sessionID, Version: 1 << 40, Model: "stub/gpt-5.6-terra",
+		Toolset: "lean", ToolsetChoices: []string{"lean", "default"}})
+	opt := a.toolsetOption()
+	if opt == nil || opt.CurrentValue != "lean" || len(opt.Options) != 2 {
+		t.Fatalf("toolset option = %+v", opt)
+	}
+	a.applySettingsSnapshot(acp.SessionSettings{SessionID: a.sessionID, Version: 1<<40 + 1, Model: "stub/gpt-5.6-terra"})
+	if a.toolsetOption() != nil {
+		t.Fatal("the toolset option outlived the last preset")
+	}
+}

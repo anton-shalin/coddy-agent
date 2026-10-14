@@ -257,9 +257,8 @@ func (h *Handler) localSettingsLocked(sessionID string, st *sessionState) acp.Se
 		Reasoning:      st.reasoning,
 		Mode:           st.mode,
 		PermissionMode: st.permissionMode,
-		Toolset:        st.toolset,
-		ToolsetChoices: append([]string(nil), st.toolsetChoices...),
 	}
+	snap.Toolset, snap.ToolsetChoices = h.toolsetLocked(st)
 	for _, m := range h.models {
 		if m.ID == model {
 			snap.ReasoningChoices = append([]string(nil), m.ReasoningLevels...)

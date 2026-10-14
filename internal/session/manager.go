@@ -270,10 +270,11 @@ func toolsetsMoved(previous, next *config.Config) bool {
 }
 
 // republishSessionSettings publishes the settings snapshot of every live
-// session that is not a subagent's run again, so a surface showing one - a
-// browser tab, a console, an editor - offers the toolsets a configuration
-// reload brought, or stops offering the ones it took away, without waiting for
-// the next change of the session.
+// session that is not a subagent's run again, with the ACP config options an
+// editor shows, so a surface showing one - a browser tab, a console, an
+// editor - offers the toolsets a configuration reload brought, or stops
+// offering the ones it took away, without waiting for the next change of the
+// session.
 func (m *Manager) republishSessionSettings() {
 	m.mu.RLock()
 	ids := make([]string, 0, len(m.sessions))
@@ -288,6 +289,9 @@ func (m *Manager) republishSessionSettings() {
 	m.mu.RUnlock()
 	for i, st := range states {
 		m.PublishSessionSettings(ids[i], st, "", "config")
+		if m.server != nil {
+			m.sendConfigOptionUpdate(ids[i], st)
+		}
 	}
 }
 

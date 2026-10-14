@@ -405,7 +405,7 @@ func (m *Manager) CreateSubagentSession(ctx context.Context, spec SubagentSpec) 
 	if spec.ResolveTools != nil {
 		resolved := spec.ResolveTools(mcpToolNames(state))
 		if len(resolved) == 0 {
-			return nil, fmt.Errorf("subagent %q would have no tools at all on model %s: its definition, its mode and the model's tools / disallowed_tools lists leave nothing",
+			return nil, fmt.Errorf("subagent %q would have no tools at all on model %s: its definition, its mode and the toolset the model names (models[].toolset) leave nothing",
 				name, state.EffectiveModelID(m.Cfg()))
 		}
 		state.SetSubagentTools(resolved)

@@ -25,6 +25,8 @@ const MODEL = "fake/alpha-model";
 /** The presets GET /coddy/info names. */
 let toolsets: string[];
 let posted: Array<{ input?: string; metadata?: Record<string, string> }>;
+/** Whether the next POST /v1/responses fails before any answer. */
+let failNextPost: boolean;
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -65,6 +67,10 @@ const fetchMock = vi.fn(
       });
     }
     if (path === "/v1/responses") {
+      if (failNextPost) {
+        failNextPost = false;
+        throw new TypeError("Failed to fetch");
+      }
       posted.push(JSON.parse(String(init?.body)));
       return emptyStream();
     }
@@ -109,6 +115,7 @@ beforeEach(() => {
   eventsController = null;
   toolsets = [];
   posted = [];
+  failNextPost = false;
   initLocale("en");
   localStorage.clear();
   document.cookie = "coddy_llm_model=; Path=/; Max-Age=0";
@@ -178,4 +185,65 @@ test("a toolset picked on the start screen rides in with the first message", asy
   await waitFor(() => expect(posted.length).toBeGreaterThan(0));
   expect(posted[0]!.input).toBe("hello");
   expect(posted[0]!.metadata?.toolset).toBe("default");
+});
+
+async function pickAllTools() {
+  await waitFor(() =>
+    expect(screen.getByTestId("composer-toolset")).toHaveTextContent("coding"),
+  );
+  fireEvent.click(screen.getByTestId("composer-toolset"));
+  fireEvent.click(screen.getByRole("menuitem", { name: "All tools" }));
+  await waitFor(() =>
+    expect(screen.getByTestId("composer-toolset")).toHaveTextContent(
+      "All tools",
+    ),
+  );
+}
+
+test("a first message the server never took keeps the toolset for the next try", async () => {
+  toolsets = ["coding", "no-net"];
+  await mountHome();
+  await pickAllTools();
+
+  failNextPost = true;
+  fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+    target: { value: "hello" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
+  await waitFor(() =>
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue(
+      "hello",
+    ),
+  );
+  await settle();
+  expect(screen.getByTestId("composer-toolset")).toHaveTextContent("All tools");
+
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
+  await waitFor(() => expect(posted.length).toBeGreaterThan(0));
+  expect(posted[0]!.metadata?.toolset).toBe("default");
+});
+
+test("a toolset picked on the start screen is dropped when a new chat starts over", async () => {
+  toolsets = ["coding", "no-net"];
+  await mountHome();
+  await pickAllTools();
+
+  // Another chat, then a new one: the pick of the first start screen is gone.
+  await act(async () => {
+    window.location.hash = "#/s/sess_other";
+    await new Promise((r) => setTimeout(r, 50));
+  });
+  await act(async () => {
+    window.location.hash = "#/";
+    await new Promise((r) => setTimeout(r, 50));
+  });
+  await waitFor(() =>
+    expect(screen.getByTestId("composer-toolset")).toHaveTextContent("coding"),
+  );
+  fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+    target: { value: "hello" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
+  await waitFor(() => expect(posted.length).toBeGreaterThan(0));
+  expect(posted[0]!.metadata?.toolset).toBeUndefined();
 });
