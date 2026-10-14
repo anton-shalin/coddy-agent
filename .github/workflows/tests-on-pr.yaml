@@ -544,6 +544,11 @@ jobs:
       - name: Check the generated pages, the links and the assets
         run: make docs-check
 
+      # The shipped alert rules (examples/prometheus), run by promtool from an
+      # image pinned by tag and digest, so a rule that stops firing is a red job.
+      - name: Test the Prometheus alert rules
+        run: docker run --rm -v "$PWD/examples/prometheus:/r:ro" --entrypoint promtool 'prom/prometheus:v3.15.0@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e' test rules /r/coddy-rules.test.yml
+
   # The passes of `make lint` and `make lint-windows`: `make fmt-check` (gofmt -s
   # over every tracked Go file, the ones no pass compiles included), then the
   # untagged tree, every tag but ui, and the shipped set, each for the host and
