@@ -1221,6 +1221,20 @@ export function Composer(props: {
     void fetchCommandsOnce();
   }, [fetchCommandsOnce]);
 
+  // /toolset is a command only while the configuration has a preset: a
+  // reload that brings the first one, or takes the last away, reads the
+  // commands again.
+  const hasToolsets = props.toolsetControl !== undefined;
+  const toolsetsSeenRef = useRef(hasToolsets);
+  useEffect(() => {
+    if (toolsetsSeenRef.current === hasToolsets) {
+      return;
+    }
+    toolsetsSeenRef.current = hasToolsets;
+    commandsFetchedRef.current = false;
+    void fetchCommandsOnce();
+  }, [hasToolsets, fetchCommandsOnce]);
+
   const fetchMentions = useCallback(
     async (query: string, refresh: boolean) => {
       const sp = new URLSearchParams({
