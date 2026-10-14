@@ -3,6 +3,9 @@ package serve
 import (
 	"context"
 	"errors"
+	"io"
+	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -10,8 +13,11 @@ import (
 
 	"github.com/EvilFreelancer/coddy-agent/internal/acp"
 	"github.com/EvilFreelancer/coddy-agent/internal/agent"
+	"github.com/EvilFreelancer/coddy-agent/internal/bgtask"
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
+	"github.com/EvilFreelancer/coddy-agent/internal/session"
 	"github.com/EvilFreelancer/coddy-agent/internal/status"
+	"github.com/EvilFreelancer/coddy-agent/internal/version"
 )
 
 type recordingBroker struct {
@@ -438,4 +444,143 @@ func TestSupervisorStatusDisabledListenerHasNoPending(t *testing.T) {
 	if required || refused != "" {
 		t.Errorf("restartRequired = %v, refused = %q; want neither", required, refused)
 	}
+}
+
+// heldTask is background work that runs until the test lets it go.
+type heldTask struct {
+	release chan struct{}
+	once    sync.Once
+}
+
+func (h *heldTask) finish()                     { h.once.Do(func() { close(h.release) }) }
+func (h *heldTask) Wait() (int, error)          { <-h.release; return 0, nil }
+func (h *heldTask) Stop(time.Duration) error    { h.finish(); return nil }
+func (h *heldTask) PID() int                    { return 0 }
+func (h *heldTask) ProcessStartedAt() time.Time { return time.Time{} }
+
+// The snapshot is what the process reads off itself, piece by piece: what it
+// is, the supervisor's reading of the live configuration, the turns and tasks
+// in flight, and the disk of its session store. A piece the process has no
+// source for is absent, never zero.
+func TestRuntimeStatusSnapshot(t *testing.T) {
+	t.Run("a runtime with nothing attached says what it is", func(t *testing.T) {
+		rt := &Runtime{}
+		snap := rt.Status()
+		if snap.Build.Version != version.Get() || snap.Build.GoVersion != runtime.Version() ||
+			snap.Build.GOOS != runtime.GOOS || snap.Build.GOARCH != runtime.GOARCH {
+			t.Errorf("build = %+v", snap.Build)
+		}
+		if snap.Subsystems != nil || snap.RestartRequired || snap.RestartRefused != "" ||
+			snap.TurnsRunning != 0 || !snap.OldestTurnStartedAt.IsZero() || snap.Disk != nil {
+			t.Errorf("nothing is attached, yet the snapshot says %+v", snap)
+		}
+	})
+
+	t.Run("a runtime with a manager and no turn reports none", func(t *testing.T) {
+		cfg := &config.Config{}
+		cfg.Paths.Home = t.TempDir()
+		rt := &Runtime{}
+		if err := rt.Init(Options{Cfg: cfg, NeedsSessions: true, SessionsRoot: t.TempDir()}); err != nil {
+			t.Fatal(err)
+		}
+		if snap := rt.Status(); snap.TurnsRunning != 0 || !snap.OldestTurnStartedAt.IsZero() {
+			t.Errorf("turns = %d, oldest = %v; want none", snap.TurnsRunning, snap.OldestTurnStartedAt)
+		}
+	})
+
+	t.Run("the supervisor reads the live configuration", func(t *testing.T) {
+		s := &serveFeatureState{}
+		s.reset()
+		s.subs = s.describe(false) // no gateway in this build
+		s.restartable = true
+		launched(t, s)
+		rt := &Runtime{}
+		if err := rt.Init(Options{Cfg: s.cfg}); err != nil {
+			t.Fatal(err)
+		}
+		rt.SetSupervisor(s.sup)
+
+		unrunnable := *s.cfg
+		unrunnable.Gateways.Telegram.Enabled = true
+		unrunnable.HTTPServer.Port = 23456
+		rt.ReplaceConfig(&unrunnable)
+		snap := rt.Status()
+		want := []status.Subsystem{
+			{Kind: string(KindHTTP), State: status.StateRunning, Address: "12345", PendingAddress: "23456"},
+			{Kind: string(KindGateway), State: status.StateStarting},
+		}
+		if !reflect.DeepEqual(snap.Subsystems, want) {
+			t.Errorf("subsystems = %+v, want %+v", snap.Subsystems, want)
+		}
+		if !snap.RestartRequired || !strings.Contains(snap.RestartRefused, "gateways.telegram.enable") {
+			t.Errorf("restartRequired = %v, refused = %q", snap.RestartRequired, snap.RestartRefused)
+		}
+	})
+
+	t.Run("background work in flight is counted by kind and status", func(t *testing.T) {
+		held := &heldTask{release: make(chan struct{})}
+		launched, err := bgtask.Default().Launch(
+			bgtask.Spec{SessionID: "sess_status", Kind: bgtask.KindAgent, Label: "explore", Agent: &bgtask.AgentInfo{Name: "explore"}},
+			func(string, io.Writer) (bgtask.Handle, error) { return held, nil })
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			held.finish()
+			_, _ = bgtask.Default().Wait(context.Background(), "sess_status", launched.ID, 2*time.Second)
+		})
+		if got := (&Runtime{}).Status().Tasks["agent"]["running"]; got != 1 {
+			t.Errorf("running agent tasks = %d, want 1", got)
+		}
+	})
+}
+
+// The disk of the session store is one reading of its folder per snapshot,
+// through the seam a test lowers the figures with. A folder that cannot be
+// read, and a process with no store, have no disk rather than a full one.
+func TestRuntimeStatusDisk(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		store bool
+		free  func(string) (uint64, uint64, error)
+		want  *status.Disk
+	}{
+		{"low", true, func(string) (uint64, uint64, error) { return 400 << 20, 1 << 30, nil },
+			&status.Disk{AvailableBytes: 400 << 20, SizeBytes: 1 << 30}},
+		{"unreadable", true, func(string) (uint64, uint64, error) { return 0, 0, errors.New("permission denied") }, nil},
+		{"no store", false, func(string) (uint64, uint64, error) { panic("read the disk of no store") }, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rt := &Runtime{diskFree: tc.free}
+			if tc.store {
+				rt.Store = &session.FileStore{Root: t.TempDir()}
+			}
+			if got := rt.Status().Disk; !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("disk = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+
+	t.Run("the folder of the store is what is read", func(t *testing.T) {
+		var asked string
+		rt := &Runtime{Store: &session.FileStore{Root: t.TempDir()}, diskFree: func(path string) (uint64, uint64, error) {
+			asked = path
+			return 1, 2, nil
+		}}
+		rt.Status()
+		if asked != rt.Store.Root {
+			t.Errorf("read %q, want the sessions folder %q", asked, rt.Store.Root)
+		}
+	})
+
+	t.Run("the platform reads it by default", func(t *testing.T) {
+		rt := &Runtime{Store: &session.FileStore{Root: t.TempDir()}}
+		disk := rt.Status().Disk
+		if disk == nil {
+			t.Skip("no free-space call on this platform")
+		}
+		if disk.SizeBytes == 0 || disk.AvailableBytes > disk.SizeBytes {
+			t.Errorf("disk = %+v", disk)
+		}
+	})
 }
