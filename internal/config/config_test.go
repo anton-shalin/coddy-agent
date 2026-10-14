@@ -299,6 +299,37 @@ func TestMetricsDefaults(t *testing.T) {
 	}
 }
 
+// An exporter bound anywhere but this machine, with no token, answers whoever
+// can reach the port.
+func TestMetricsExposedWithoutToken(t *testing.T) {
+	cases := []struct {
+		name string
+		m    config.MetricsConfig
+		want bool
+	}{
+		{"the default address", config.MetricsConfig{}, false},
+		{"127.0.0.1", config.MetricsConfig{Host: "127.0.0.1"}, false},
+		{"::1", config.MetricsConfig{Host: "::1"}, false},
+		{"localhost", config.MetricsConfig{Host: "localhost"}, false},
+		{"every interface", config.MetricsConfig{Host: "0.0.0.0"}, true},
+		{"every interface of IPv6", config.MetricsConfig{Host: "::"}, true},
+		{"a LAN address", config.MetricsConfig{Host: "192.168.1.20"}, true},
+		{"a host name", config.MetricsConfig{Host: "coddy.internal"}, true},
+		{"every interface behind a token", config.MetricsConfig{Host: "0.0.0.0", Token: "scrape-me"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.m.ExposedWithoutToken(); got != tc.want {
+				t.Fatalf("ExposedWithoutToken() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+	var none *config.MetricsConfig
+	if none.ExposedWithoutToken() {
+		t.Fatal("a missing section is not exposed")
+	}
+}
+
 func TestLoadFromCLIWhenConfigMissing_UsesLoopSafetyDefaults(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv(config.EnvCODDYHome, home)

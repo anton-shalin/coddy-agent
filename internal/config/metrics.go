@@ -43,6 +43,16 @@ func (m *MetricsConfig) ListenAddr() string {
 	return net.JoinHostPort(host, strconv.Itoa(port))
 }
 
+// ExposedWithoutToken reports an exporter bound off loopback with no token:
+// whoever can reach the port reads its figures.
+func (m *MetricsConfig) ExposedWithoutToken() bool {
+	if m == nil || m.Token != "" {
+		return false
+	}
+	host, _, err := net.SplitHostPort(m.ListenAddr())
+	return err != nil || !isLoopbackHostname(host)
+}
+
 // Normalize trims the string fields that later comparisons depend on.
 func (m *MetricsConfig) Normalize() {
 	if m == nil {
