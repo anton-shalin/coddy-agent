@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/EvilFreelancer/coddy-agent/external/gateway"
@@ -211,6 +212,13 @@ func TestServeRunsTheExporterAsAnAuxiliarySubsystem(t *testing.T) {
 	case wiring.Built():
 		if !errors.As(err, &nothing) || slices.Contains(nothing.Keys, "metrics.enable") {
 			t.Fatalf("metrics alone: %v, want ErrNothingEnabled that does not suggest metrics.enable", err)
+		}
+		// Something is enabled, so the refusal must not claim otherwise: it
+		// names the exporter and asks for a surface beside it.
+		if !slices.Equal(nothing.Auxiliary, []string{"metrics.enable"}) ||
+			!strings.HasPrefix(err.Error(), "only metrics.enable is set, and it runs only beside a surface") ||
+			strings.Contains(err.Error(), "no subsystem is enabled") {
+			t.Fatalf("metrics alone: %q (auxiliary %v), want the refusal that names metrics.enable as set", err, nothing.Auxiliary)
 		}
 	default:
 		if !errors.As(err, &notBuilt) || notBuilt.BuildTag != "metrics" || notBuilt.ConfigKey != "metrics.enable" {

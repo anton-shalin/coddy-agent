@@ -114,13 +114,30 @@ type ErrNothingEnabled struct {
 	// would only lead to the refusal ErrNotBuilt already explains. So is an
 	// auxiliary subsystem's key: it would not start anything on its own.
 	Keys []string
+	// Auxiliary are the keys of the auxiliary subsystems the configuration did
+	// enable. They are why "nothing is enabled" would be wrong: something is
+	// switched on, but it runs only beside a surface, and the message says so.
+	Auxiliary []string
 }
 
+// shippedTags is what a binary has to be built with to run every subsystem.
+const shippedTags = "http ui scheduler memory cli gateway swarm metrics"
+
 func (e *ErrNothingEnabled) Error() string {
-	if len(e.Keys) == 0 {
-		return "no subsystem is enabled, and this binary was built with none of them (rebuild with -tags \"http ui scheduler memory cli gateway swarm metrics\")"
+	if len(e.Auxiliary) == 0 {
+		if len(e.Keys) == 0 {
+			return "no subsystem is enabled, and this binary was built with none of them (rebuild with -tags \"" + shippedTags + "\")"
+		}
+		return "no subsystem is enabled: set one of " + strings.Join(e.Keys, ", ") + " to true in config.yaml"
 	}
-	return "no subsystem is enabled: set one of " + strings.Join(e.Keys, ", ") + " to true in config.yaml"
+	set := strings.Join(e.Auxiliary, ", ") + " is set, and it runs"
+	if len(e.Auxiliary) > 1 {
+		set = strings.Join(e.Auxiliary, ", ") + " are set, and they run"
+	}
+	if len(e.Keys) == 0 {
+		return "only " + set + " only beside a surface, but this binary was built with none (rebuild with -tags \"" + shippedTags + "\")"
+	}
+	return "only " + set + " only beside a surface: also set one of " + strings.Join(e.Keys, ", ") + " to true in config.yaml"
 }
 
 // ErrNotBuilt is returned when the configuration enables a surface this binary
@@ -138,7 +155,8 @@ func (e *ErrNotBuilt) Error() string {
 
 // Resolve returns the subsystems cfg asks for, in the order they were declared.
 // An auxiliary one is returned too, but it is not enough to start on: when
-// nothing else is enabled the process has nobody to serve.
+// nothing else is enabled the process has nobody to serve, and the refusal
+// names the auxiliary keys that are set (ErrNothingEnabled.Auxiliary).
 //
 // A surface that is enabled but missing from the build is an error rather than
 // a warning: an operator who wrote `enable: true` and got a log line they never
@@ -148,6 +166,7 @@ func Resolve(cfg *config.Config, all []Subsystem) ([]Subsystem, error) {
 	var out []Subsystem
 	surfaces := 0
 	keys := make([]string, 0, len(all))
+	var auxiliary []string
 	for _, sub := range all {
 		if sub.Available && !sub.Auxiliary {
 			keys = append(keys, sub.ConfigKey)
@@ -159,13 +178,16 @@ func Resolve(cfg *config.Config, all []Subsystem) ([]Subsystem, error) {
 			return nil, &ErrNotBuilt{Kind: sub.Kind, ConfigKey: sub.ConfigKey, BuildTag: sub.BuildTag}
 		}
 		out = append(out, sub)
-		if !sub.Auxiliary {
+		if sub.Auxiliary {
+			auxiliary = append(auxiliary, sub.ConfigKey)
+		} else {
 			surfaces++
 		}
 	}
 	if surfaces == 0 {
 		sort.Strings(keys)
-		return nil, &ErrNothingEnabled{Keys: keys}
+		sort.Strings(auxiliary)
+		return nil, &ErrNothingEnabled{Keys: keys, Auxiliary: auxiliary}
 	}
 	return out, nil
 }

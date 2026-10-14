@@ -43,7 +43,7 @@ Feature: coddy serve runs the subsystems the config enables
   Scenario: a configuration that enables only the metrics exporter is refused
     Given a config enabling only the metrics exporter
     When the runtime resolves which subsystems to start
-    Then resolving fails asking for a subsystem to be enabled
+    Then resolving fails saying only "metrics.enable" is set and a surface is needed beside it
     And the suggestions do not name "metrics.enable"
 
   Scenario: rotating the bot token restarts the gateway alone
