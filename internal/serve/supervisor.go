@@ -81,7 +81,8 @@ func NewSupervisor(log *slog.Logger, subs []Subsystem) *Supervisor {
 // A failure is fatal for the whole process on purpose. Half of `coddy serve`
 // still answering is worse than none of it: the operator's supervisor restarts
 // a process that exited, and nobody notices one that is quietly missing the
-// surface they rely on.
+// surface they rely on. An auxiliary subsystem is the exception: nobody is
+// served through it, so it fails alone.
 //
 // cfg is the configuration the surfaces are being started from: it seeds the
 // restart fingerprints, so the first reload only rebuilds what actually moved.
@@ -154,6 +155,17 @@ func (s *Supervisor) start(ctx context.Context, sub Subsystem, cfg *config.Confi
 			err = fmt.Errorf("%s stopped on its own", sub.Kind)
 		}
 		s.log.Error("subsystem failed", "subsystem", string(sub.Kind), "error", err)
+		if sub.Auxiliary {
+			// Nobody is served through it, so its failure - an exporter moved
+			// onto a port that is taken - ends it alone; the next configuration
+			// that enables it starts it again.
+			s.mu.Lock()
+			if s.running[sub.Kind] == inst {
+				delete(s.running, sub.Kind)
+			}
+			s.mu.Unlock()
+			return
+		}
 		failures <- fmt.Errorf("%s: %w", sub.Kind, err)
 	}()
 }

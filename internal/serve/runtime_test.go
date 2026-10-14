@@ -6,6 +6,7 @@ import (
 	"io"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -443,6 +444,57 @@ func TestSupervisorStatusDisabledListenerHasNoPending(t *testing.T) {
 	}
 	if required || refused != "" {
 		t.Errorf("restartRequired = %v, refused = %q; want neither", required, refused)
+	}
+}
+
+// An auxiliary subsystem that fails - an exporter rebuilt onto a port that is
+// taken - stops alone: the surfaces keep running, the row reads stopped, and
+// the next configuration that enables it starts it again.
+func TestSupervisorAnAuxiliaryFailureStopsOnlyItself(t *testing.T) {
+	s := &serveFeatureState{}
+	s.reset()
+	for i := range s.subs {
+		if s.subs[i].Kind != KindMetrics {
+			continue
+		}
+		run := s.subs[i].Run
+		s.subs[i].Fingerprint = func(c *config.Config) string { return strconv.Itoa(c.Metrics.Port) }
+		s.subs[i].Run = func(ctx context.Context, c *config.Config) error {
+			if c.Metrics.Port == 1 {
+				return errors.New("listen tcp :1: bind: address already in use")
+			}
+			return run(ctx, c)
+		}
+	}
+	s.cfg.Metrics.Enable = true
+	launched(t, s)
+
+	taken := *s.cfg
+	taken.Metrics.Port = 1
+	if err := s.settle(&taken); err != nil {
+		t.Fatalf("the process ended with the exporter: %v", err)
+	}
+	if err := waitFor(func() bool {
+		rows, _, _ := s.sup.Status(&taken)
+		return statusRow(t, rows, KindMetrics).State == status.StateStopped
+	}); err != nil {
+		t.Fatalf("the failed exporter never read as stopped: %v", err)
+	}
+	rows, _, _ := s.sup.Status(&taken)
+	if got := statusRow(t, rows, KindHTTP).State; got != status.StateRunning {
+		t.Errorf("http after the exporter failed: %q, want running", got)
+	}
+
+	free := *s.cfg
+	free.Metrics.Port = 2
+	if err := s.settle(&free); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitFor(func() bool {
+		rows, _, _ := s.sup.Status(&free)
+		return statusRow(t, rows, KindMetrics).State == status.StateRunning
+	}); err != nil {
+		t.Errorf("the exporter on a free port never ran again: %v", err)
 	}
 }
 

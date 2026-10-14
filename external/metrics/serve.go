@@ -5,7 +5,6 @@ package metrics
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -46,7 +45,7 @@ func Serve(ctx context.Context, opts Options) error {
 	}
 	ln, err := net.Listen("tcp", opts.Addr)
 	if err != nil {
-		return fmt.Errorf("metrics: %w", err)
+		return err
 	}
 	if cfg := opts.Cfg(); cfg != nil && cfg.Metrics.ExposedWithoutToken() {
 		log.Warn("the metrics exporter listens beyond this machine with no token: anybody who can reach the port reads its figures (set metrics.token, or bind metrics.host to 127.0.0.1)", "addr", opts.Addr)

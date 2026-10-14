@@ -59,8 +59,8 @@ type Subsystem struct {
 	// start in it (Supervisor.Sessionless).
 	NeedsSessions bool
 	// Auxiliary marks a subsystem that serves alongside the surfaces and is
-	// never the only one: it does not count as something enabled, and it is
-	// always free to stop.
+	// never the only one: it does not count as something enabled, it is
+	// always free to stop, and its failure stops it alone.
 	Auxiliary bool
 	// Enabled reports whether cfg asks for this surface.
 	Enabled func(*config.Config) bool
