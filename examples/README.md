@@ -55,7 +55,7 @@ TG_E2E_KEEP=1 ./examples/test_gateway.sh             # leaves both running and p
 RICH_MESSAGES=true ./examples/test_gateway.sh
 ```
 
-Knobs: **`TG_PORT`** (18790), **`LLM_DELAY`** (50ms), **`TG_VERBOSE`** (one line per Bot API call), **`CODDY_BIN`**, **`CODDY_TGFAKE_BIN`** (a prebuilt tgfake; unset builds the version **`go.mod`** pins). The same variable feeds every script here that starts tgfake (**`shared/wake_e2e_common.py`**, **`cli/capture_wake.py`**, `npm run check:telegram`). Guides: [Integration tests with tgfake](../docs/contributing/tgfake.md), [Debugging against a fake Bot API](../docs/surfaces/gateway.md#debugging-against-a-fake-bot-api).
+Knobs: **`TG_PORT`** (18790), **`LLM_DELAY`** (50ms), **`TG_VERBOSE`** (one line per Bot API call), **`CODDY_BIN`**, **`TG_E2E_METRICS=1`** (also turns the Prometheus exporter on and scrapes it after the chat; needs a binary built with **`TAGS="gateway metrics"`**), **`CODDY_TGFAKE_BIN`** (a prebuilt tgfake; unset builds the version **`go.mod`** pins). The same variable feeds every script here that starts tgfake (**`shared/wake_e2e_common.py`**, **`cli/capture_wake.py`**, `npm run check:telegram`). Guides: [Integration tests with tgfake](../docs/contributing/tgfake.md), [Debugging against a fake Bot API](../docs/surfaces/gateway.md#debugging-against-a-fake-bot-api).
 
 ## HTTP gateway
 
