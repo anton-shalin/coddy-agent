@@ -775,6 +775,16 @@ func UISchemaMap() map[string]interface{} {
 			},
 			[]string{"level", "levels", "outputs", "file", "format", "rotation"},
 			nil),
+		"metrics": objectSchema("Metrics", "Prometheus exporter on a port of its own. It takes effect only in a binary built with the metrics tag.",
+			map[string]interface{}{
+				"enable": boolProp("Enabled", "Serve /metrics from this process."),
+				"host":   strProp("Listen host", "Address to bind. Empty falls back to 127.0.0.1, which only this machine can reach."),
+				"port":   intProp("Listen port", "Port to bind. 0 falls back to 12347."),
+				"token": secretProp("Token", "Bearer credential a scrape must present. Write-only: leave it empty to keep the one set. With none set the exporter asks for no credential.",
+					"token_configured"),
+			},
+			[]string{"enable", "host", "port", "token"},
+			nil),
 		"sessions": objectSchema("Sessions", "Where persisted chat bundles are stored.",
 			map[string]interface{}{
 				"dir": strProp("Sessions directory", "Override sessions root; empty resolves under CODDY_HOME."),
@@ -826,14 +836,15 @@ func UISchemaMap() map[string]interface{} {
 	// model), then what the agent can do (tools, MCP servers, skills,
 	// subagents, hooks), then what runs it without a person at the composer
 	// (the scheduler, the messenger gateways), and last the operation of the
-	// process (the logger, then prompts and instructions, which the web UI
-	// folds into one System tab). The sessions key belongs to the Sessions tab.
+	// process (the logger and the metrics exporter, then prompts and
+	// instructions, which the web UI folds into one System tab). The sessions
+	// key belongs to the Sessions tab.
 	rootOrder := []string{
 		"providers", "models", "toolsets",
 		"agent", "supervisor", "compaction", "memory", "decisions",
 		"tools", "skills", "subagents", "hooks",
 		"scheduler", "gateways",
-		"logger", "sessions", "prompts", "instructions",
+		"logger", "metrics", "sessions", "prompts", "instructions",
 	}
 
 	doc := map[string]interface{}{
