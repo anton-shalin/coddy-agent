@@ -25,6 +25,11 @@ const (
 
 // ResilientOptions configures retry and pacing for LLM calls.
 type ResilientOptions struct {
+	// Name, Type and Model say which provider row the wrapper calls
+	// (ProviderInput.Name, .Type and .Model): they label the CallEvent of
+	// every attempt. A bare wrapper leaves them empty.
+	Name, Type, Model string
+
 	RetryMax int
 	// RetryDisabled means retries were explicitly turned off (llm_retry_max: 0):
 	// a zero RetryMax alone still falls back to the default, so the zero value
@@ -125,7 +130,9 @@ func (p *resilientProvider) callWithRetry(ctx context.Context, fn func(context.C
 			return nil, ctx.Err()
 		}
 		allowance.recordAttempt(attempt > 0)
+		began := time.Now()
 		resp, err := fn(ctx)
+		p.observeAttempt(began, resp, err)
 		p.markCallFinished()
 		if err == nil {
 			return resp, nil
@@ -630,6 +637,9 @@ func WithAgentResilience(in ProviderInput, retryMax, retryBaseMS, minIntervalMS 
 
 func applyResilientWrap(p Provider, in ProviderInput) Provider {
 	return wrapResilient(p, ResilientOptions{
+		Name:           in.Name,
+		Type:           in.Type,
+		Model:          in.Model,
 		RetryMax:       in.RetryMax,
 		RetryDisabled:  in.RetryDisabled,
 		RetryBase:      in.RetryBase,
