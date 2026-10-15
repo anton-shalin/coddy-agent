@@ -88,15 +88,46 @@ make rpm PKG_TAGS="http cli"      # lean binary, no npm step
 make brew VERSION=1.0.11
 ```
 
-**`scripts/build-homebrew-cask.sh`** подставляет в **`packaging/homebrew/coddy.rb.tmpl`** версию и SHA-256 обоих архивов для macOS и записывает **`dist/coddy.rb`**. Архивы он берёт из **`DIST_DIR`**, если они там есть (так бывает в задании релиза, сразу после кросс-компиляции), а иначе скачивает из релиза на GitHub - cask закрепляет контрольные суммы, поэтому сгенерировать его можно только для версии, архивы которой уже существуют.
+**`scripts/build-homebrew-cask.sh`** подставляет в **`packaging/homebrew/coddy.rb.tmpl`** версию и SHA-256 обоих архивов для macOS и записывает **`dist/coddy.rb`**. Архивы он хеширует в **`DIST_DIR`**, если они там есть (так бывает в задании релиза, сразу после кросс-компиляции), а иначе берёт их контрольные суммы из **`SHA256SUMS`** этого релиза на GitHub - cask закрепляет контрольные суммы, поэтому сгенерировать его можно только для версии, архивы которой уже существуют.
 
-Чтобы попробовать сгенерированный файл, установите его.
+Текущий Homebrew не принимает cask по пути к файлу, поэтому сгенерированный файл пробуют через временный локальный тап. На Mac с Homebrew это выглядит так.
 
 ```bash
-brew install --cask dist/coddy.rb
+make brew-cask-check                                    # dist/coddy.rb from a local tap
+make brew-cask-check BREW_TAP=coddy-project/coddy-agent # the published cask, by name
 ```
 
-Cask создаёт ссылки на **`coddy`**, **`coddy.1`** и оба скрипта автодополнения, поэтому релизные архивы **`darwin`** и **`linux`** содержат эти файлы рядом с бинарником. **`tmux`** он рекомендует в своих **`caveats`**, а не объявляет зависимостью, потому что у **`depends_on`** в cask нет необязательной формы, а Coddy работает без tmux, так что cask его называет и ничего не устанавливает. Каждый релиз публикует **`coddy.rb`** как файл релиза, и **`brew install --cask <url>`** устанавливает из него.
+**`scripts/check-homebrew-cask.sh`** устанавливает cask, прогоняет по нему **`brew style`** и проверяет, что **`coddy -v`** печатает его версию, что бинарник ведёт в **`Caskroom`** и на нём не осталось атрибута **`com.apple.quarantine`**, что ссылки на man-страницу и оба автодополнения созданы и что **`coddy update`** называет **`brew upgrade --cask coddy`**, после чего запускает эту команду. В конце он удаляет cask и добавленный им тап, а **`--keep`** оставляет и то и другое. Режим разработчика Homebrew он не включает. Локальный тап он создаёт обычным каталогом, без **`brew tap-new`**, а **`brew style`** запускает с переменной **`HOMEBREW_DEVELOPER`** только для этой команды, потому что команда для разработчиков без неё включает этот режим насовсем.
+
+Cask создаёт ссылки на **`coddy`**, **`coddy.1`** и оба скрипта автодополнения, поэтому релизные архивы **`darwin`** и **`linux`** содержат эти файлы рядом с бинарником. Он объявляет **`depends_on macos: :monterey`**, потому что Go 1.25 и новее собирает бинарники, которым нужна macOS 12. Шаг **`postflight_steps`** снимает с бинарника атрибут карантина, который Homebrew ставит на загрузку. Бинарник подписан ad-hoc и не нотаризован, и без этого шага Gatekeeper остановил бы его первый запуск. **`tmux`** cask рекомендует в своих **`caveats`**, а не объявляет зависимостью, потому что у **`depends_on`** в cask нет необязательной формы, а Coddy работает без tmux, так что cask его называет и ничего не устанавливает.
+
+### Тап Homebrew
+
+До пользователей cask доходит через тап [coddy-project/homebrew-coddy-agent](https://github.com/coddy-project/homebrew-coddy-agent), который ставится командой **`brew install coddy-project/coddy-agent/coddy`**. Его **`Casks/coddy.rb`** генерируется, и вручную его не правят.
+
+```bash
+make brew-publish VERSION=1.0.11
+```
+
+**`scripts/publish-homebrew-tap.sh`** клонирует тап, заменяет **`Casks/coddy.rb`** сгенерированным cask и пушит коммит **`coddy X.Y.Z`**. Тап движется только вперёд. Cask для релиза старше того, что уже лежит в тапе, пропускается, а cask, совпадающий с тем, что в тапе, ничего не меняет, поэтому перезапуск задания релиза для старого тега не откатит тап. Пуш, проигравший гонку с другим заданием релиза, повторяется поверх нового состояния тапа.
+
+Задание релиза запускает скрипт после загрузки файлов релиза с приватной частью deploy key из секрета **`HOMEBREW_TAP_DEPLOY_KEY`**. У этого ключа есть право записи только в тап. SSH-ключи хоста GitHub скрипт берёт из **`api.github.com/meta`**. Без секрета шаг релиза останавливается с ошибкой уже после загрузки файлов, и тап остаётся на прошлом релизе, пока задание не запустят снова. Если запустить скрипт вручную без секрета, он пушит с вашими собственными учётными данными git. Затем workflow **Homebrew tap** ([`homebrew.yaml`](../../../.github/workflows/homebrew.yaml)) ставит cask по имени на macOS-раннере с текущим Homebrew и проверяет, что в нём только что опубликованный релиз или более новый. Тот же workflow запускается на пул-реквестах, которые меняют cask, скрипты или сам workflow, и там он ещё ставит cask, сгенерированный из этого чекаута. Ещё его запускают вручную, а раз в неделю он запускается сам, чтобы вовремя заметить релиз Homebrew, который перестал ставить cask из тапа.
+
+Ключ один раз настраивает владелец организации. Сначала разрешите deploy keys для репозиториев организации в её настройках, раздел Member privileges, пункт Deploy keys. Затем сгенерируйте пару ключей и дайте публичной части право записи в тап.
+
+```bash
+ssh-keygen -t ed25519 -N "" -C "coddy-agent release workflow" -f ./tap_key
+gh repo deploy-key add tap_key.pub --repo coddy-project/homebrew-coddy-agent --allow-write --title "coddy-agent release workflow"
+```
+
+Приватную часть сохраните в секрет этого репозитория, а оба файла удалите.
+
+```bash
+gh secret set HOMEBREW_TAP_DEPLOY_KEY --repo coddy-project/coddy-agent < tap_key
+rm tap_key tap_key.pub
+```
+
+Больше ничего не нужно. **`tag-on-merge.yaml`** вызывает workflow релиза с **`secrets: inherit`**, а **`GITHUB_TOKEN`** Actions подставляет сам. Новый ключ заменяет старый так же, после этого старый deploy key удалите из тапа.
 
 ### Формула для Homebrew
 
@@ -216,7 +247,7 @@ go build -tags=http,ui,scheduler,memory,cli,gateway,swarm,metrics ...
 | **`coddy_X.Y.Z_darwin_arm64.tar.gz`** | macOS Apple Silicon |
 | **`coddy_X.Y.Z_linux_amd64.deb`**, **`coddy_X.Y.Z_linux_arm64.deb`** | Debian, Ubuntu и производные |
 | **`coddy_X.Y.Z_linux_amd64.rpm`**, **`coddy_X.Y.Z_linux_arm64.rpm`** | Fedora, RHEL, openSUSE и производные |
-| **`coddy.rb`** | Homebrew cask для архивов macOS этого тега |
+| **`coddy.rb`** | Homebrew cask для архивов macOS этого тега; тот же файл коммитится в тап [coddy-project/homebrew-coddy-agent](https://github.com/coddy-project/homebrew-coddy-agent) |
 | **`SHA256SUMS`** | Контрольные суммы всех архивов и пакетов выше |
 
 Архивы **`.tar.gz`** содержат рядом с бинарником man-страницу и автодополнения оболочек; пакеты оборачивают бинарники Linux, которые только что собрало то же задание, а не компилируют свои, поэтому в **`.deb`**, **`.rpm`** и **`.tar.gz`** одного тега лежат побайтно одинаковые исполняемые файлы.
@@ -239,4 +270,4 @@ go install github.com/EvilFreelancer/coddy-agent/cmd/coddy@latest
 
 Так компилируется то, что модуль собирает по умолчанию, **без** ваших локальных **`TAGS`**. Чтобы получить известный набор возможностей (HTTP, веб-интерфейс, планировщик, память, консоль, шлюз мессенджеров), клонируйте репозиторий и используйте **`make build TAGS="http ui scheduler memory cli gateway swarm metrics"`** (или **`go build -tags=...`**, как выше).
 
-<!-- docsgen:source sha256=bd7553aa3326b86d -->
+<!-- docsgen:source sha256=bcc9b605f0d39786 -->

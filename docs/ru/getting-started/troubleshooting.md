@@ -292,6 +292,27 @@ models:
 
 Ставьте `max_turns: 0`, только если сознательно отключаете ограничение шагов.
 
+## `brew` сообщает `No Cask with this name exists`
+
+**Симптом.** `brew install --cask https://github.com/coddy-project/coddy-agent/releases/latest/download/coddy.rb` выводит `Cask 'coddy' is unavailable: No Cask with this name exists` и предлагает cask с похожим именем. Или `brew install --cask coddy` останавливается на `Refusing to load cask coddy-project/coddy-agent/coddy from untrusted tap coddy-project/coddy-agent`.
+
+**Причина.** Текущий Homebrew загружает cask только из тапа. URL или путь к файлу `.rb` он читает как имя cask, а cask с таким именем нет ни в одном тапе. Тап, который не принадлежит самому Homebrew, остаётся недоверенным, пока вы не доверите его или не установите из него cask по полному имени.
+
+**Решение.** Установите cask из тапа Coddy по полному имени, Homebrew сам добавит тап и доверит этому cask.
+
+```bash
+brew install coddy-project/coddy-agent/coddy
+```
+
+Coddy, который старый Homebrew поставил по URL, не относится ни к одному тапу, поэтому `brew upgrade` никогда не предложит ему новый релиз. Переустановите его из тапа, `brew uninstall` оставляет `~/.coddy` на месте.
+
+```bash
+brew uninstall --cask coddy
+brew install coddy-project/coddy-agent/coddy
+```
+
+См. [Установка](install.md#macos-homebrew).
+
 ## `coddy update` отказывается перезаписывать бинарник из пакета
 
 **Симптом.** `coddy update` ничего не меняет, называет пакет, которому принадлежит установка, выводит команду пакетного менеджера и завершается с кодом 1 либо отсылает к `brew upgrade`.
@@ -379,4 +400,4 @@ coddy acp --log-level debug
 
 Те же настройки можно сохранить в разделе `logger` файла `config.yaml` (`level`, `levels`, `outputs`, `file`, `format`). Справка - [Конфигурация](configuration.md), [`logger`](../reference/config.md#logger).
 
-<!-- docsgen:source sha256=9e2db28ec762f1b2 -->
+<!-- docsgen:source sha256=afe68fc4ec16c75e -->
