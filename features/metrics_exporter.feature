@@ -13,5 +13,7 @@ Feature: Prometheus exporter
     And "coddy_tool_calls_total" for read, ok rose by 1
     And "coddy_turns_started_total" and "coddy_turns_ended_total" each rose by 1
     And "coddy_turn_duration_seconds_count" rose by 1
+    And "coddy_llm_time_to_first_token_seconds_count" rose by 2
+    And "coddy_prompts_pending" is present
     And "coddy_sessions_disk_available_bytes" is present
     And the answer contains none of "SECRET-TITLE", "SECRET-WS", "SECRET-PROMPT"

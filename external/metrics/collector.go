@@ -42,12 +42,14 @@ type Source struct {
 }
 
 // The bounds of the duration histograms, in seconds: an attempt lasts as long
-// as its whole stream, a tool from a file read to a long command, a turn from
-// one answer to an afternoon of work.
+// as its whole stream, its first token comes within seconds, a tool runs from
+// a file read to a long command, a turn from one answer to an afternoon of
+// work.
 var (
-	attemptBuckets = []float64{0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600}
-	toolBuckets    = []float64{0.1, 0.5, 1, 5, 15, 60, 300}
-	turnBuckets    = []float64{1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600}
+	attemptBuckets    = []float64{0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600}
+	firstTokenBuckets = []float64{0.25, 0.5, 1, 2, 4, 8, 15, 30, 60}
+	toolBuckets       = []float64{0.1, 0.5, 1, 5, 15, 60, 300}
+	turnBuckets       = []float64{1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600}
 )
 
 // Collector is the state of the exporter of one coddy serve process: the
@@ -63,6 +65,7 @@ type Collector struct {
 
 	attempts       *instruments
 	attemptSeconds *instruments
+	firstToken     *instruments
 	inputTokens    *instruments
 	cachedTokens   *instruments
 	outputTokens   *instruments
@@ -107,6 +110,8 @@ func NewCollector(src Source) *Collector {
 		"Provider invocation attempts, retries included; some fail before a request is sent.")
 	c.attemptSeconds = add("coddy_llm_attempt_duration_seconds", "histogram",
 		"Duration of a provider invocation attempt, the whole stream included.")
+	c.firstToken = add("coddy_llm_time_to_first_token_seconds", "histogram",
+		"Time from the start of a streamed attempt to its first chunk with content: text, reasoning or a tool call.")
 	c.inputTokens = add("coddy_llm_input_tokens_total", "counter", "Input tokens the provider reported for attempts that returned a response.")
 	c.cachedTokens = add("coddy_llm_cached_input_tokens_total", "counter", "Cached input tokens: a subset of the input tokens.")
 	c.outputTokens = add("coddy_llm_output_tokens_total", "counter", "Output tokens the provider reported for attempts that returned a response.")
@@ -148,8 +153,15 @@ func (c *Collector) Close() {
 // removal later leaves what was counted where it was.
 func (c *Collector) observeCall(ev llm.CallEvent) {
 	provider, model := c.budget.labels(c.src.Cfg(), ev.Provider, ev.Model)
-	c.attempts.counter("provider", provider, "model", model, "outcome", ev.Outcome).Inc()
+	attempt := attemptFirst
+	if ev.Retry {
+		attempt = attemptRetry
+	}
+	c.attempts.counter("provider", provider, "model", model, "outcome", ev.Outcome, "attempt", attempt).Inc()
 	c.attemptSeconds.histogram(attemptBuckets, "provider", provider).Update(ev.Duration.Seconds())
+	if ev.FirstContent > 0 {
+		c.firstToken.histogram(firstTokenBuckets, "provider", provider).Update(ev.FirstContent.Seconds())
+	}
 	addTokens(c.inputTokens, ev.InputTokens, provider, model)
 	addTokens(c.cachedTokens, ev.CachedInputTokens, provider, model)
 	addTokens(c.outputTokens, ev.OutputTokens, provider, model)
@@ -205,8 +217,9 @@ func (c *Collector) observeConfig(next *config.Config) {
 }
 
 // seed gives every provider and declared model of cfg that the budget admits a
-// series at zero for each outcome and each token counter, and the provider an
-// empty duration histogram, so a rate or an increase over its first attempt
+// series at zero for each outcome of a first attempt and of a retry and for
+// each token counter, and the provider empty duration and first token
+// histograms, so a rate or an increase over its first attempt
 // has a sample to start from; the other model beside it is seeded for what
 // cfg does not declare.
 func (c *Collector) seed(cfg *config.Config) {
@@ -221,12 +234,15 @@ func (c *Collector) seed(cfg *config.Config) {
 		}
 		seeded[pair] = true
 		for _, outcome := range llm.CallOutcomes() {
-			c.attempts.counter("provider", provider, "model", model, "outcome", outcome)
+			for _, attempt := range []string{attemptFirst, attemptRetry} {
+				c.attempts.counter("provider", provider, "model", model, "outcome", outcome, "attempt", attempt)
+			}
 		}
 		for _, tokens := range []*instruments{c.inputTokens, c.cachedTokens, c.outputTokens} {
 			tokens.counter("provider", provider, "model", model)
 		}
 		c.attemptSeconds.histogram(attemptBuckets, "provider", provider)
+		c.firstToken.histogram(firstTokenBuckets, "provider", provider)
 	}
 	for _, p := range cfg.Providers {
 		seed(c.budget.labels(cfg, p.Name, ""))
@@ -245,10 +261,16 @@ func (c *Collector) exposition() []byte {
 	for _, f := range c.families {
 		f.writeTo(&b)
 	}
-	writeState(&b, c.src.Status())
+	writeState(&b, c.src.Status(), c.budget.admitted)
 	writeLibrary(&b)
 	return b.Bytes()
 }
+
+// The attempt label: the first attempt of a call or one the wrapper retried.
+const (
+	attemptFirst = "first"
+	attemptRetry = "retry"
+)
 
 // The lifetime bound on the labels of the llm families: this many providers
 // and named (provider, model) pairs, whatever happens to the configuration.
@@ -271,6 +293,14 @@ type budget struct {
 
 func newBudget() *budget {
 	return &budget{providers: map[string]struct{}{}, pairs: map[[2]string]struct{}{}}
+}
+
+// admitted reports whether provider holds a label of its own.
+func (b *budget) admitted(provider string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	_, ok := b.providers[provider]
+	return ok
 }
 
 // labels folds the provider row and the API model id of an attempt against

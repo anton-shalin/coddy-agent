@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/EvilFreelancer/coddy-agent/internal/acp"
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
@@ -134,5 +135,67 @@ func TestToolCallObserverRemoval(t *testing.T) {
 	}
 	if AddToolCallObserver(nil) == nil {
 		t.Fatal("a nil observer must still return a remove function")
+	}
+}
+
+// holdingSender keeps every prompt open until the test releases it, the way a
+// person who has not answered yet does.
+type holdingSender struct {
+	resumePermissionSender
+	entered chan string
+	release chan struct{}
+}
+
+func (s holdingSender) RequestPermission(context.Context, acp.PermissionRequestParams) (*acp.PermissionResult, error) {
+	s.entered <- "permission"
+	<-s.release
+	return &acp.PermissionResult{Outcome: "selected", OptionID: "reject"}, nil
+}
+
+func (s holdingSender) RequestQuestion(context.Context, acp.QuestionRequestParams) (*acp.QuestionResult, error) {
+	s.entered <- "question"
+	<-s.release
+	return &acp.QuestionResult{}, nil
+}
+
+// A permission prompt and a question each count as waiting for the person
+// while they are open, and stop counting once answered.
+func TestPendingPromptsCountWhatWaitsForAnAnswer(t *testing.T) {
+	dir := t.TempDir()
+	sender := holdingSender{entered: make(chan string, 1), release: make(chan struct{})}
+	st := &session.State{ID: "sess_pending_prompts", CWD: dir, Mode: session.ModeAgent, SessionDir: t.TempDir()}
+	st.SetPermissionMode(config.PermModeAsk)
+	ag := NewAgent(&config.Config{}, st, sender, nil)
+	env := &tools.Env{CWD: dir, PermissionMode: config.PermModeAsk, SessionID: st.ID, Sender: sender}
+
+	for _, tc := range []struct {
+		kind string
+		call llm.ToolCall
+	}{
+		{"permission", llm.ToolCall{ID: "p1", Name: "write", InputJSON: `{"path":"b.txt","content":"x"}`}},
+		{"question", llm.ToolCall{ID: "q1", Name: "question", InputJSON: `{"questions":[{"header":"h","question":"Which?","options":[{"label":"a"}]}]}`}},
+	} {
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_, _ = ag.executeToolCall(context.Background(), tc.call, env, "agent", st.ID, false)
+		}()
+		select {
+		case got := <-sender.entered:
+			if got != tc.kind {
+				t.Fatalf("%s call asked a %s", tc.kind, got)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("the %s call never asked", tc.kind)
+		}
+		permission, question := PendingPrompts()
+		if want := map[string][2]int{"permission": {1, 0}, "question": {0, 1}}[tc.kind]; permission != want[0] || question != want[1] {
+			t.Errorf("while a %s waits: permission %d, question %d; want %v", tc.kind, permission, question, want)
+		}
+		sender.release <- struct{}{}
+		<-done
+		if permission, question := PendingPrompts(); permission != 0 || question != 0 {
+			t.Errorf("after the %s was answered: permission %d, question %d; want none", tc.kind, permission, question)
+		}
 	}
 }

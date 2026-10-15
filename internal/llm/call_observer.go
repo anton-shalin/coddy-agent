@@ -45,8 +45,16 @@ type CallEvent struct {
 	Provider, Model string
 	// Outcome is CallOutcome of the attempt's error.
 	Outcome string
+	// Retry is true for an attempt the wrapper made after a failed one of
+	// the same call.
+	Retry bool
 	// Duration is the whole attempt, the full stream included.
 	Duration time.Duration
+	// FirstContent is how long the attempt took to deliver its first chunk
+	// with content (text, reasoning or a tool call), zero for an attempt that
+	// streamed none to a caller: a non-streaming call, a stream without a
+	// callback, or one that ended before any content.
+	FirstContent time.Duration
 	// The tokens of the attempt's Response, whenever one exists (a stream cut
 	// by the caller keeps what it delivered), else zero.
 	InputTokens, OutputTokens, CachedInputTokens int
@@ -104,16 +112,50 @@ func swapCallObservers(change func(cur []*callObserver) []*callObserver) {
 	}
 }
 
-// observeAttempt tells the observers about the attempt that began at began.
-func (p *resilientProvider) observeAttempt(began time.Time, resp *Response, err error) {
+// attemptClock times one invocation attempt: when it began, whether it is a
+// retry, and when Stream saw its first chunk with content.
+type attemptClock struct {
+	began time.Time
+	retry bool
+	// firstContent is the time from began to the first chunk with content,
+	// in nanoseconds; zero until one arrives.
+	firstContent atomic.Int64
+}
+
+// watch returns onChunk wrapped to note the first chunk with content. A nil
+// callback stays nil, and so does every callback while nobody observes: the
+// adapters read a nil callback as a call that streams nothing to a caller,
+// which decides whether a failed stream may be retried.
+func (c *attemptClock) watch(onChunk func(StreamChunk)) func(StreamChunk) {
+	if onChunk == nil || callObservers.Load() == nil {
+		return onChunk
+	}
+	return func(chunk StreamChunk) {
+		if c.firstContent.Load() == 0 && chunkHasContent(chunk) {
+			c.firstContent.CompareAndSwap(0, max(1, int64(time.Since(c.began))))
+		}
+		onChunk(chunk)
+	}
+}
+
+// chunkHasContent reports a chunk that carries something the model wrote, as
+// opposed to usage figures or a stop reason alone.
+func chunkHasContent(c StreamChunk) bool {
+	return c.TextDelta != "" || c.ReasoningDelta != "" || c.ToolCall != nil || c.ToolCallDelta != nil || c.ToolCallNamed != nil
+}
+
+// observeAttempt tells the observers about the attempt clock timed.
+func (p *resilientProvider) observeAttempt(clock *attemptClock, resp *Response, err error) {
 	observers := callObservers.Load()
 	if observers == nil {
 		return
 	}
 	ev := CallEvent{
 		Provider: p.opts.Name, Model: p.opts.Model,
-		Outcome:  CallOutcome(err),
-		Duration: time.Since(began),
+		Outcome:      CallOutcome(err),
+		Retry:        clock.retry,
+		Duration:     time.Since(clock.began),
+		FirstContent: time.Duration(clock.firstContent.Load()),
 	}
 	if resp != nil {
 		ev.InputTokens, ev.OutputTokens, ev.CachedInputTokens = resp.InputTokens, resp.OutputTokens, resp.CachedInputTokens

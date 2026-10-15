@@ -1096,6 +1096,74 @@ func TestCallObserverOneEventPerAttempt(t *testing.T) {
 			t.Fatalf("events = %+v, want one that lasted the whole stream", events)
 		}
 	})
+	t.Run("a retried attempt says it is a retry", func(t *testing.T) {
+		calls := recordCalls(t, opts.Name)
+		var n atomic.Int32
+		p := wrapResilient(&stubProvider{completeFn: func(context.Context, []Message, []ToolDefinition) (*Response, error) {
+			if n.Add(1) == 1 {
+				return nil, errors.New("503 Service Unavailable")
+			}
+			return &Response{}, nil
+		}}, opts)
+		if _, err := p.Complete(context.Background(), nil, nil); err != nil {
+			t.Fatal(err)
+		}
+		events := calls()
+		if len(events) != 2 || events[0].Retry || !events[1].Retry {
+			t.Fatalf("events = %+v, want a first attempt and then a retry", events)
+		}
+	})
+	t.Run("the first token is the first chunk that carries content", func(t *testing.T) {
+		calls := recordCalls(t, opts.Name)
+		p := wrapResilient(&stubProvider{streamFn: func(_ context.Context, _ []Message, _ []ToolDefinition, onChunk func(StreamChunk)) (*Response, error) {
+			onChunk(StreamChunk{InputTokens: 3})
+			time.Sleep(30 * time.Millisecond)
+			onChunk(StreamChunk{ReasoningDelta: "hm"})
+			time.Sleep(30 * time.Millisecond)
+			onChunk(StreamChunk{TextDelta: "a"})
+			return &Response{Content: "a"}, nil
+		}}, opts)
+		if _, err := p.Stream(context.Background(), nil, nil, func(StreamChunk) {}); err != nil {
+			t.Fatal(err)
+		}
+		events := calls()
+		if len(events) != 1 || events[0].FirstContent < 30*time.Millisecond || events[0].FirstContent >= events[0].Duration-20*time.Millisecond {
+			t.Fatalf("events = %+v, want the first content after the usage chunk and before the text", events)
+		}
+	})
+	t.Run("an attempt with no content has no first token", func(t *testing.T) {
+		calls := recordCalls(t, opts.Name)
+		p := wrapResilient(&stubProvider{
+			streamFn: func(_ context.Context, _ []Message, _ []ToolDefinition, onChunk func(StreamChunk)) (*Response, error) {
+				// As the adapters do: nothing is streamed to a caller that passed no callback.
+				if onChunk != nil {
+					onChunk(StreamChunk{StopReason: "stop", OutputTokens: 1})
+				}
+				return &Response{}, nil
+			},
+			completeFn: func(context.Context, []Message, []ToolDefinition) (*Response, error) {
+				return &Response{Content: "x"}, nil
+			},
+		}, opts)
+		if _, err := p.Stream(context.Background(), nil, nil, func(StreamChunk) {}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.Stream(context.Background(), nil, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.Complete(context.Background(), nil, nil); err != nil {
+			t.Fatal(err)
+		}
+		events := calls()
+		if len(events) != 3 {
+			t.Fatalf("events = %+v, want three", events)
+		}
+		for _, ev := range events {
+			if ev.FirstContent != 0 {
+				t.Fatalf("event %+v has a first token", ev)
+			}
+		}
+	})
 	t.Run("a call that never reaches the provider is not an attempt", func(t *testing.T) {
 		calls := recordCalls(t, opts.Name)
 		var reached atomic.Int32
@@ -1227,9 +1295,10 @@ func TestCallEventHoldsNoRequestReference(t *testing.T) {
 	for i := range typ.NumField() {
 		field := typ.Field(i)
 		switch {
-		case field.Type.Kind() == reflect.String, field.Type.Kind() == reflect.Int, field.Type == reflect.TypeFor[time.Duration]():
+		case field.Type.Kind() == reflect.String, field.Type.Kind() == reflect.Int, field.Type.Kind() == reflect.Bool,
+			field.Type == reflect.TypeFor[time.Duration]():
 		default:
-			t.Errorf("CallEvent.%s is a %s; only strings, ints and a time.Duration may be fields", field.Name, field.Type)
+			t.Errorf("CallEvent.%s is a %s; only strings, ints, bools and a time.Duration may be fields", field.Name, field.Type)
 		}
 	}
 }

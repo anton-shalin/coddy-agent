@@ -5,6 +5,8 @@ package metrics
 import (
 	"bytes"
 	"fmt"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 
 	"github.com/EvilFreelancer/coddy-agent/internal/bgtask"
 	"github.com/EvilFreelancer/coddy-agent/internal/serve"
+	"github.com/EvilFreelancer/coddy-agent/internal/swarm"
 )
 
 // The text format escapes a label value and a help text each with a set of
@@ -168,7 +171,22 @@ var (
 		"Free space a non-root writer can use on the disk holding the session store.")
 	diskSize = gauge("coddy_sessions_disk_size_bytes",
 		"Size of the disk holding the session store.")
+	promptsPending = gauge("coddy_prompts_pending",
+		"Prompts that wait for a person to answer, by kind: a permission prompt or a question.")
+	quotaUsed = gauge("coddy_provider_quota_used_ratio",
+		"Share of a provider account's usage window used, from 0 to 1, as the session manager's cache last read it; a scrape asks the provider nothing.")
+	quotaReset = gauge("coddy_provider_quota_reset_timestamp_seconds",
+		"When a provider account's usage window starts over, as a Unix time.")
+	swarmJoins = gauge("coddy_swarm_joins",
+		"Registrations of this process into parent relays, by relay host, transport and the state of the last registration attempt.")
+	swarmNodes = gauge("coddy_swarm_nodes",
+		"Nodes the relay of this process knows, by kind, transport and state.")
 )
+
+// quotaWindow is the closed set of usage window identifiers the provider
+// usage readers produce; anything else (a limit a provider names freely) is
+// not exported.
+var quotaWindow = regexp.MustCompile(`^(session|day|week|acu|window-[0-9]+)(-secondary)?$`)
 
 // The kinds and statuses coddy_background_tasks always lists, so a quiet pool
 // is a row of zeros rather than missing series.
@@ -179,8 +197,9 @@ var (
 
 // writeState writes what the process says about itself, from one
 // serve.Snapshot taken for the scrape. It never leaves the process: no
-// provider, bot API or MCP server is asked anything.
-func writeState(b *bytes.Buffer, snap serve.Snapshot) {
+// provider, bot API or MCP server is asked anything. admitted says which
+// provider names hold a label of their own.
+func writeState(b *bytes.Buffer, snap serve.Snapshot, admitted func(provider string) bool) {
 	var rows bytes.Buffer
 	flush := func(f family) {
 		f.writeRows(b, &rows)
@@ -229,6 +248,63 @@ func writeState(b *bytes.Buffer, snap serve.Snapshot) {
 		flush(diskAvailable)
 		vm.WriteGaugeUint64(&rows, diskSize.name, snap.Disk.SizeBytes)
 		flush(diskSize)
+	}
+
+	vm.WriteGaugeUint64(&rows, series(promptsPending.name, "kind", "permission"), uint64(snap.PermissionPrompts))
+	vm.WriteGaugeUint64(&rows, series(promptsPending.name, "kind", "question"), uint64(snap.Questions))
+	flush(promptsPending)
+
+	var resets bytes.Buffer
+	for _, q := range snap.ProviderQuotas {
+		if !admitted(q.Provider) || !quotaWindow.MatchString(q.Window) {
+			continue
+		}
+		vm.WriteGaugeFloat64(&rows, series(quotaUsed.name, "provider", q.Provider, "window", q.Window), q.UsedRatio)
+		if !q.ResetsAt.IsZero() {
+			vm.WriteGaugeUint64(&resets, series(quotaReset.name, "provider", q.Provider, "window", q.Window), uint64(q.ResetsAt.Unix()))
+		}
+	}
+	flush(quotaUsed)
+	quotaReset.writeRows(b, &resets)
+
+	writeJoins(&rows, snap.SwarmJoins)
+	flush(swarmJoins)
+	for _, n := range snap.RelayNodes {
+		vm.WriteGaugeUint64(&rows, series(swarmNodes.name, "kind", n.Kind, "transport", n.Transport, "state", n.State), uint64(n.Count))
+	}
+	flush(swarmNodes)
+}
+
+// writeJoins counts the registrations by relay host and transport, both
+// states written for every pair, so two registrations into one relay (under
+// two names) add up instead of writing one series twice.
+func writeJoins(rows *bytes.Buffer, joins []swarm.JoinStatus) {
+	type key struct{ relay, transport string }
+	counts := map[key][2]uint64{}
+	for _, j := range joins {
+		k := key{j.Relay, j.Transport}
+		c := counts[k]
+		if j.Online {
+			c[0]++
+		} else {
+			c[1]++
+		}
+		counts[k] = c
+	}
+	keys := make([]key, 0, len(counts))
+	for k := range counts {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].relay != keys[j].relay {
+			return keys[i].relay < keys[j].relay
+		}
+		return keys[i].transport < keys[j].transport
+	})
+	for _, k := range keys {
+		c := counts[k]
+		vm.WriteGaugeUint64(rows, series(swarmJoins.name, "relay", k.relay, "transport", k.transport, "state", serve.NodeOnline), c[0])
+		vm.WriteGaugeUint64(rows, series(swarmJoins.name, "relay", k.relay, "transport", k.transport, "state", serve.NodeOffline), c[1])
 	}
 }
 

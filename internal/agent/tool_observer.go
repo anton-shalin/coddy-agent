@@ -126,3 +126,22 @@ func (a *Agent) toolLabel(name string) string {
 	}
 	return toolLabelOther
 }
+
+// pendingPermissions and pendingQuestions count the prompts of every session
+// in the process that wait for a person right now.
+var pendingPermissions, pendingQuestions atomic.Int64
+
+// PendingPrompts reports how many permission prompts and questions of the
+// process wait for an answer. A prompt counts while the call that asked it
+// waits, a subagent's included; one whose stream ended waits in no call and
+// is not counted until it is resumed.
+func PendingPrompts() (permission, question int) {
+	return int(pendingPermissions.Load()), int(pendingQuestions.Load())
+}
+
+// waitingFor counts one prompt on gauge until the returned function runs.
+func waitingFor(gauge *atomic.Int64) (answered func()) {
+	gauge.Add(1)
+	var once sync.Once
+	return func() { once.Do(func() { gauge.Add(-1) }) }
+}

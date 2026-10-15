@@ -2361,6 +2361,8 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall, env *tools
 		if hookRes.ask {
 			askedUnder = config.PermModeAsk
 		}
+		answered := waitingFor(&pendingPermissions)
+		defer answered()
 		permResult, err := a.server.RequestPermission(ctx, acp.PermissionRequestParams{
 			SessionID: sessionID,
 			ToolCall: acp.PermissionToolCall{
@@ -2378,6 +2380,7 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall, env *tools
 			}),
 			SessionPermissionMode: askedUnder,
 		})
+		answered()
 
 		if err != nil || !permission.Approved(permResult) {
 			// A prompt nobody answered is resumed later and counted when it
@@ -2417,7 +2420,14 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall, env *tools
 			execErr = tools.ApplyOutputLimitError(execErr, tc.Name, env)
 		}
 	} else {
+		// A question waits for the person for the whole of its run.
+		answered := func() {}
+		if tc.Name == "question" {
+			answered = waitingFor(&pendingQuestions)
+			defer answered()
+		}
 		result, execErr = a.registry.Execute(ctx, tc.Name, tc.InputJSON, env)
+		answered()
 	}
 	ranFor = time.Since(started)
 	outcome = ToolOutcomeOK

@@ -30,6 +30,7 @@ import (
 	"github.com/EvilFreelancer/coddy-agent/internal/llm"
 	"github.com/EvilFreelancer/coddy-agent/internal/serve"
 	"github.com/EvilFreelancer/coddy-agent/internal/session"
+	"github.com/EvilFreelancer/coddy-agent/internal/swarm"
 )
 
 // live stands in for the runtime: the configuration and the snapshot the
@@ -215,6 +216,28 @@ func find(body, name string, want map[string]string) (float64, bool) {
 	return 0, false
 }
 
+// sumOf adds up every sample of name whose labels include want, so a family
+// split by a label the caller does not name (attempt) still reads whole.
+func sumOf(body, name string, want map[string]string) (total float64, found bool) {
+	for _, s := range parseSamples(body) {
+		if s.name != name {
+			continue
+		}
+		match := true
+		for k, v := range want {
+			if s.labels[k] != v {
+				match = false
+				break
+			}
+		}
+		if match {
+			total += s.value
+			found = true
+		}
+	}
+	return total, found
+}
+
 // valueOf is find for a series the test requires.
 func valueOf(t testing.TB, body, name string, want map[string]string) float64 {
 	t.Helper()
@@ -254,9 +277,14 @@ func freeAddr(t testing.TB) string {
 	return ln.Addr().String()
 }
 
+// attemptsOf is the attempts of a pair and an outcome, first ones and retries.
 func attemptsOf(t testing.TB, body, provider, model, outcome string) float64 {
 	t.Helper()
-	return valueOf(t, body, "coddy_llm_attempts_total", lbl("provider", provider, "model", model, "outcome", outcome))
+	v, ok := sumOf(body, "coddy_llm_attempts_total", lbl("provider", provider, "model", model, "outcome", outcome))
+	if !ok {
+		t.Fatalf("no coddy_llm_attempts_total for %s/%s/%s in the scrape:\n%s", provider, model, outcome, body)
+	}
+	return v
 }
 
 // A model renamed or removed after the event keeps the label it was counted
@@ -399,7 +427,7 @@ func TestTheLabelBudgetHoldsUnderConfigChurn(t *testing.T) {
 	if len(pairs) > 64 {
 		t.Errorf("%d named model pairs, the budget is 64", len(pairs))
 	}
-	if limit := (64 + 17) * 9; series > limit {
+	if limit := (64 + 17) * 9 * 2; series > limit {
 		t.Errorf("%d attempt series, the bound is %d", series, limit)
 	}
 	if got := attemptsOf(t, body, "keep", "m-0", "ok"); got != 1 {
@@ -625,38 +653,41 @@ func families(t testing.TB, body string) map[string]*exposedFamily {
 // one HELP for each family and one TYPE for each of the catalogue's.
 func TestTheFamiliesAreTheCatalogue(t *testing.T) {
 	l := newLive(configWith(map[string][]string{"stub": {"echo"}}))
-	l.setStatus(serve.Snapshot{
-		Subsystems: []serve.SubsystemStatus{{Kind: "httpserver", State: serve.StateRunning}},
-		Tasks:      map[string]map[string]int{},
-		Disk:       &serve.Disk{AvailableBytes: 1, SizeBytes: 2},
-	})
+	l.setStatus(fullSnapshot())
 	c := newCollector(t, l)
 	attempt("stub", "echo", answered(1, 1, 1), nil)
 	c.observeTool(agent.ToolCallEvent{Tool: "read", Outcome: agent.ToolOutcomeOK, Duration: time.Second})
+	c.observeCall(llm.CallEvent{Provider: "stub", Model: "echo", Outcome: "ok", FirstContent: time.Second})
 
 	catalogue := map[string]struct {
 		kind, labels string
 		help         []string
 	}{
-		"coddy_build_info":                    {"gauge", "goarch,goos,goversion,revision,tags,version", nil},
-		"coddy_subsystem_up":                  {"gauge", "subsystem", nil},
-		"coddy_restart_required":              {"gauge", "", nil},
-		"coddy_turns_running":                 {"gauge", "", []string{"independently"}},
-		"coddy_turn_oldest_running_seconds":   {"gauge", "", []string{"not prove"}},
-		"coddy_background_tasks":              {"gauge", "kind,status", nil},
-		"coddy_sessions_disk_available_bytes": {"gauge", "", []string{"non-root"}},
-		"coddy_sessions_disk_size_bytes":      {"gauge", "", []string{"session store"}},
-		"coddy_llm_attempts_total":            {"counter", "model,outcome,provider", []string{"Provider invocation attempts, retries included; some fail before a request is sent."}},
-		"coddy_llm_attempt_duration_seconds":  {"histogram", "provider", nil},
-		"coddy_llm_input_tokens_total":        {"counter", "model,provider", nil},
-		"coddy_llm_cached_input_tokens_total": {"counter", "model,provider", []string{"a subset of the input tokens"}},
-		"coddy_llm_output_tokens_total":       {"counter", "model,provider", nil},
-		"coddy_turns_started_total":           {"counter", "", []string{"independently"}},
-		"coddy_turns_ended_total":             {"counter", "", []string{"independently"}},
-		"coddy_turn_duration_seconds":         {"histogram", "", nil},
-		"coddy_tool_calls_total":              {"counter", "outcome,tool", []string{"mcp for any tool of an MCP server"}},
-		"coddy_tool_call_duration_seconds":    {"histogram", "tool", nil},
-		"coddy_config_reloads_total":          {"counter", "", nil},
+		"coddy_build_info":                             {"gauge", "goarch,goos,goversion,revision,tags,version", nil},
+		"coddy_subsystem_up":                           {"gauge", "subsystem", nil},
+		"coddy_restart_required":                       {"gauge", "", nil},
+		"coddy_turns_running":                          {"gauge", "", []string{"independently"}},
+		"coddy_turn_oldest_running_seconds":            {"gauge", "", []string{"not prove"}},
+		"coddy_background_tasks":                       {"gauge", "kind,status", nil},
+		"coddy_sessions_disk_available_bytes":          {"gauge", "", []string{"non-root"}},
+		"coddy_sessions_disk_size_bytes":               {"gauge", "", []string{"session store"}},
+		"coddy_llm_attempts_total":                     {"counter", "attempt,model,outcome,provider", []string{"Provider invocation attempts, retries included; some fail before a request is sent."}},
+		"coddy_llm_time_to_first_token_seconds":        {"histogram", "provider", []string{"first chunk"}},
+		"coddy_llm_attempt_duration_seconds":           {"histogram", "provider", nil},
+		"coddy_llm_input_tokens_total":                 {"counter", "model,provider", nil},
+		"coddy_llm_cached_input_tokens_total":          {"counter", "model,provider", []string{"a subset of the input tokens"}},
+		"coddy_llm_output_tokens_total":                {"counter", "model,provider", nil},
+		"coddy_turns_started_total":                    {"counter", "", []string{"independently"}},
+		"coddy_turns_ended_total":                      {"counter", "", []string{"independently"}},
+		"coddy_turn_duration_seconds":                  {"histogram", "", nil},
+		"coddy_tool_calls_total":                       {"counter", "outcome,tool", []string{"mcp for any tool of an MCP server"}},
+		"coddy_tool_call_duration_seconds":             {"histogram", "tool", nil},
+		"coddy_prompts_pending":                        {"gauge", "kind", []string{"wait for a person"}},
+		"coddy_provider_quota_used_ratio":              {"gauge", "provider,window", []string{"cache"}},
+		"coddy_provider_quota_reset_timestamp_seconds": {"gauge", "provider,window", nil},
+		"coddy_swarm_joins":                            {"gauge", "relay,state,transport", nil},
+		"coddy_swarm_nodes":                            {"gauge", "kind,state,transport", nil},
+		"coddy_config_reloads_total":                   {"counter", "", nil},
 	}
 	got := families(t, scrape(t, c))
 	for name, f := range got {
@@ -762,8 +793,8 @@ func TestLabelValuesWithQuotesAndBackslashesAreEscaped(t *testing.T) {
 	body := scrape(t, c)
 	const escaped = `provider="we\"ird\\prov",model="m\"o\\del"`
 	for _, line := range []string{
-		`coddy_llm_attempts_total{` + escaped + `,outcome="ok"} 1`,
-		`coddy_llm_attempts_total{` + escaped + `,outcome="timeout"} 0`,
+		`coddy_llm_attempts_total{` + escaped + `,outcome="ok",attempt="first"} 1`,
+		`coddy_llm_attempts_total{` + escaped + `,outcome="timeout",attempt="retry"} 0`,
 		`coddy_llm_input_tokens_total{` + escaped + `} 5`,
 		`coddy_llm_attempt_duration_seconds_count{provider="we\"ird\\prov"} 1`,
 	} {
@@ -1322,14 +1353,11 @@ func TestAReloadThatOpensTheExporterWarnsOnce(t *testing.T) {
 // depend on the platform and are checked where the library reads them all.
 func TestTheDashboardAndTheRulesReadOnlyExportedSeries(t *testing.T) {
 	l := newLive(configWith(map[string][]string{"stub": {"echo"}}))
-	l.setStatus(serve.Snapshot{
-		Subsystems: []serve.SubsystemStatus{{Kind: serve.KindHTTP, State: serve.StateRunning}},
-		Tasks:      map[string]map[string]int{},
-		Disk:       &serve.Disk{AvailableBytes: 1, SizeBytes: 2},
-	})
+	l.setStatus(fullSnapshot())
 	c := newCollector(t, l)
 	attempt("stub", "echo", answered(1, 1, 1), nil)
 	c.observeTool(agent.ToolCallEvent{Tool: "read", Outcome: agent.ToolOutcomeOK, Duration: time.Second})
+	c.observeCall(llm.CallEvent{Provider: "stub", Model: "echo", Outcome: "ok", FirstContent: time.Second})
 	exported := map[string]bool{"up": true}
 	for _, s := range parseSamples(scrape(t, c)) {
 		exported[s.name] = true
@@ -1354,5 +1382,150 @@ func TestTheDashboardAndTheRulesReadOnlyExportedSeries(t *testing.T) {
 		if len(seen) == 0 {
 			t.Errorf("%s names no series at all", file)
 		}
+	}
+}
+
+// An attempt is counted as the first of its call or as a retry, and both are
+// seeded at zero for every outcome, so a retry rate has a sample to start
+// from.
+func TestAttemptsAreSplitIntoFirstAndRetry(t *testing.T) {
+	c := newCollector(t, newLive(configWith(map[string][]string{"stub": {"echo"}})))
+	body := scrape(t, c)
+	for _, attempt := range []string{"first", "retry"} {
+		for _, outcome := range llm.CallOutcomes() {
+			if got, ok := find(body, "coddy_llm_attempts_total", lbl("provider", "stub", "model", "echo", "outcome", outcome, "attempt", attempt)); !ok || got != 0 {
+				t.Errorf("seed stub/echo/%s/%s = %v (present %v), want 0", outcome, attempt, got, ok)
+			}
+		}
+	}
+	c.observeCall(llm.CallEvent{Provider: "stub", Model: "echo", Outcome: "server_error"})
+	c.observeCall(llm.CallEvent{Provider: "stub", Model: "echo", Outcome: "ok", Retry: true})
+	body = scrape(t, c)
+	if got := total(body, "coddy_llm_attempts_total", lbl("provider", "stub", "model", "echo", "outcome", "server_error", "attempt", "first")); got != 1 {
+		t.Errorf("first attempts that failed = %v, want 1", got)
+	}
+	if got := total(body, "coddy_llm_attempts_total", lbl("provider", "stub", "model", "echo", "outcome", "ok", "attempt", "retry")); got != 1 {
+		t.Errorf("retries that succeeded = %v, want 1", got)
+	}
+}
+
+// The time to the first token is observed for an attempt that streamed
+// content, under its provider, and the histogram is there, empty, for every
+// admitted provider from the start.
+func TestTheTimeToFirstTokenIsObservedForStreamedAttempts(t *testing.T) {
+	c := newCollector(t, newLive(configWith(map[string][]string{"stub": {"echo"}})))
+	body := scrape(t, c)
+	if got, ok := find(body, "coddy_llm_time_to_first_token_seconds_count", lbl("provider", "stub")); !ok || got != 0 {
+		t.Fatalf("the first token histogram of stub is not seeded empty: %v (present %v)", got, ok)
+	}
+	c.observeCall(llm.CallEvent{Provider: "stub", Model: "echo", Outcome: "ok", FirstContent: 1500 * time.Millisecond})
+	c.observeCall(llm.CallEvent{Provider: "stub", Model: "echo", Outcome: "ok"})
+	body = scrape(t, c)
+	if got := total(body, "coddy_llm_time_to_first_token_seconds_count", lbl("provider", "stub")); got != 1 {
+		t.Errorf("first tokens observed = %v, want 1", got)
+	}
+	if got := total(body, "coddy_llm_time_to_first_token_seconds_sum", lbl("provider", "stub")); got != 1.5 {
+		t.Errorf("first token sum = %v, want 1.5", got)
+	}
+}
+
+// The prompts that wait for a person are one gauge by kind, both kinds always
+// present.
+func TestPendingPromptsAreAGaugeByKind(t *testing.T) {
+	l := newLive(configWith(nil))
+	l.setStatus(serve.Snapshot{PermissionPrompts: 2})
+	body := scrape(t, newCollector(t, l))
+	if got := total(body, "coddy_prompts_pending", lbl("kind", "permission")); got != 2 {
+		t.Errorf("permission prompts = %v, want 2", got)
+	}
+	if got, ok := find(body, "coddy_prompts_pending", lbl("kind", "question")); !ok || got != 0 {
+		t.Errorf("questions = %v (present %v), want 0", got, ok)
+	}
+}
+
+// A provider's quota windows are exported by provider and window, the reset
+// as a timestamp when the provider names one. Only an admitted provider and a
+// window from the closed set of the usage readers reach a label.
+func TestProviderQuotasAreExportedForAdmittedProvidersAndKnownWindows(t *testing.T) {
+	l := newLive(configWith(map[string][]string{"hub": {"m"}}))
+	resets := time.Date(2026, 10, 15, 18, 0, 0, 0, time.UTC)
+	l.setStatus(serve.Snapshot{ProviderQuotas: []serve.ProviderQuota{
+		{Provider: "hub", Window: "session", UsedRatio: 0.25, ResetsAt: resets},
+		{Provider: "hub", Window: "window-86400-secondary", UsedRatio: 0.5},
+		{Provider: "hub", Window: "codex:1:some extra limit", UsedRatio: 0.9},
+		{Provider: "ghost", Window: "week", UsedRatio: 1},
+	}})
+	body := scrape(t, newCollector(t, l))
+	if got := total(body, "coddy_provider_quota_used_ratio", lbl("provider", "hub", "window", "session")); got != 0.25 {
+		t.Errorf("session used = %v, want 0.25", got)
+	}
+	if got := total(body, "coddy_provider_quota_used_ratio", lbl("provider", "hub", "window", "window-86400-secondary")); got != 0.5 {
+		t.Errorf("long window used = %v, want 0.5", got)
+	}
+	if got := total(body, "coddy_provider_quota_reset_timestamp_seconds", lbl("provider", "hub", "window", "session")); got != float64(resets.Unix()) {
+		t.Errorf("session reset = %v, want %d", got, resets.Unix())
+	}
+	if _, ok := find(body, "coddy_provider_quota_reset_timestamp_seconds", lbl("window", "window-86400-secondary")); ok {
+		t.Error("a window without a reset moment has a reset timestamp")
+	}
+	for _, s := range parseSamples(body) {
+		if strings.HasPrefix(s.name, "coddy_provider_quota") && (s.labels["provider"] == "ghost" || strings.Contains(s.labels["window"], "extra")) {
+			t.Errorf("a name outside the budget or the closed set of windows reached a label: %+v", s)
+		}
+	}
+}
+
+// The registrations into parent relays are counted by relay, transport and
+// state, both states written for every pair; a relay's nodes by kind,
+// transport and state, and only in a process that runs a relay.
+func TestTheSwarmStateIsCountedByClosedLabels(t *testing.T) {
+	l := newLive(configWith(nil))
+	l.setStatus(serve.Snapshot{SwarmJoins: []swarm.JoinStatus{
+		{Relay: "relay.example:8443", Kind: swarm.KindAgent, Transport: swarm.TransportDirect, Online: true},
+		{Relay: "relay.example:8443", Kind: swarm.KindAgent, Transport: swarm.TransportDirect, Online: false},
+		{Relay: "10.0.0.2:12346", Kind: swarm.KindRelay, Transport: swarm.TransportTunnel, Online: false},
+	}})
+	c := newCollector(t, l)
+	body := scrape(t, c)
+	for _, tc := range []struct {
+		relay, transport, state string
+		want                    float64
+	}{
+		{"relay.example:8443", "direct", "online", 1},
+		{"relay.example:8443", "direct", "offline", 1},
+		{"10.0.0.2:12346", "tunnel", "online", 0},
+		{"10.0.0.2:12346", "tunnel", "offline", 1},
+	} {
+		if got, ok := find(body, "coddy_swarm_joins", lbl("relay", tc.relay, "transport", tc.transport, "state", tc.state)); !ok || got != tc.want {
+			t.Errorf("joins %s/%s/%s = %v (present %v), want %v", tc.relay, tc.transport, tc.state, got, ok, tc.want)
+		}
+	}
+	if strings.Contains(body, "coddy_swarm_nodes") {
+		t.Error("a process that runs no relay exports relay nodes")
+	}
+
+	l.setStatus(serve.Snapshot{RelayNodes: []serve.RelayNodeCount{
+		{Kind: "agent", Transport: "tunnel", State: "online", Count: 3},
+		{Kind: "relay", Transport: "direct", State: "offline", Count: 0},
+	}})
+	body = scrape(t, c)
+	if got := total(body, "coddy_swarm_nodes", lbl("kind", "agent", "transport", "tunnel", "state", "online")); got != 3 {
+		t.Errorf("online tunnel agents = %v, want 3", got)
+	}
+	if got, ok := find(body, "coddy_swarm_nodes", lbl("kind", "relay", "transport", "direct", "state", "offline")); !ok || got != 0 {
+		t.Errorf("offline direct relays = %v (present %v), want 0", got, ok)
+	}
+}
+
+// fullSnapshot is a snapshot with every part present, for the tests that need
+// every family in the scrape.
+func fullSnapshot() serve.Snapshot {
+	return serve.Snapshot{
+		Subsystems:     []serve.SubsystemStatus{{Kind: serve.KindHTTP, State: serve.StateRunning}},
+		Tasks:          map[string]map[string]int{},
+		Disk:           &serve.Disk{AvailableBytes: 1, SizeBytes: 2},
+		ProviderQuotas: []serve.ProviderQuota{{Provider: "stub", Window: "session", UsedRatio: 0.5, ResetsAt: time.Unix(1_800_000_000, 0)}},
+		SwarmJoins:     []swarm.JoinStatus{{Relay: "relay.example:8443", Kind: swarm.KindAgent, Transport: swarm.TransportDirect, Online: true}},
+		RelayNodes:     []serve.RelayNodeCount{{Kind: swarm.KindAgent, Transport: swarm.TransportDirect, State: serve.NodeOnline, Count: 1}},
 	}
 }
