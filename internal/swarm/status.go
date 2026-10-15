@@ -52,12 +52,32 @@ func Joins() []JoinStatus {
 	var out []JoinStatus
 	for _, s := range sets {
 		for _, c := range s.Clients() {
+			// An agent registration that leaves its name to the relay of the
+			// same process is not a registration of its own.
+			if c.Yielding() {
+				continue
+			}
 			out = append(out, JoinStatus{
 				Relay: relayHost(c.opts.RelayURL), Kind: c.opts.Kind, Transport: c.Transport(), Online: c.Online(),
 			})
 		}
 	}
 	return out
+}
+
+// relayRegisters reports whether a running relay join set of this process
+// registers name into relayURL.
+func relayRegisters(relayURL, name string) bool {
+	statusMu.Lock()
+	defer statusMu.Unlock()
+	for s := range joinSets {
+		for _, c := range s.clients {
+			if c.opts.Kind == KindRelay && c.opts.RelayURL == relayURL && c.opts.Name == name {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // relayHost is the host[:port] of a relay URL, without the user information
