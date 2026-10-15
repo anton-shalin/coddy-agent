@@ -162,9 +162,18 @@ step "coddy update sends a cask install back to brew"
 status=0
 update_out=$("$bin" update --yes --version "$version" 2>&1) || status=$?
 printf '%s\n' "$update_out"
-[ "$status" -ne 0 ] || fail "coddy update replaced a file Homebrew owns instead of pointing at brew"
-grep -qF "brew upgrade --cask coddy" <<< "$update_out" ||
-    fail "coddy update does not name 'brew upgrade --cask coddy'"
+# coddy update asks the GitHub API for the release before it looks at the file,
+# without a token. A shared CI address runs out of anonymous calls now and then;
+# that says nothing about the cask, and features/update_packages.feature holds
+# the hint itself, so the step is reported as skipped rather than failed.
+if grep -q 'rate limit exceeded' <<< "$update_out"; then
+    msg="skipped: the GitHub API refused this address its anonymous rate limit"
+    if [ -n "${GITHUB_ACTIONS:-}" ]; then echo "::warning::coddy update ${msg}"; else echo "$msg"; fi
+else
+    [ "$status" -ne 0 ] || fail "coddy update replaced a file Homebrew owns instead of pointing at brew"
+    grep -qF "brew upgrade --cask coddy" <<< "$update_out" ||
+        fail "coddy update does not name 'brew upgrade --cask coddy'"
+fi
 
 step "brew upgrade --cask coddy"
 brew upgrade --cask coddy
