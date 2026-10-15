@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"net"
 	"strconv"
 	"strings"
@@ -51,6 +52,16 @@ func (m *MetricsConfig) ExposedWithoutToken() bool {
 	}
 	host, _, err := net.SplitHostPort(m.ListenAddr())
 	return err != nil || !isLoopbackHostname(host)
+}
+
+// Validate refuses a port outside the range of a TCP port, as
+// httpserver.port and swarm.port are refused: the fallback to 12347 is for
+// zero, not for a value nobody can bind.
+func (m *MetricsConfig) Validate() error {
+	if m != nil && (m.Port < 0 || m.Port > 65535) {
+		return fmt.Errorf("metrics.port %d is out of range", m.Port)
+	}
+	return nil
 }
 
 // Normalize trims the string fields that later comparisons depend on.

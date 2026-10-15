@@ -11,8 +11,6 @@ type noExporter struct{}
 
 func newMetricsWiring(*serve.Runtime) metricsWiring { return noExporter{} }
 
-func (noExporter) Subsystem(subsystemDeps) serve.Subsystem { return metricsDescriptor() }
+func (noExporter) Subsystem() serve.Subsystem { return metricsDescriptor() }
 
 func (noExporter) Start() (stop func()) { return func() {} }
-
-func (noExporter) Built() bool { return false }

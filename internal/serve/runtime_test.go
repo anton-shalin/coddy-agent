@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"runtime"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,7 +16,6 @@ import (
 	"github.com/EvilFreelancer/coddy-agent/internal/bgtask"
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
 	"github.com/EvilFreelancer/coddy-agent/internal/session"
-	"github.com/EvilFreelancer/coddy-agent/internal/status"
 	"github.com/EvilFreelancer/coddy-agent/internal/version"
 )
 
@@ -284,15 +282,15 @@ func launched(t *testing.T, s *serveFeatureState) {
 	}
 }
 
-func statusRow(t *testing.T, rows []status.Subsystem, kind Kind) status.Subsystem {
+func statusRow(t *testing.T, rows []SubsystemStatus, kind Kind) SubsystemStatus {
 	t.Helper()
 	for _, row := range rows {
-		if row.Kind == string(kind) {
+		if row.Kind == kind {
 			return row
 		}
 	}
 	t.Fatalf("no row for %s in %+v", kind, rows)
-	return status.Subsystem{}
+	return SubsystemStatus{}
 }
 
 // A listener's new address is pending as soon as the configuration says so:
@@ -316,27 +314,24 @@ func TestSupervisorStatusPendingBeforeApply(t *testing.T) {
 
 			moved := *s.cfg
 			moved.HTTPServer.Port = 23456
-			rows, required, refused := s.sup.Status(&moved)
-			row := statusRow(t, rows, KindHTTP)
-			if row.State != status.StateRunning || row.Address != "12345" || row.PendingAddress != "23456" {
-				t.Errorf("http row = %+v, want running on 12345 with 23456 pending", row)
+			rows, required := s.sup.Status(&moved)
+			if row := statusRow(t, rows, KindHTTP); row.State != StateRunning {
+				t.Errorf("http row = %+v, want running until the restart", row)
 			}
-			if required != tc.wantRequired || refused != "" {
-				t.Errorf("restartRequired = %v, refused = %q; want %v and none", required, refused, tc.wantRequired)
+			if required != tc.wantRequired {
+				t.Errorf("restartRequired = %v, want %v", required, tc.wantRequired)
 			}
 
-			rows, required, _ = s.sup.Status(s.cfg)
-			if row := statusRow(t, rows, KindHTTP); row.PendingAddress != "" || required {
-				t.Errorf("moving the address back left %+v, restartRequired = %v", row, required)
+			if _, required = s.sup.Status(s.cfg); required {
+				t.Errorf("moving the address back left restartRequired = %v", required)
 			}
 		})
 	}
 }
 
 // A dispatcher restarts the process only into a configuration its pre-flight
-// accepts. When it would not, the change waits for a manual restart that would
-// fail the same way, and the read says why.
-func TestSupervisorStatusRestartRefused(t *testing.T) {
+// accepts. When it would not, the change waits for a manual restart.
+func TestSupervisorStatusRestartIntoARefusedConfiguration(t *testing.T) {
 	s := &serveFeatureState{}
 	s.reset()
 	s.subs = s.describe(false) // no gateway in this build
@@ -346,22 +341,44 @@ func TestSupervisorStatusRestartRefused(t *testing.T) {
 	unrunnable := *s.cfg
 	unrunnable.Gateways.Telegram.Enabled = true
 	unrunnable.HTTPServer.Port = 23456
-	_, required, refused := s.sup.Status(&unrunnable)
-	if !required || !strings.Contains(refused, "gateways.telegram.enable") || !strings.Contains(refused, "-tags gateway") {
-		t.Errorf("restartRequired = %v, refused = %q; want the pre-flight's refusal naming the key and the tag", required, refused)
+	if _, required := s.sup.Status(&unrunnable); !required {
+		t.Error("a dispatcher that would not restart into the configuration still reads as restarting by itself")
 	}
 
 	// With no address to move there is nothing to restart for, runnable or not.
 	unrunnable.HTTPServer.Port = 0
-	if _, required, refused := s.sup.Status(&unrunnable); required || refused != "" {
-		t.Errorf("without a pending address: restartRequired = %v, refused = %q", required, refused)
+	if _, required := s.sup.Status(&unrunnable); required {
+		t.Error("without a pending address a restart is required")
 	}
 
 	// Without a dispatcher the change just waits, whatever the pre-flight says.
 	s.sup.Restartable = false
 	unrunnable.HTTPServer.Port = 23456
-	if _, required, refused := s.sup.Status(&unrunnable); !required || refused != "" {
-		t.Errorf("foreground: restartRequired = %v, refused = %q; want a manual restart and no refusal", required, refused)
+	if _, required := s.sup.Status(&unrunnable); !required {
+		t.Error("foreground: no manual restart is required")
+	}
+}
+
+// A process started without a session store cannot start a surface that runs
+// turns in place (applyConfig refuses it the same way): the saved change waits
+// for a restart, like a moved listener.
+func TestSupervisorStatusSessionlessProcessNeedsRestartForASessionSurface(t *testing.T) {
+	s := &serveFeatureState{}
+	s.reset()
+	s.restartable = false
+	launched(t, s)
+	s.sup.mu.Lock()
+	s.sup.Sessionless = true
+	s.sup.mu.Unlock()
+
+	next := *s.cfg
+	next.Scheduler.Enabled = true
+	rows, required := s.sup.Status(&next)
+	if !required {
+		t.Errorf("a session surface a sessionless process cannot start reads restartRequired = false (rows %+v)", rows)
+	}
+	if _, required := s.sup.Status(s.cfg); required {
+		t.Error("the configuration the process runs on requires a restart")
 	}
 }
 
@@ -373,13 +390,13 @@ func TestSupervisorStatusStartingBeforeLaunch(t *testing.T) {
 	s.reset()
 	s.cfg.Gateways.Telegram.Enabled = true
 	idle := NewSupervisor(nil, s.subs)
-	rows, required, _ := idle.Status(s.cfg)
+	rows, required := idle.Status(s.cfg)
 	if len(rows) != 2 || required {
 		t.Fatalf("an unstarted supervisor reads %+v, restartRequired = %v; want the two enabled surfaces", rows, required)
 	}
 	for i, kind := range []Kind{KindHTTP, KindGateway} {
-		if rows[i].Kind != string(kind) || rows[i].State != status.StateStarting || rows[i].Address != "" {
-			t.Errorf("row %d = %+v, want %s starting with no address, in declaration order", i, rows[i], kind)
+		if rows[i].Kind != kind || rows[i].State != StateStarting {
+			t.Errorf("row %d = %+v, want %s starting, in declaration order", i, rows[i], kind)
 		}
 	}
 
@@ -387,22 +404,22 @@ func TestSupervisorStatusStartingBeforeLaunch(t *testing.T) {
 	launched(t, s)
 	wider := *s.cfg
 	wider.Scheduler.Enabled = true
-	rows, _, _ = s.sup.Status(&wider)
-	if got := statusRow(t, rows, KindScheduler).State; got != status.StateStarting {
+	rows, _ = s.sup.Status(&wider)
+	if got := statusRow(t, rows, KindScheduler).State; got != StateStarting {
 		t.Errorf("a surface the configuration enabled, before the supervisor saw it: %q, want starting", got)
 	}
 	s.reloads <- &wider
 	if err := s.settle(&wider); err != nil {
 		t.Fatal(err)
 	}
-	rows, _, _ = s.sup.Status(&wider)
-	if got := statusRow(t, rows, KindScheduler).State; got != status.StateRunning {
+	rows, _ = s.sup.Status(&wider)
+	if got := statusRow(t, rows, KindScheduler).State; got != StateRunning {
 		t.Errorf("after the supervisor applied it: %q, want running", got)
 	}
 }
 
 // An enabled surface the supervisor applied and did not start (this binary
-// has no support for it) is stopped, and it has no address.
+// has no support for it) is stopped.
 func TestSupervisorStatusStoppedWhenAppliedButNotRunning(t *testing.T) {
 	s := &serveFeatureState{}
 	s.reset()
@@ -415,12 +432,12 @@ func TestSupervisorStatusStoppedWhenAppliedButNotRunning(t *testing.T) {
 	if err := s.settle(&next); err != nil {
 		t.Fatal(err)
 	}
-	rows, required, refused := s.sup.Status(&next)
-	if row := statusRow(t, rows, KindGateway); row.State != status.StateStopped || row.Address != "" {
-		t.Errorf("gateway row = %+v, want stopped with no address", row)
+	rows, required := s.sup.Status(&next)
+	if row := statusRow(t, rows, KindGateway); row.State != StateStopped {
+		t.Errorf("gateway row = %+v, want stopped", row)
 	}
-	if required || refused != "" {
-		t.Errorf("restartRequired = %v, refused = %q; want neither", required, refused)
+	if required {
+		t.Error("restartRequired for a surface this binary cannot run")
 	}
 }
 
@@ -437,13 +454,12 @@ func TestSupervisorStatusDisabledListenerHasNoPending(t *testing.T) {
 	disabled := *s.cfg
 	disabled.HTTPServer.Enabled = &off
 	disabled.HTTPServer.Port = 23456
-	rows, required, refused := s.sup.Status(&disabled)
-	row := statusRow(t, rows, KindHTTP)
-	if row.State != status.StateRetained || row.Address != "12345" || row.PendingAddress != "" {
-		t.Errorf("http row = %+v, want retained on 12345 with nothing pending", row)
+	rows, required := s.sup.Status(&disabled)
+	if row := statusRow(t, rows, KindHTTP); row.State != StateRetained {
+		t.Errorf("http row = %+v, want retained", row)
 	}
-	if required || refused != "" {
-		t.Errorf("restartRequired = %v, refused = %q; want neither", required, refused)
+	if required {
+		t.Error("restartRequired for a listener that may simply stop")
 	}
 }
 
@@ -475,13 +491,13 @@ func TestSupervisorAnAuxiliaryFailureStopsOnlyItself(t *testing.T) {
 		t.Fatalf("the process ended with the exporter: %v", err)
 	}
 	if err := waitFor(func() bool {
-		rows, _, _ := s.sup.Status(&taken)
-		return statusRow(t, rows, KindMetrics).State == status.StateStopped
+		rows, _ := s.sup.Status(&taken)
+		return statusRow(t, rows, KindMetrics).State == StateStopped
 	}); err != nil {
 		t.Fatalf("the failed exporter never read as stopped: %v", err)
 	}
-	rows, _, _ := s.sup.Status(&taken)
-	if got := statusRow(t, rows, KindHTTP).State; got != status.StateRunning {
+	rows, _ := s.sup.Status(&taken)
+	if got := statusRow(t, rows, KindHTTP).State; got != StateRunning {
 		t.Errorf("http after the exporter failed: %q, want running", got)
 	}
 
@@ -491,8 +507,8 @@ func TestSupervisorAnAuxiliaryFailureStopsOnlyItself(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := waitFor(func() bool {
-		rows, _, _ := s.sup.Status(&free)
-		return statusRow(t, rows, KindMetrics).State == status.StateRunning
+		rows, _ := s.sup.Status(&free)
+		return statusRow(t, rows, KindMetrics).State == StateRunning
 	}); err != nil {
 		t.Errorf("the exporter on a free port never ran again: %v", err)
 	}
@@ -522,7 +538,7 @@ func TestRuntimeStatusSnapshot(t *testing.T) {
 			snap.Build.GOOS != runtime.GOOS || snap.Build.GOARCH != runtime.GOARCH {
 			t.Errorf("build = %+v", snap.Build)
 		}
-		if snap.Subsystems != nil || snap.RestartRequired || snap.RestartRefused != "" ||
+		if snap.Subsystems != nil || snap.RestartRequired ||
 			snap.TurnsRunning != 0 || !snap.OldestTurnStartedAt.IsZero() || snap.Disk != nil {
 			t.Errorf("nothing is attached, yet the snapshot says %+v", snap)
 		}
@@ -557,15 +573,15 @@ func TestRuntimeStatusSnapshot(t *testing.T) {
 		unrunnable.HTTPServer.Port = 23456
 		rt.ReplaceConfig(&unrunnable)
 		snap := rt.Status()
-		want := []status.Subsystem{
-			{Kind: string(KindHTTP), State: status.StateRunning, Address: "12345", PendingAddress: "23456"},
-			{Kind: string(KindGateway), State: status.StateStarting},
+		want := []SubsystemStatus{
+			{Kind: KindHTTP, State: StateRunning},
+			{Kind: KindGateway, State: StateStarting},
 		}
 		if !reflect.DeepEqual(snap.Subsystems, want) {
 			t.Errorf("subsystems = %+v, want %+v", snap.Subsystems, want)
 		}
-		if !snap.RestartRequired || !strings.Contains(snap.RestartRefused, "gateways.telegram.enable") {
-			t.Errorf("restartRequired = %v, refused = %q", snap.RestartRequired, snap.RestartRefused)
+		if !snap.RestartRequired {
+			t.Error("a moved address the dispatcher would not restart into reads restartRequired = false")
 		}
 	})
 
@@ -595,10 +611,10 @@ func TestRuntimeStatusDisk(t *testing.T) {
 		name  string
 		store bool
 		free  func(string) (uint64, uint64, error)
-		want  *status.Disk
+		want  *Disk
 	}{
 		{"low", true, func(string) (uint64, uint64, error) { return 400 << 20, 1 << 30, nil },
-			&status.Disk{AvailableBytes: 400 << 20, SizeBytes: 1 << 30}},
+			&Disk{AvailableBytes: 400 << 20, SizeBytes: 1 << 30}},
 		{"unreadable", true, func(string) (uint64, uint64, error) { return 0, 0, errors.New("permission denied") }, nil},
 		{"no store", false, func(string) (uint64, uint64, error) { panic("read the disk of no store") }, nil},
 	} {

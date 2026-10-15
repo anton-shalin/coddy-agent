@@ -6,8 +6,12 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+	"time"
 
 	vm "github.com/VictoriaMetrics/metrics"
+
+	"github.com/EvilFreelancer/coddy-agent/internal/bgtask"
+	"github.com/EvilFreelancer/coddy-agent/internal/serve"
 )
 
 // The text format escapes a label value and a help text each with a set of
@@ -62,10 +66,11 @@ func (f family) writeRows(b, rows *bytes.Buffer) {
 }
 
 // instruments is a family whose samples the library keeps, in a set of its
-// own. The library writes no help or type but an empty "# HELP name", and a
-// set holding one family is what lets the header go in front of exactly its
-// samples. None of the sets is shared with the library's package-level one, so
-// nothing else in the process writes into a scrape.
+// own. A set writes its samples sorted by name and nothing else (its HELP and
+// TYPE lines only after a process-wide vm.ExposeMetadata, which writeTo drops),
+// so a set holding one family is what lets the header go in front of exactly
+// its samples. None of the sets is shared with the library's package-level
+// one, so nothing else in the process writes into a scrape.
 type instruments struct {
 	family
 	set *vm.Set
@@ -87,8 +92,13 @@ func (i *instruments) histogram(bounds []float64, kv ...string) *vm.PrometheusHi
 }
 
 func (i *instruments) writeTo(b *bytes.Buffer) {
-	var rows bytes.Buffer
-	i.set.WritePrometheus(&rows)
+	var raw, rows bytes.Buffer
+	i.set.WritePrometheus(&raw)
+	for line := range strings.Lines(raw.String()) {
+		if !strings.HasPrefix(line, "#") {
+			rows.WriteString(line)
+		}
+	}
 	i.writeRows(b, &rows)
 }
 
@@ -102,8 +112,10 @@ func writeLibrary(b *bytes.Buffer) {
 	annotate(b, raw.String())
 }
 
-// annotate copies the library's exposition, with one HELP line in front of
-// the first sample of each name. There is no TYPE line on purpose: the
+// annotate copies the samples of the library's exposition, with one HELP line
+// in front of the first sample of each name; whatever metadata the library
+// wrote is dropped, so a name is never announced twice. There is no TYPE line
+// on purpose: the
 // library's own types (a counter named go_cgo_calls_count, a gauge named
 // process_io_read_bytes_total) would trip a linter that checks names against
 // types, and an untyped family is read as a gauge.
@@ -111,18 +123,16 @@ func annotate(b *bytes.Buffer, text string) {
 	seen := map[string]bool{}
 	for line := range strings.Lines(text) {
 		line = strings.TrimSuffix(line, "\n")
-		if line == "" {
+		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		if !strings.HasPrefix(line, "#") {
-			name := line
-			if n := strings.IndexAny(line, "{ "); n >= 0 {
-				name = line[:n]
-			}
-			if !seen[name] {
-				seen[name] = true
-				family{name: name, help: libraryHelp(name)}.writeHeader(b)
-			}
+		name := line
+		if n := strings.IndexAny(line, "{ "); n >= 0 {
+			name = line[:n]
+		}
+		if !seen[name] {
+			seen[name] = true
+			family{name: name, help: libraryHelp(name)}.writeHeader(b)
 		}
 		b.WriteString(line)
 		b.WriteByte('\n')
@@ -137,4 +147,94 @@ func libraryHelp(name string) string {
 		return "Process metric written by github.com/VictoriaMetrics/metrics."
 	}
 	return "Metric written by github.com/VictoriaMetrics/metrics."
+}
+
+func gauge(name, help string) family { return family{name: name, typ: "gauge", help: help} }
+
+var (
+	buildInfo = gauge("coddy_build_info",
+		"Build of the running binary; the value is always 1.")
+	subsystemUp = gauge("coddy_subsystem_up",
+		"1 for a subsystem the process runs or is starting, 0 for one that is enabled and not running; the exporter itself is left out.")
+	restartRequired = gauge("coddy_restart_required",
+		"1 when a saved change only a fresh process can apply (a moved listen address, a surface that needs a session store) waits for a restart that nothing will perform on its own.")
+	turnsRunning = gauge("coddy_turns_running",
+		"Sessions with a turn running in this process. The turn families are read independently, so started minus ended need not equal it.")
+	turnOldest = gauge("coddy_turn_oldest_running_seconds",
+		"Age of the longest-running turn, 0 when none runs. It does not prove a turn is stuck: waits for a permission or a usage limit are legitimate.")
+	backgroundTasks = gauge("coddy_background_tasks",
+		"Background tasks of the model that are queued or running.")
+	diskAvailable = gauge("coddy_sessions_disk_available_bytes",
+		"Free space a non-root writer can use on the disk holding the session store.")
+	diskSize = gauge("coddy_sessions_disk_size_bytes",
+		"Size of the disk holding the session store.")
+)
+
+// The kinds and statuses coddy_background_tasks always lists, so a quiet pool
+// is a row of zeros rather than missing series.
+var (
+	taskKinds    = []bgtask.Kind{bgtask.KindCommand, bgtask.KindAgent, bgtask.KindServer}
+	taskStatuses = []bgtask.Status{bgtask.StatusQueued, bgtask.StatusRunning}
+)
+
+// writeState writes what the process says about itself, from one
+// serve.Snapshot taken for the scrape. It never leaves the process: no
+// provider, bot API or MCP server is asked anything.
+func writeState(b *bytes.Buffer, snap serve.Snapshot) {
+	var rows bytes.Buffer
+	flush := func(f family) {
+		f.writeRows(b, &rows)
+		rows.Reset()
+	}
+
+	bi := snap.Build
+	vm.WriteGaugeUint64(&rows, series(buildInfo.name,
+		"version", bi.Version, "revision", bi.Revision, "goversion", bi.GoVersion,
+		"goos", bi.GOOS, "goarch", bi.GOARCH, "tags", strings.Join(bi.Tags, ",")), 1)
+	flush(buildInfo)
+
+	for _, sub := range snap.Subsystems {
+		if sub.Kind == serve.KindMetrics {
+			continue
+		}
+		up := 1.0
+		if sub.State == serve.StateStopped {
+			up = 0
+		}
+		vm.WriteGaugeFloat64(&rows, series(subsystemUp.name, "subsystem", string(sub.Kind)), up)
+	}
+	flush(subsystemUp)
+
+	vm.WriteGaugeFloat64(&rows, restartRequired.name, boolValue(snap.RestartRequired))
+	flush(restartRequired)
+	vm.WriteGaugeFloat64(&rows, turnsRunning.name, float64(snap.TurnsRunning))
+	flush(turnsRunning)
+	oldest := 0.0
+	if !snap.OldestTurnStartedAt.IsZero() {
+		oldest = max(0, time.Since(snap.OldestTurnStartedAt).Seconds())
+	}
+	vm.WriteGaugeFloat64(&rows, turnOldest.name, oldest)
+	flush(turnOldest)
+
+	for _, kind := range taskKinds {
+		for _, st := range taskStatuses {
+			vm.WriteGaugeFloat64(&rows, series(backgroundTasks.name, "kind", string(kind), "status", string(st)),
+				float64(snap.Tasks[string(kind)][string(st)]))
+		}
+	}
+	flush(backgroundTasks)
+
+	if snap.Disk != nil {
+		vm.WriteGaugeUint64(&rows, diskAvailable.name, snap.Disk.AvailableBytes)
+		flush(diskAvailable)
+		vm.WriteGaugeUint64(&rows, diskSize.name, snap.Disk.SizeBytes)
+		flush(diskSize)
+	}
+}
+
+func boolValue(b bool) float64 {
+	if b {
+		return 1
+	}
+	return 0
 }

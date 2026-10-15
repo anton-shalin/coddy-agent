@@ -40,9 +40,9 @@ func CallOutcomes() []string {
 // request, a message or a response alive, and nothing it does reaches what is
 // sent.
 type CallEvent struct {
-	// Provider, ProviderType and Model are ProviderInput.Name, .Type and
-	// .Model: the configured row and the API model id, with no provider prefix.
-	Provider, ProviderType, Model string
+	// Provider and Model are ProviderInput.Name and .Model: the configured
+	// row and the API model id, with no provider prefix.
+	Provider, Model string
 	// Outcome is CallOutcome of the attempt's error.
 	Outcome string
 	// Duration is the whole attempt, the full stream included.
@@ -111,7 +111,7 @@ func (p *resilientProvider) observeAttempt(began time.Time, resp *Response, err 
 		return
 	}
 	ev := CallEvent{
-		Provider: p.opts.Name, ProviderType: p.opts.Type, Model: p.opts.Model,
+		Provider: p.opts.Name, Model: p.opts.Model,
 		Outcome:  CallOutcome(err),
 		Duration: time.Since(began),
 	}

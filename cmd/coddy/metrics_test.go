@@ -97,12 +97,9 @@ func TestTheMetricsWiringServesTheRuntimeAndRebuildsOnANewAddress(t *testing.T) 
 		t.Fatal(err)
 	}
 	wiring := newMetricsWiring(rt)
-	if !wiring.Built() {
-		t.Fatal("a build with the tag reports the exporter as not built")
-	}
 	stop := wiring.Start()
 	t.Cleanup(stop)
-	sub := wiring.Subsystem(subsystemDeps{})
+	sub := wiring.Subsystem()
 	if !sub.Available {
 		t.Fatal("the exporter is not available in a build with the tag")
 	}

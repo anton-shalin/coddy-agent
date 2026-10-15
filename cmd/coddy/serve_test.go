@@ -190,9 +190,6 @@ func TestServeRunsTheExporterAsAnAuxiliarySubsystem(t *testing.T) {
 	if !sub.Auxiliary || sub.NeedsSessions || sub.RestartKey != nil {
 		t.Fatalf("the exporter is auxiliary, needs no sessions and has no restart key: %+v", sub)
 	}
-	if sub.Available != wiring.Built() {
-		t.Fatalf("Available = %v, Built() = %v", sub.Available, wiring.Built())
-	}
 	c := &config.Config{}
 	if sub.Enabled(c) {
 		t.Fatal("metrics enabled by an empty config")
@@ -210,7 +207,7 @@ func TestServeRunsTheExporterAsAnAuxiliarySubsystem(t *testing.T) {
 	var notBuilt *serve.ErrNotBuilt
 	var nothing *serve.ErrNothingEnabled
 	switch {
-	case wiring.Built():
+	case sub.Available:
 		if !errors.As(err, &nothing) || slices.Contains(nothing.Keys, "metrics.enable") {
 			t.Fatalf("metrics alone: %v, want ErrNothingEnabled that does not suggest metrics.enable", err)
 		}

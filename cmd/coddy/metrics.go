@@ -21,8 +21,6 @@ type exporter struct {
 
 func newMetricsWiring(rt *serve.Runtime) metricsWiring { return &exporter{rt: rt} }
 
-func (e *exporter) Built() bool { return true }
-
 func (e *exporter) Start() (stop func()) {
 	e.collector = metrics.NewCollector(metrics.Source{
 		Status:            e.rt.Status,
@@ -34,7 +32,7 @@ func (e *exporter) Start() (stop func()) {
 	return e.collector.Close
 }
 
-func (e *exporter) Subsystem(subsystemDeps) serve.Subsystem {
+func (e *exporter) Subsystem() serve.Subsystem {
 	sub := metricsDescriptor()
 	sub.Available = true
 	// Only the address rebuilds the listener; the token is read on every request.

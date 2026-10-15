@@ -299,6 +299,26 @@ func TestMetricsDefaults(t *testing.T) {
 	}
 }
 
+// A metrics.port outside the range of a TCP port is refused when the file
+// loads, as httpserver.port and swarm.port are, instead of falling back to the
+// default and binding an address nobody asked for.
+func TestMetricsPortOutOfRangeIsRefused(t *testing.T) {
+	for _, port := range []string{"-1", "65536"} {
+		t.Run(port, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv(config.EnvCODDYHome, home)
+			cfgPath := filepath.Join(home, "config.yaml")
+			if err := os.WriteFile(cfgPath, []byte("metrics:\n  enable: true\n  port: "+port+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv(config.EnvCODDYConfig, cfgPath)
+			if _, err := config.LoadFromCLI(config.CLIPaths{}); err == nil || !strings.Contains(err.Error(), "metrics.port") {
+				t.Fatalf("metrics.port %s loaded: %v, want an error naming metrics.port", port, err)
+			}
+		})
+	}
+}
+
 // An exporter bound anywhere but this machine, with no token, answers whoever
 // can reach the port.
 func TestMetricsExposedWithoutToken(t *testing.T) {

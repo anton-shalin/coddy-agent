@@ -1035,8 +1035,8 @@ func TestCallObserverOneEventPerAttempt(t *testing.T) {
 				var outcomes []string
 				for _, ev := range events {
 					outcomes = append(outcomes, ev.Outcome)
-					if ev.Provider != stand.input.Name || ev.ProviderType != kind || ev.Model != stand.input.Model {
-						t.Errorf("event names %q/%q/%q, want %q/%q/%q", ev.Provider, ev.ProviderType, ev.Model, stand.input.Name, kind, stand.input.Model)
+					if ev.Provider != stand.input.Name || ev.Model != stand.input.Model {
+						t.Errorf("event names %q/%q, want %q/%q", ev.Provider, ev.Model, stand.input.Name, stand.input.Model)
 					}
 				}
 				if !slices.Equal(outcomes, row.want) {
@@ -1064,7 +1064,7 @@ func TestCallObserverOneEventPerAttempt(t *testing.T) {
 		}
 	}
 
-	opts := ResilientOptions{Name: "call-stub", Type: "openai", Model: "m", RetryMax: 2, RetryBase: time.Millisecond}
+	opts := ResilientOptions{Name: "call-stub", Model: "m", RetryMax: 2, RetryBase: time.Millisecond}
 	t.Run("a stream cut by the caller reports what it delivered", func(t *testing.T) {
 		calls := recordCalls(t, opts.Name)
 		partial := &Response{Content: "par", InputTokens: 7, OutputTokens: 2, CachedInputTokens: 1}

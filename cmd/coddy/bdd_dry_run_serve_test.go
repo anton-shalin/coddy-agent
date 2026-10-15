@@ -16,7 +16,7 @@ import (
 
 func TestConfigDryRunServeFeature(t *testing.T) {
 	tags := ""
-	if !newMetricsWiring(nil).Built() {
+	if !newMetricsWiring(nil).Subsystem().Available {
 		tags = "~@metrics"
 	}
 	suite := godog.TestSuite{

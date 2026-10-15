@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
-	"github.com/EvilFreelancer/coddy-agent/internal/status"
 )
 
 // restartDrain bounds how long a surface may take to stop before the supervisor
@@ -290,13 +289,14 @@ func (s *Supervisor) markApplied(cfg *config.Config) {
 // right after a save sees a listener's new address before the supervisor has
 // been handed the configuration, and moving the address back clears it.
 //
-// A listener whose address live moved is pending; it needs a manual restart
-// unless a dispatcher would restart the process by itself, which it does only
-// into a configuration the pre-flight accepts (the check applyConfig makes).
-// When it would not, refused says why, in the pre-flight's own words: keys and
-// build tags, never values. A listener live no longer enables may simply stop,
-// so it has no pending address.
-func (s *Supervisor) Status(live *config.Config) (subs []status.Subsystem, restartRequired bool, refused string) {
+// A change only a fresh process can adopt is pending, as needsFreshProcess
+// decides it: a listener whose address live moved, or a surface that runs
+// turns in a process started without a session store. It needs a manual
+// restart unless a dispatcher would restart the process by itself, which it
+// does only into a configuration the pre-flight accepts (the check applyConfig
+// makes). A listener live no longer enables may simply stop, so it is never
+// pending.
+func (s *Supervisor) Status(live *config.Config) (subs []SubsystemStatus, restartRequired bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	pending := false
@@ -306,36 +306,32 @@ func (s *Supervisor) Status(live *config.Config) (subs []status.Subsystem, resta
 		if inst == nil && !want {
 			continue
 		}
-		row := status.Subsystem{Kind: string(sub.Kind)}
+		row := SubsystemStatus{Kind: sub.Kind}
 		switch {
 		case inst != nil && want:
-			row.State = status.StateRunning
+			row.State = StateRunning
 		case inst != nil:
-			row.State = status.StateRetained
+			row.State = StateRetained
 		case s.applied != live:
-			row.State = status.StateStarting
+			row.State = StateStarting
 		default:
-			row.State = status.StateStopped
+			row.State = StateStopped
 		}
-		if inst != nil {
-			row.Address = inst.restartKey
-			if next := sub.restartKey(live); want && sub.RestartKey != nil && next != inst.restartKey {
-				row.PendingAddress = next
-				pending = true
-			}
+		switch {
+		case inst != nil && want && sub.restartKey(live) != inst.restartKey,
+			inst == nil && want && sub.Available && sub.NeedsSessions && s.Sessionless:
+			pending = true
 		}
 		subs = append(subs, row)
 	}
 	if !pending {
-		return subs, false, ""
+		return subs, false
 	}
 	if !s.Restartable {
-		return subs, true, ""
+		return subs, true
 	}
-	if _, err := Resolve(live, s.subs); err != nil {
-		return subs, true, err.Error()
-	}
-	return subs, false, ""
+	_, err := Resolve(live, s.subs)
+	return subs, err != nil
 }
 
 // needsFreshProcess names a surface cfg asks for that this process cannot

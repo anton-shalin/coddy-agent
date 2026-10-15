@@ -480,15 +480,13 @@ type subsystemDeps struct {
 // file imports nothing of it: metrics.go carries the exporter in a build with
 // the metrics tag, metrics_stub.go the refusal in one without.
 type metricsWiring interface {
-	// Subsystem describes the exporter; Available says whether this build can
-	// run it.
-	Subsystem(deps subsystemDeps) serve.Subsystem
+	// Subsystem describes the exporter; Available says whether this build
+	// carries it, which is also what the settings form of the Metrics section
+	// depends on.
+	Subsystem() serve.Subsystem
 	// Start begins counting, once the runtime is initialised, and returns what
 	// ends it.
 	Start() (stop func())
-	// Built reports whether this binary carries the exporter, which is what
-	// the settings form of the Metrics section depends on.
-	Built() bool
 }
 
 // metricsDescriptor is the exporter's descriptor in every build. A build with
@@ -510,8 +508,9 @@ func metricsDescriptor() serve.Subsystem {
 // that asks for a surface this binary cannot run is refused by name instead of
 // starting a daemon that quietly does less than it was told to.
 func subsystems(rt *serve.Runtime, deps subsystemDeps) []serve.Subsystem {
+	metrics := deps.metrics.Subsystem()
 	var unbuilt []string
-	if !deps.metrics.Built() {
+	if !metrics.Available {
 		unbuilt = []string{"metrics"}
 	}
 	return []serve.Subsystem{
@@ -640,7 +639,7 @@ func subsystems(rt *serve.Runtime, deps subsystemDeps) []serve.Subsystem {
 				})
 			},
 		},
-		deps.metrics.Subsystem(deps),
+		metrics,
 	}
 }
 

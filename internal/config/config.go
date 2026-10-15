@@ -114,6 +114,9 @@ func validateSubconfigs(cfg *Config) error {
 	if err := cfg.Swarm.Validate(); err != nil {
 		return err
 	}
+	if err := cfg.Metrics.Validate(); err != nil {
+		return err
+	}
 	if err := cfg.MCP.Validate(); err != nil {
 		return fmt.Errorf("mcp: %w", err)
 	}

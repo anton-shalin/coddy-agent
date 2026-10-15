@@ -12,6 +12,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"slices"
@@ -23,10 +25,11 @@ import (
 
 	vm "github.com/VictoriaMetrics/metrics"
 
+	"github.com/EvilFreelancer/coddy-agent/internal/agent"
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
 	"github.com/EvilFreelancer/coddy-agent/internal/llm"
+	"github.com/EvilFreelancer/coddy-agent/internal/serve"
 	"github.com/EvilFreelancer/coddy-agent/internal/session"
-	"github.com/EvilFreelancer/coddy-agent/internal/status"
 )
 
 // live stands in for the runtime: the configuration and the snapshot the
@@ -34,7 +37,7 @@ import (
 type live struct {
 	mu        sync.Mutex
 	cfg       *config.Config
-	snap      status.Snapshot
+	snap      serve.Snapshot
 	observers map[int]func(*config.Config)
 	next      int
 	removed   int
@@ -46,7 +49,7 @@ func newLive(cfg *config.Config) *live {
 
 func (l *live) source() Source {
 	return Source{
-		Status: func() status.Snapshot {
+		Status: func() serve.Snapshot {
 			l.mu.Lock()
 			defer l.mu.Unlock()
 			return l.snap
@@ -89,7 +92,7 @@ func (l *live) reload(cfg *config.Config) {
 	}
 }
 
-func (l *live) setStatus(snap status.Snapshot) {
+func (l *live) setStatus(snap serve.Snapshot) {
 	l.mu.Lock()
 	l.snap = snap
 	l.mu.Unlock()
@@ -144,7 +147,7 @@ func (f fakeProvider) Stream(context.Context, []llm.Message, []llm.ToolDefinitio
 // what tells the process-wide call observers.
 func attempt(provider, model string, resp *llm.Response, err error) {
 	p := llm.WrapResilient(fakeProvider{resp: resp, err: err}, llm.ResilientOptions{
-		Name: provider, Type: "openai", Model: model, RetryDisabled: true,
+		Name: provider, Model: model, RetryDisabled: true,
 	})
 	_, _ = p.Complete(context.Background(), nil, nil)
 }
@@ -310,6 +313,9 @@ func TestAnUnknownOrEmptyProviderIsOther(t *testing.T) {
 	}
 }
 
+// Every admitted pair has its attempts, for each outcome, and its token
+// counters at zero, and its provider an empty duration histogram, so an
+// increase over the first attempt of a quiet node counts that attempt.
 func TestEveryOutcomeIsSeededAtZeroForEachAdmittedPair(t *testing.T) {
 	l := newLive(configWith(map[string][]string{"stub": {"echo", "big"}}))
 	c := newCollector(t, l)
@@ -325,6 +331,17 @@ func TestEveryOutcomeIsSeededAtZeroForEachAdmittedPair(t *testing.T) {
 				t.Errorf("seed stub/%s/%s = %v, want 0", model, outcome, got)
 			}
 		}
+	}
+
+	for _, model := range []string{"echo", "big", "other"} {
+		for _, name := range []string{"coddy_llm_input_tokens_total", "coddy_llm_cached_input_tokens_total", "coddy_llm_output_tokens_total"} {
+			if got, ok := find(body, name, map[string]string{"provider": "stub", "model": model}); !ok || got != 0 {
+				t.Errorf("seed %s stub/%s = %v (present %v), want 0", name, model, got, ok)
+			}
+		}
+	}
+	if got, ok := find(body, "coddy_llm_attempt_duration_seconds_count", map[string]string{"provider": "stub"}); !ok || got != 0 {
+		t.Errorf("the duration histogram of stub is not seeded empty: %v (present %v)", got, ok)
 	}
 
 	l.reload(configWith(map[string][]string{"stub": {"echo", "big"}, "second": {"fast"}}))
@@ -464,12 +481,12 @@ func TestCloseRemovesTheObserversAndIsIdempotent(t *testing.T) {
 
 func TestSubsystemUpLeavesTheExporterOut(t *testing.T) {
 	l := newLive(configWith(nil))
-	l.setStatus(status.Snapshot{Subsystems: []status.Subsystem{
-		{Kind: "httpserver", State: status.StateRunning},
-		{Kind: "metrics", State: status.StateRunning},
-		{Kind: "gateway", State: status.StateStopped},
-		{Kind: "swarm", State: status.StateStarting},
-		{Kind: "scheduler", State: status.StateRetained},
+	l.setStatus(serve.Snapshot{Subsystems: []serve.SubsystemStatus{
+		{Kind: "httpserver", State: serve.StateRunning},
+		{Kind: "metrics", State: serve.StateRunning},
+		{Kind: "gateway", State: serve.StateStopped},
+		{Kind: "swarm", State: serve.StateStarting},
+		{Kind: "scheduler", State: serve.StateRetained},
 	}})
 	body := scrape(t, newCollector(t, l))
 
@@ -485,13 +502,13 @@ func TestSubsystemUpLeavesTheExporterOut(t *testing.T) {
 
 func TestTheStateGaugesReadOneSnapshot(t *testing.T) {
 	l := newLive(configWith(nil))
-	l.setStatus(status.Snapshot{
-		Build:               status.Build{Version: "v9.9.9", Revision: "abc123", GoVersion: "go1.26", GOOS: "linux", GOARCH: "arm64", Tags: []string{"gateway", "metrics"}},
+	l.setStatus(serve.Snapshot{
+		Build:               serve.Build{Version: "v9.9.9", Revision: "abc123", GoVersion: "go1.26", GOOS: "linux", GOARCH: "arm64", Tags: []string{"gateway", "metrics"}},
 		RestartRequired:     true,
 		TurnsRunning:        2,
 		OldestTurnStartedAt: time.Now().Add(-90 * time.Second),
 		Tasks:               map[string]map[string]int{"command": {"running": 3, "queued": 1}, "server": {"running": 1}},
-		Disk:                &status.Disk{AvailableBytes: 123456, SizeBytes: 654321},
+		Disk:                &serve.Disk{AvailableBytes: 123456, SizeBytes: 654321},
 	})
 	body := scrape(t, newCollector(t, l))
 
@@ -526,7 +543,7 @@ func TestTheStateGaugesReadOneSnapshot(t *testing.T) {
 		t.Errorf("size bytes = %v", got)
 	}
 
-	l.setStatus(status.Snapshot{})
+	l.setStatus(serve.Snapshot{})
 	body = scrape(t, newCollector(t, l))
 	if got := valueOf(t, body, "coddy_turn_oldest_running_seconds", nil); got != 0 {
 		t.Errorf("oldest turn without a turn = %v, want 0", got)
@@ -608,13 +625,14 @@ func families(t testing.TB, body string) map[string]*exposedFamily {
 // one HELP for each family and one TYPE for each of the catalogue's.
 func TestTheFamiliesAreTheCatalogue(t *testing.T) {
 	l := newLive(configWith(map[string][]string{"stub": {"echo"}}))
-	l.setStatus(status.Snapshot{
-		Subsystems: []status.Subsystem{{Kind: "httpserver", State: status.StateRunning}},
+	l.setStatus(serve.Snapshot{
+		Subsystems: []serve.SubsystemStatus{{Kind: "httpserver", State: serve.StateRunning}},
 		Tasks:      map[string]map[string]int{},
-		Disk:       &status.Disk{AvailableBytes: 1, SizeBytes: 2},
+		Disk:       &serve.Disk{AvailableBytes: 1, SizeBytes: 2},
 	})
 	c := newCollector(t, l)
 	attempt("stub", "echo", answered(1, 1, 1), nil)
+	c.observeTool(agent.ToolCallEvent{Tool: "read", Outcome: agent.ToolOutcomeOK, Duration: time.Second})
 
 	catalogue := map[string]struct {
 		kind, labels string
@@ -635,6 +653,9 @@ func TestTheFamiliesAreTheCatalogue(t *testing.T) {
 		"coddy_llm_output_tokens_total":       {"counter", "model,provider", nil},
 		"coddy_turns_started_total":           {"counter", "", []string{"independently"}},
 		"coddy_turns_ended_total":             {"counter", "", []string{"independently"}},
+		"coddy_turn_duration_seconds":         {"histogram", "", nil},
+		"coddy_tool_calls_total":              {"counter", "outcome,tool", []string{"mcp for any tool of an MCP server"}},
+		"coddy_tool_call_duration_seconds":    {"histogram", "tool", nil},
 		"coddy_config_reloads_total":          {"counter", "", nil},
 	}
 	got := families(t, scrape(t, c))
@@ -794,7 +815,9 @@ func TestHelpIsEscapedLikeTheTextFormat(t *testing.T) {
 }
 
 // The library's figures get one HELP in front of the first sample of each
-// name, once even when a name comes back, and no TYPE.
+// name, once even when a name comes back, and no TYPE; metadata the library
+// wrote itself (after a process-wide vm.ExposeMetadata) is dropped, so no name
+// is announced twice.
 func TestTheLibraryFamiliesAreAnnotatedOnceAndLeftUntyped(t *testing.T) {
 	raw := strings.Join([]string{
 		`go_a 1`, `go_a{x="1"} 2`, `# HELP kept already`, `process_b 3`, `go_a 4`,
@@ -804,7 +827,6 @@ func TestTheLibraryFamiliesAreAnnotatedOnceAndLeftUntyped(t *testing.T) {
 	annotate(&b, raw)
 	const lib = " written by github.com/VictoriaMetrics/metrics.\n"
 	want := "# HELP go_a Go runtime metric" + lib + `go_a 1` + "\n" + `go_a{x="1"} 2` + "\n" +
-		"# HELP kept already\n" +
 		"# HELP process_b Process metric" + lib + "process_b 3\n" +
 		"go_a 4\n" +
 		"# HELP other_c Metric" + lib + `other_c{y="z"} 5` + "\n" +
@@ -943,7 +965,8 @@ func TestAScrapeIsPlainTextAndNeverCompressed(t *testing.T) {
 }
 
 // At most two scrapes are in flight: the third is refused at once, without
-// reading the process, and a slot comes back when a scrape returns.
+// reading the process, even through the handler of a rebuilt listener, and a
+// slot comes back when a scrape returns.
 func TestAThirdConcurrentScrapeIsRefused(t *testing.T) {
 	l := newLive(configWith(nil))
 	entered := make(chan struct{}, 4)
@@ -951,10 +974,10 @@ func TestAThirdConcurrentScrapeIsRefused(t *testing.T) {
 	open := sync.OnceFunc(func() { close(release) })
 	t.Cleanup(open)
 	src := l.source()
-	src.Status = func() status.Snapshot {
+	src.Status = func() serve.Snapshot {
 		entered <- struct{}{}
 		<-release
-		return status.Snapshot{}
+		return serve.Snapshot{}
 	}
 	c := NewCollector(src)
 	t.Cleanup(c.Close)
@@ -982,7 +1005,9 @@ func TestAThirdConcurrentScrapeIsRefused(t *testing.T) {
 		}
 	}
 
-	third := serveOne()
+	rebuilt := httptest.NewRecorder()
+	c.Handler(func() string { return "" }).ServeHTTP(rebuilt, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	third := rebuilt
 	if third.Code != http.StatusServiceUnavailable || !strings.Contains(third.Body.String(), "too many scrapes in flight") {
 		t.Errorf("the third concurrent scrape: %d %q, want 503 too many scrapes in flight", third.Code, third.Body.String())
 	}
@@ -1199,5 +1224,135 @@ func TestAnExporterOffLoopbackWithoutATokenWarnsOnceAtStart(t *testing.T) {
 				t.Fatalf("warnings %q, want none", got)
 			}
 		})
+	}
+}
+
+// A tool call is counted under its tool and outcome; only a call that ran has
+// a duration.
+func TestToolCallsAreCountedByToolAndOutcome(t *testing.T) {
+	c := newCollector(t, newLive(configWith(nil)))
+	for _, ev := range []agent.ToolCallEvent{
+		{Tool: "read", Outcome: agent.ToolOutcomeOK, Duration: 200 * time.Millisecond},
+		{Tool: "read", Outcome: agent.ToolOutcomeError, Duration: 2 * time.Second},
+		{Tool: "run_command", Outcome: agent.ToolOutcomeDenied},
+		{Tool: "mcp", Outcome: agent.ToolOutcomeRefused},
+	} {
+		c.observeTool(ev)
+	}
+	body := scrape(t, c)
+	for _, tc := range []struct {
+		tool, outcome string
+	}{{"read", "ok"}, {"read", "error"}, {"run_command", "denied"}, {"mcp", "refused"}} {
+		if got := total(body, "coddy_tool_calls_total", map[string]string{"tool": tc.tool, "outcome": tc.outcome}); got != 1 {
+			t.Errorf("tool calls %s/%s = %v, want 1", tc.tool, tc.outcome, got)
+		}
+	}
+	if got := total(body, "coddy_tool_call_duration_seconds_count", map[string]string{"tool": "read"}); got != 2 {
+		t.Errorf("read ran %v times, want 2", got)
+	}
+	if got := total(body, "coddy_tool_call_duration_seconds_sum", map[string]string{"tool": "read"}); got != 2.2 {
+		t.Errorf("read ran for %v s, want 2.2", got)
+	}
+	for _, tool := range []string{"run_command", "mcp"} {
+		if _, ok := find(body, "coddy_tool_call_duration_seconds_count", map[string]string{"tool": tool}); ok {
+			t.Errorf("a %s call that never ran has a duration", tool)
+		}
+	}
+}
+
+// A turn's duration runs from its started edge to its ended edge, per
+// session; an ended edge with no start seen is not a duration.
+func TestTheTurnDurationIsTheTimeBetweenTheEdges(t *testing.T) {
+	c := newCollector(t, newLive(configWith(nil)))
+	body := scrape(t, c)
+	if got, ok := find(body, "coddy_turn_duration_seconds_count", nil); !ok || got != 0 {
+		t.Fatalf("the turn histogram is not there from the start: %v (present %v)", got, ok)
+	}
+	at := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	c.observeTurn(session.TurnEvent{SessionID: "sess_a", Phase: session.TurnPhaseStarted, At: at})
+	c.observeTurn(session.TurnEvent{SessionID: "sess_b", Phase: session.TurnPhaseStarted, At: at.Add(time.Minute)})
+	c.observeTurn(session.TurnEvent{SessionID: "sess_a", Phase: session.TurnPhaseWoken, At: at})
+	c.observeTurn(session.TurnEvent{SessionID: "sess_a", Phase: session.TurnPhaseEnded, At: at.Add(90 * time.Second)})
+	c.observeTurn(session.TurnEvent{SessionID: "sess_c", Phase: session.TurnPhaseEnded, At: at})
+
+	body = scrape(t, c)
+	if got := total(body, "coddy_turn_duration_seconds_count", nil); got != 1 {
+		t.Errorf("turn durations = %v, want 1", got)
+	}
+	if got := total(body, "coddy_turn_duration_seconds_sum", nil); got != 90 {
+		t.Errorf("turn duration sum = %v, want 90", got)
+	}
+	if got := total(body, "coddy_turns_ended_total", nil); got != 2 {
+		t.Errorf("turns ended = %v, want 2", got)
+	}
+}
+
+// The token is read on every request, so a reload that clears it on an
+// exporter bound beyond loopback rebuilds nothing and no start warns: the
+// reload says so itself, once, until the exporter is closed off again.
+func TestAReloadThatOpensTheExporterWarnsOnce(t *testing.T) {
+	closed := configWith(nil)
+	closed.Metrics = config.MetricsConfig{Enable: true, Host: "0.0.0.0", Token: "scrape-me"}
+	open := configWith(nil)
+	open.Metrics = config.MetricsConfig{Enable: true, Host: "0.0.0.0"}
+	loopback := configWith(nil)
+	loopback.Metrics = config.MetricsConfig{Enable: true, Host: "127.0.0.1"}
+
+	l := newLive(closed)
+	rec := &capture{}
+	src := l.source()
+	src.Log = slog.New(rec)
+	c := NewCollector(src)
+	t.Cleanup(c.Close)
+
+	for i, step := range []struct {
+		cfg   *config.Config
+		warns int
+	}{{open, 1}, {open, 1}, {closed, 1}, {loopback, 1}, {open, 2}} {
+		l.reload(step.cfg)
+		if got := len(rec.warnings()); got != step.warns {
+			t.Fatalf("after reload %d: %d warnings %q, want %d", i, got, rec.warnings(), step.warns)
+		}
+	}
+}
+
+// The Grafana dashboard and the alert rules shipped under examples/ read only
+// series a scrape holds, so renaming a family without them fails here rather
+// than leaving an operator with empty panels. The Go and process figures
+// depend on the platform and are checked where the library reads them all.
+func TestTheDashboardAndTheRulesReadOnlyExportedSeries(t *testing.T) {
+	l := newLive(configWith(map[string][]string{"stub": {"echo"}}))
+	l.setStatus(serve.Snapshot{
+		Subsystems: []serve.SubsystemStatus{{Kind: serve.KindHTTP, State: serve.StateRunning}},
+		Tasks:      map[string]map[string]int{},
+		Disk:       &serve.Disk{AvailableBytes: 1, SizeBytes: 2},
+	})
+	c := newCollector(t, l)
+	attempt("stub", "echo", answered(1, 1, 1), nil)
+	c.observeTool(agent.ToolCallEvent{Tool: "read", Outcome: agent.ToolOutcomeOK, Duration: time.Second})
+	exported := map[string]bool{"up": true}
+	for _, s := range parseSamples(scrape(t, c)) {
+		exported[s.name] = true
+	}
+
+	name := regexp.MustCompile(`\b(?:coddy|go|process)_[a-z_]+[a-z]\b`)
+	for _, file := range []string{"../../examples/grafana/coddy-dashboard.json", "../../examples/prometheus/coddy-rules.yml"} {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seen := map[string]bool{}
+		for _, ref := range name.FindAllString(string(raw), -1) {
+			if seen[ref] || (!strings.HasPrefix(ref, "coddy_") && runtime.GOOS != "linux") {
+				continue
+			}
+			seen[ref] = true
+			if !exported[ref] {
+				t.Errorf("%s reads %s, which no scrape holds", filepath.Base(file), ref)
+			}
+		}
+		if len(seen) == 0 {
+			t.Errorf("%s names no series at all", file)
+		}
 	}
 }

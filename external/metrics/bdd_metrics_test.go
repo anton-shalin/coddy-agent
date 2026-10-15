@@ -5,8 +5,9 @@ package metrics
 // Godog harness for features/metrics_exporter.feature: a real serve.Runtime
 // over a temporary home, the exporter run as a subsystem by a serve.Supervisor
 // on a free port with a token, and a session that runs one turn through the
-// real llm.NewProvider against tgfake's scripted model (llmstub). Nothing here
-// builds the HTTP API: the exporter has a listener of its own.
+// real llm.NewProvider against tgfake's scripted model (llmstub), which reads a
+// file with the read tool before it answers. Nothing here builds the HTTP API:
+// the exporter has a listener of its own.
 
 import (
 	"context"
@@ -153,7 +154,7 @@ func (s *exporterState) providerWithModel(provider, model string) error {
 		return fmt.Errorf("the model %q is not the provider %q's", model, provider)
 	}
 	stub := &llmstub.Server{Model: api, StripTags: []string{"turn_context"}, Rules: []llmstub.Rule{
-		{Match: "SECRET-PROMPT", Answer: "A scripted answer."},
+		{Match: "SECRET-PROMPT", Answer: "A scripted answer.", Tool: &llmstub.ToolCall{Name: "read", Arguments: []byte(`{"path":"notes.txt"}`)}},
 	}}
 	handler := stub.Handler()
 	s.model = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -190,6 +191,9 @@ func (s *exporterState) aSessionRanOneTurn(title, folder, prompt string) error {
 	}
 	dir := filepath.Join(s.root, folder)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("SECRET-NOTES\n"), 0o644); err != nil {
 		return err
 	}
 	ctx := context.Background()
@@ -270,6 +274,21 @@ func (s *exporterState) buildInfoAndAttemptsRose(info, attempts, provider, model
 	return nil
 }
 
+func (s *exporterState) toolCallsRose(name, tool, outcome string, want float64) error {
+	labels := map[string]string{"tool": tool, "outcome": outcome}
+	if got := total(s.after, name, labels) - total(s.before, name, labels); got != want {
+		return fmt.Errorf("%s%v rose by %v, want %v\nafter:\n%s", name, labels, got, want, s.after)
+	}
+	return nil
+}
+
+func (s *exporterState) rose(name string, want float64) error {
+	if got := total(s.after, name, nil) - total(s.before, name, nil); got != want {
+		return fmt.Errorf("%s rose by %v, want %v", name, got, want)
+	}
+	return nil
+}
+
 func (s *exporterState) eachRose(a, b string, want float64) error {
 	for _, name := range []string{a, b} {
 		if got := total(s.after, name, nil) - total(s.before, name, nil); got != want {
@@ -287,7 +306,7 @@ func (s *exporterState) isPresent(name string) error {
 }
 
 func (s *exporterState) containsNoneOf(a, b, c string) error {
-	for _, secret := range []string{a, b, c} {
+	for _, secret := range []string{a, b, c, "SECRET-NOTES", "notes.txt"} {
 		if strings.Contains(s.after, secret) {
 			return fmt.Errorf("the scrape contains %q", secret)
 		}
@@ -303,12 +322,16 @@ func initializeExporterScenario(sc *godog.ScenarioContext) {
 	})
 	sc.Step(`^coddy serve built with metrics, the exporter on a free port with the token "([^"]*)"$`, s.serveWithMetrics)
 	sc.Step(`^a provider "([^"]*)" served by llmstub with the model "([^"]*)" declared$`, s.providerWithModel)
-	sc.Step(`^a session titled "([^"]*)" in the folder "([^"]*)" ran one turn with "([^"]*)"$`, s.aSessionRanOneTurn)
+	sc.Step(`^a session titled "([^"]*)" in the folder "([^"]*)" ran one turn with "([^"]*)" that read a file$`, s.aSessionRanOneTurn)
 	sc.Step(`^Prometheus scrapes "([^"]*)" with the token "([^"]*)"$`, s.prometheusScrapes)
 	sc.Step(`^"([^"]*)" is 1 and "([^"]*)" for ([^ ,]+), ([^ ,]+), ([^ ,]+) rose by (\d+)$`, func(info, attempts, provider, model, outcome string, n int) error {
 		return s.buildInfoAndAttemptsRose(info, attempts, provider, model, outcome, float64(n))
 	})
+	sc.Step(`^"([^"]*)" for ([^ ,]+), ([^ ,]+) rose by (\d+)$`, func(name, tool, outcome string, n int) error {
+		return s.toolCallsRose(name, tool, outcome, float64(n))
+	})
 	sc.Step(`^"([^"]*)" and "([^"]*)" each rose by (\d+)$`, func(a, b string, n int) error { return s.eachRose(a, b, float64(n)) })
+	sc.Step(`^"([^"]*)" rose by (\d+)$`, func(name string, n int) error { return s.rose(name, float64(n)) })
 	sc.Step(`^"([^"]*)" is present$`, s.isPresent)
 	sc.Step(`^the answer contains none of "([^"]*)", "([^"]*)", "([^"]*)"$`, s.containsNoneOf)
 }

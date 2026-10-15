@@ -1,6 +1,6 @@
 # Monitoring with Prometheus
 
-`coddy serve` can export provider calls, turns, background tasks and the disk of the session store as Prometheus metrics on a port of its own. This page covers enabling the exporter, scraping it, the metrics and the shipped alert rules.
+`coddy serve` can export provider calls, tool calls, turns, background tasks and the disk of the session store as Prometheus metrics on a port of its own. This page covers enabling the exporter, scraping it, the metrics, the shipped alert rules and the Grafana dashboard.
 
 ## What the exporter is
 
@@ -34,7 +34,7 @@ A [configuration change](serve.md#picking-up-a-configuration-change) applies to 
 
 ## Binding beyond loopback
 
-The exporter listens on `127.0.0.1:12347`, which only the machine itself reaches. The figures hold no conversation (see [what is never exported](#what-is-never-exported)) but show load and provider use. To scrape from another machine, set `metrics.host` to a reachable address (`0.0.0.0` for all) and set `metrics.token`. Without a token, a bind beyond loopback (anything but `localhost`, `127.x.x.x` and `::1`) logs a startup warning, and `coddy serve --dry-run` warns at `metrics.host`.
+The exporter listens on `127.0.0.1:12347`, which only the machine itself reaches. The figures hold no conversation (see [what is never exported](#what-is-never-exported)) but show load and provider use. To scrape from another machine, set `metrics.host` to a reachable address (`0.0.0.0` for all) and set `metrics.token`. Without a token, a bind beyond loopback (anything but `localhost`, `127.x.x.x` and `::1`) logs a startup warning, a reload that clears the token of such an exporter logs it again, and `coddy serve --dry-run` warns at `metrics.host`.
 
 In a container, loopback is the container's own, which a published port cannot reach: bind `0.0.0.0` with a token and publish port `12347`. See [Docker](../getting-started/docker.md#what-the-image-contains-by-default) for the image and [Security and trust](security.md#the-metrics-exporter) for what the token protects.
 
@@ -76,15 +76,25 @@ An **attempt** is one call into a provider that the retry wrapper makes, so a re
 
 Every attempt lands in exactly one `outcome`: `ok`, `canceled` (the caller stopped it), `timeout` (a deadline ran out or the stream stalled), `rate_limited` (HTTP 429), `auth` (401 or 403), `context_overflow` (the prompt does not fit the model's context), `client_error` (any other 4xx), `server_error` (a 5xx, a cut stream, a failed dial or a transient transport error) and `error` (everything else).
 
+### Tool calls
+
+| Family | Type | Meaning |
+|--------|------|---------|
+| `coddy_tool_calls_total{tool,outcome}` | counter | Tool calls the agent decided on, in every session of the process, a subagent's included. |
+| `coddy_tool_call_duration_seconds{tool}` | histogram | How long the tool ran, for the calls that ran; hooks are not counted. Buckets: 0.1, 0.5, 1, 5, 15, 60, 300 seconds. |
+
+`tool` is the name of a built-in tool (`read`, `run_command`, `spawn_agent`, the [tool reference](../reference/tools.md) lists them), `mcp` for any tool of an MCP server and `other` for a name the agent does not know, such as one the model made up. A call lands in one `outcome`: `ok` (the tool returned a result), `error` (it returned an error), `refused` (it never ran: the mode, the toolset, a subagent's tool set, a hook or the safety check refused it) or `denied` (the person declined it at the permission prompt). A prompt nobody answered, because the stream that carried it ended, is no outcome: the call is counted when it is resumed and runs.
+
 ### The process
 
 | Family | Type | Meaning |
 |--------|------|---------|
 | `coddy_turns_started_total`, `coddy_turns_ended_total` | counter | Turns started and ended in this process. |
+| `coddy_turn_duration_seconds` | histogram | Duration of the turns that ended, from the moment the session became busy. Buckets: 1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600 seconds. |
 | `coddy_config_reloads_total` | counter | Replacements of the live configuration. |
 | `coddy_build_info{version,revision,goversion,goos,goarch,tags}` | gauge | The running build; the value is 1. |
 | `coddy_subsystem_up{subsystem}` | gauge | 1 for a subsystem the process runs or is starting, 0 for one that is enabled and not running; the exporter is left out. |
-| `coddy_restart_required` | gauge | 1 when a saved HTTP or swarm address waits for a restart ([Restarting itself](serve.md#restarting-itself)). |
+| `coddy_restart_required` | gauge | 1 when a saved change only a fresh process can apply waits for a restart that nothing will perform on its own: a moved HTTP or swarm address, or a surface that runs turns in a process started without a session store ([Restarting itself](serve.md#restarting-itself)). |
 | `coddy_turns_running` | gauge | Sessions with a turn running. |
 | `coddy_turn_oldest_running_seconds` | gauge | Age of the longest-running turn, 0 when none runs. A wait for a permission or a usage limit is legitimate, so it proves no hang. |
 | `coddy_background_tasks{kind,status}` | gauge | Background tasks of the model by kind (`command`, `agent`, `server`) and status (`queued`, `running`). |
@@ -94,11 +104,11 @@ A **turn** is one run of the agent on a session, on any surface of the process, 
 
 ### Labels and their budget
 
-`provider` is the name of a provider row in `providers[]`, and `model` is the API model id of a model declared in `models[]`, without the provider prefix (`gpt-5`, not `openai/gpt-5`). Anything else is `other`: an undeclared provider is `provider="other", model="other"`, and an undeclared model of a declared provider is `model="other"`.
+`provider` is the name of a provider row in `providers[]`, and `model` is the API model id of a model declared in `models[]`, without the provider prefix (`gpt-5`, not `openai/gpt-5`). Anything else is `other`: an undeclared provider is `provider="other", model="other"`, and an undeclared model of a declared provider is `model="other"`. A provider row or a model id that is itself named `other` shares its series with that fallback.
 
 Labels are decided when an attempt is observed, against the live configuration. The first 16 provider names and the first 64 named provider and model pairs keep their own label, and every later one is `other`. An admitted name stays admitted, so a reload, a rename or a removal never takes a series from a counter, and a restart starts a fresh budget. At the bound, Coddy's own families add up to about 1,200 series.
 
-At start and at every configuration reload, each admitted provider gets `coddy_llm_attempts_total` at zero for every outcome, once per declared model and once for `other`, so a rate over its first failure has a sample to start from. The other families have no seeds.
+At start and at every configuration reload, each admitted provider gets `coddy_llm_attempts_total` at zero for every outcome and the three token counters at zero, once per declared model and once for `other`, and an empty `coddy_llm_attempt_duration_seconds`, so an `increase()` over its first attempt counts that attempt. `coddy_turn_duration_seconds` is there, empty, from the start; the tool families have no seeds.
 
 ### Reading the numbers
 
@@ -118,10 +128,41 @@ A scrape reads the families one after another, so they describe slightly differe
 
 CI tests them on every pull request. [`examples/prometheus/coddy-rules.test.yml`](../../examples/prometheus/coddy-rules.test.yml) holds cases that must fire and cases that must stay quiet for every rule; run them with `promtool test rules examples/prometheus/coddy-rules.test.yml`.
 
+## The Grafana dashboard
+
+[`examples/grafana/coddy-dashboard.json`](../../examples/grafana/coddy-dashboard.json) draws every family above for one process or a whole swarm: the fleet at a glance and a row per process, turns, model calls, tokens, tool calls, background tasks and subsystems, and the Go and process figures. Import it in Grafana (**Dashboards → New → Import**) and pick a Prometheus data source; it is made for Grafana 12.
+
+![The Coddy dashboard over three agents and a relay of a swarm](../assets/monitoring/grafana-dashboard-dark-1280.png)
+
+*The dashboard over three agents and a relay of a swarm, grouped by the `node` label of the targets*
+
+The variables at the top filter and split every panel:
+
+- **Job** and **Process** pick the scrape jobs and the targets (`instance`);
+- **Provider** narrows the model call and token panels;
+- **Group by** names the label the per-group panels split by: `instance`, `job` or any label your scrape configuration puts on the targets, such as `node`, `role` or `site`. The list is read from the targets, so a label added there appears on its own.
+
+[`examples/grafana/docker-compose.yaml`](../../examples/grafana/docker-compose.yaml) starts Prometheus and Grafana on the host network with the [shipped rules](#the-shipped-alert-rules) and the dashboard provisioned. List your exporters in [`examples/grafana/targets.yml`](../../examples/grafana/targets.yml), one entry per `coddy serve`, with the labels the **Group by** list should offer:
+
+```yaml
+- targets: ["10.0.0.11:12347"]
+  labels: {node: alpha, role: agent}
+- targets: ["10.0.0.10:12347"]
+  labels: {node: relay-1, role: relay}
+```
+
+```bash
+CODDY_METRICS_TOKEN=... docker compose -f examples/grafana/docker-compose.yaml up -d
+```
+
+Prometheus answers on `http://127.0.0.1:9090` and Grafana on `http://127.0.0.1:3000`, read-only without signing in (`admin` / `admin` to edit). `PROMETHEUS_PORT`, `GRAFANA_PORT` and `CODDY_TARGETS` (another targets file) move them. Prometheus rereads the targets file when it changes.
+
 ## What is never exported
 
-The exporter reports counts, durations and state, never a prompt, model output, session id or title, workspace folder, tool name or other content of a conversation. Every label value is a member of a closed set (an outcome, a task kind or status, a subsystem name, the build tags, the Go version, the OS, the architecture) or a name from your configuration (a provider row, a declared model id), so keep those free of anything you would not put in a dashboard. The token is never exported, and `GET /coddy/config` reports only whether one is set.
+The exporter reports counts, durations and state, never a prompt, model output, tool arguments or result, session id or title, workspace folder, the name of an MCP server or of its tools, or other content of a conversation. Every label value is a member of a closed set (an outcome, a task kind or status, a subsystem name, a built-in tool name, the build tags, the Go version, the OS, the architecture) or a name from your configuration (a provider row, a declared model id), so keep those free of anything you would not put in a dashboard. The token is never exported, and `GET /coddy/config` reports only whether one is set.
 
 ## Relays and other processes
 
-A swarm relay does not carry the exporter of the nodes behind it: a mount refuses `/metrics`, and the relay serves no metrics of its own. Every `coddy serve` has its own exporter on its own port, so scrape each node directly and put the nodes of one relay in one Prometheus job with a target for each.
+Every `coddy serve` has its own exporter on its own port, a relay included: a relay process exports the same families as any other process (its `coddy_subsystem_up{subsystem="swarm"}`, its build and its Go and process figures; its turn and token families stay at zero) and none of its own. A relay does not carry the exporters of the nodes behind it: a mount refuses `/metrics`. Scrape each node directly, put the nodes of one swarm in one Prometheus job with a target for each, and label the targets (`node`, `role`) for the dashboard's **Group by**.
+
+A node that joins its relay over the tunnel transport (`swarm.join[].advertise_url` empty) is in a network that accepts no inbound connection, so Prometheus cannot reach its exporter from outside. Run a Prometheus in agent mode next to such a node, scraping it on loopback and sending the samples on with `remote_write`.
