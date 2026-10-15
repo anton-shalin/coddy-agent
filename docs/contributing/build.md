@@ -161,13 +161,34 @@ release job is retried from the tap's new head.
 
 The release job runs it after the assets are uploaded, with the private half of a deploy key that
 can write to the tap and nothing else, from the secret **`HOMEBREW_TAP_DEPLOY_KEY`**; GitHub's SSH
-host keys come from **`api.github.com/meta`**. Without the secret git pushes with the caller's own
-credentials. Then the **Homebrew tap** workflow
+host keys come from **`api.github.com/meta`**. Without the secret the release step stops with an
+error after the upload, and the tap stays at the previous release until the job is run again; run by
+hand without it, the script pushes with your own git credentials. Then the **Homebrew tap** workflow
 ([`homebrew.yaml`](../../.github/workflows/homebrew.yaml)) installs the cask by name on a macOS
 runner with current Homebrew and checks that it carries the release just published or a newer one. The same
 workflow runs on pull requests that touch the cask, the scripts or itself, where it also installs the
 cask the checkout renders. It also runs by hand, and weekly on its own, to catch a Homebrew release
 that stops installing the tap's cask.
+
+An owner of the organization sets the key up once. First allow deploy keys for the organization's
+repositories, in the organization settings under Member privileges, Deploy keys. Then generate a key
+pair and give its public half write access to the tap.
+
+```bash
+ssh-keygen -t ed25519 -N "" -C "coddy-agent release workflow" -f ./tap_key
+gh repo deploy-key add tap_key.pub --repo coddy-project/homebrew-coddy-agent --allow-write --title "coddy-agent release workflow"
+```
+
+Store the private half as the secret of this repository and delete both files.
+
+```bash
+gh secret set HOMEBREW_TAP_DEPLOY_KEY --repo coddy-project/coddy-agent < tap_key
+rm tap_key tap_key.pub
+```
+
+Nothing else is needed: **`tag-on-merge.yaml`** calls the release workflow with **`secrets: inherit`**,
+and Actions provides **`GITHUB_TOKEN`** itself. A new key replaces an old one the same way; remove the
+old deploy key from the tap afterwards.
 
 ### Homebrew formula
 
