@@ -187,7 +187,7 @@ var deprecatedCaskStanzas = []struct {
 func newTap(t *testing.T, env []string, version string) string {
 	t.Helper()
 	root := t.TempDir()
-	bare := filepath.Join(root, "homebrew-coddy.git")
+	bare := filepath.Join(root, "homebrew-coddy-agent.git")
 	work := filepath.Join(root, "work")
 	git := func(dir string, args ...string) {
 		t.Helper()

@@ -1,10 +1,10 @@
 # Install the Coddy cask with a real, current Homebrew on macOS.
 #
 # Current Homebrew loads a cask only out of a tap (issue #269), so the release
-# job publishes every cask to coddy-project/homebrew-coddy and the documentation
-# installs it with `brew install coddy-project/coddy/coddy`. Nothing on Linux can
-# prove that command works; this job runs it, and checks the result with
-# scripts/check-homebrew-cask.sh:
+# job publishes every cask to coddy-project/homebrew-coddy-agent and the
+# documentation installs it with `brew install coddy-project/coddy-agent/coddy`.
+# Nothing on Linux can prove that command works; this job runs it, and checks
+# the result with scripts/check-homebrew-cask.sh:
 #   - the cask this checkout renders, for the latest published release, out of a
 #     throwaway local tap: pull requests that touch the cask, manual and weekly
 #     runs;
@@ -69,4 +69,4 @@ jobs:
       - name: Install the published cask by name
         env:
           VERSION: ${{ inputs.version }}
-        run: scripts/check-homebrew-cask.sh --tap coddy-project/coddy ${VERSION:+--version "$VERSION"}
+        run: scripts/check-homebrew-cask.sh --tap coddy-project/coddy-agent ${VERSION:+--version "$VERSION"}

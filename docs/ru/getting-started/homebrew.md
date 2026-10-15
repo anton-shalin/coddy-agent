@@ -31,15 +31,15 @@ Go, без Node и без сборки, и именно его несёт наш
 ## Установка сейчас
 
 ```bash
-brew install coddy-project/coddy/coddy
+brew install coddy-project/coddy-agent/coddy
 ```
 
-В тапе [coddy-project/homebrew-coddy](https://github.com/coddy-project/homebrew-coddy) лежит один
+В тапе [coddy-project/homebrew-coddy-agent](https://github.com/coddy-project/homebrew-coddy-agent) лежит один
 файл, **`Casks/coddy.rb`**. Каждый релиз собирает его с контрольными суммами своих двух архивов для
 macOS, прикладывает к релизу как **`coddy.rb`** и коммитит в тап
 (**`scripts/publish-homebrew-tap.sh`**), поэтому **`brew upgrade --cask coddy`** видит каждый новый
 релиз. По полному имени Homebrew сам добавляет тап и доверяет этому одному cask. Ничего другого из
-стороннего тапа Homebrew 7 не загружает, пока ему не доверяют. **`brew trust coddy-project/coddy`**
+стороннего тапа Homebrew 7 не загружает, пока ему не доверяют. **`brew trust coddy-project/coddy-agent`**
 доверяет всему тапу, и тогда короткое имя работает в любой команде.
 
 Файл из релиза сам по себе больше не устанавливается. Вне режима **`HOMEBREW_DEVELOPER`** текущий
@@ -187,4 +187,4 @@ brew style coddy
 подсказку **`brew upgrade coddy`**, что уже и происходит. Как пользователи cask из тапа перейдут на
 формулу, решается вместе с этим изменением.
 
-<!-- docsgen:source sha256=74f84c733beac864 -->
+<!-- docsgen:source sha256=5fbe765da53cff79 -->

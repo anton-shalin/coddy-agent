@@ -3,7 +3,7 @@
 #
 # Current Homebrew installs a cask only out of a tap, so every release commits
 # the cask it has just rendered (scripts/build-homebrew-cask.sh) to the tap
-# repository as Casks/coddy.rb. `brew install coddy-project/coddy/coddy` then
+# repository as Casks/coddy.rb. `brew install coddy-project/coddy-agent/coddy` then
 # finds it by name, and `brew upgrade` sees each new release.
 #
 # The tap only moves forward. A cask for a release older than the one the tap
@@ -16,7 +16,7 @@
 #   --version VER    release the cask was rendered for (required)
 #   --cask FILE      the rendered cask (default: dist/coddy.rb)
 #   --tap-repo URL   git URL of the tap
-#                    (default: git@github.com:coddy-project/homebrew-coddy.git)
+#                    (default: git@github.com:coddy-project/homebrew-coddy-agent.git)
 #   --branch NAME    branch of the tap (default: main)
 #
 # Environment:
@@ -30,7 +30,7 @@ set -euo pipefail
 
 version=""
 cask="dist/coddy.rb"
-tap_repo="git@github.com:coddy-project/homebrew-coddy.git"
+tap_repo="git@github.com:coddy-project/homebrew-coddy-agent.git"
 branch="main"
 
 while [ $# -gt 0 ]; do

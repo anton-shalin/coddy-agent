@@ -34,12 +34,12 @@ curl -fsSL https://coddy.dev/install.sh | bash
 irm https://coddy.dev/install.ps1 | iex
 ```
 
-The installer puts `coddy` on `PATH`, creates `~/.coddy/config.yaml` from the release `config.example.yaml` when it is missing and, on Linux and macOS, installs the man page and the shell completions. Every release also publishes `.deb` and `.rpm` packages, a Homebrew cask in the tap [coddy-project/homebrew-coddy](https://github.com/coddy-project/homebrew-coddy), archives for Linux, macOS, Windows and [Android under Termux](docs/getting-started/android.md), and the image `ghcr.io/coddy-project/coddy-agent` for `docker compose up -d`. The packages and the cask recommend tmux, for a console session that outlives the terminal, without installing it. Details for each route are in [Install](docs/getting-started/install.md) and [Docker](docs/getting-started/docker.md); building from source is `make build TAGS="http ui scheduler memory cli gateway swarm metrics"` after `git clone`, see [Build from source](docs/contributing/build.md).
+The installer puts `coddy` on `PATH`, creates `~/.coddy/config.yaml` from the release `config.example.yaml` when it is missing and, on Linux and macOS, installs the man page and the shell completions. Every release also publishes `.deb` and `.rpm` packages, a Homebrew cask in the tap [coddy-project/homebrew-coddy-agent](https://github.com/coddy-project/homebrew-coddy-agent), archives for Linux, macOS, Windows and [Android under Termux](docs/getting-started/android.md), and the image `ghcr.io/coddy-project/coddy-agent` for `docker compose up -d`. The packages and the cask recommend tmux, for a console session that outlives the terminal, without installing it. Details for each route are in [Install](docs/getting-started/install.md) and [Docker](docs/getting-started/docker.md); building from source is `make build TAGS="http ui scheduler memory cli gateway swarm metrics"` after `git clone`, see [Build from source](docs/contributing/build.md).
 
 On macOS, Homebrew installs it from Coddy's own tap and `brew upgrade` follows the releases:
 
 ```bash
-brew install coddy-project/coddy/coddy
+brew install coddy-project/coddy-agent/coddy
 ```
 
 Then give it a model. Put a provider key into `~/.coddy/config.yaml`, or export `OPENAI_API_KEY` and let the defaults pick it up:

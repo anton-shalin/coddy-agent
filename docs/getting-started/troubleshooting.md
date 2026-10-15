@@ -294,21 +294,21 @@ Set `max_turns: 0` only when deliberately disabling the step cap.
 
 ## `brew` says `No Cask with this name exists`
 
-**Symptom.** `brew install --cask https://github.com/coddy-project/coddy-agent/releases/latest/download/coddy.rb` prints `Cask 'coddy' is unavailable: No Cask with this name exists` and offers a cask with a similar name. Or `brew install --cask coddy` stops with `Refusing to load cask coddy-project/coddy/coddy from untrusted tap coddy-project/coddy`.
+**Symptom.** `brew install --cask https://github.com/coddy-project/coddy-agent/releases/latest/download/coddy.rb` prints `Cask 'coddy' is unavailable: No Cask with this name exists` and offers a cask with a similar name. Or `brew install --cask coddy` stops with `Refusing to load cask coddy-project/coddy-agent/coddy from untrusted tap coddy-project/coddy-agent`.
 
 **Cause.** Current Homebrew loads a cask only out of a tap. It reads a URL or a path to a `.rb` file as a cask name, and no tap carries a cask by that name. A tap that is not Homebrew's own stays untrusted until you trust it or install from it by the full name.
 
 **Fix.** Install from Coddy's tap by the full name; Homebrew adds the tap and trusts the cask:
 
 ```bash
-brew install coddy-project/coddy/coddy
+brew install coddy-project/coddy-agent/coddy
 ```
 
 A Coddy that an older Homebrew installed from the URL belongs to no tap, so `brew upgrade` never offers it a new release. Reinstall it from the tap; `brew uninstall` leaves `~/.coddy` in place:
 
 ```bash
 brew uninstall --cask coddy
-brew install coddy-project/coddy/coddy
+brew install coddy-project/coddy-agent/coddy
 ```
 
 See [Install](install.md#macos-homebrew).

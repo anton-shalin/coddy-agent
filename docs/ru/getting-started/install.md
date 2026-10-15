@@ -159,10 +159,10 @@ make rpm
 ## macOS (Homebrew)
 
 ```bash
-brew install coddy-project/coddy/coddy
+brew install coddy-project/coddy-agent/coddy
 ```
 
-Cask лежит в собственном тапе Coddy, [coddy-project/homebrew-coddy](https://github.com/coddy-project/homebrew-coddy),
+Cask лежит в собственном тапе Coddy, [coddy-project/homebrew-coddy-agent](https://github.com/coddy-project/homebrew-coddy-agent),
 и каждый релиз его обновляет. Команда добавляет тап, доверяет этому одному cask и ставит бинарник
 **`coddy`** из архива для macOS последнего релиза, а также **`man coddy`** и автодополнения bash и zsh.
 Нужна macOS 12 или новее. **`tmux`** cask не ставит. Его caveats, которые выводятся после установки
@@ -177,7 +177,7 @@ brew upgrade --cask coddy
 
 Homebrew 7 ничего не загружает из стороннего тапа, пока ему не доверяют. При установке по полному
 имени Homebrew начинает доверять этому cask, поэтому следующие команды принимают короткое имя
-**`coddy`**. Чтобы доверять всему тапу, один раз выполните **`brew trust coddy-project/coddy`**, после
+**`coddy`**. Чтобы доверять всему тапу, один раз выполните **`brew trust coddy-project/coddy-agent`**, после
 этого по имени работает и **`brew install --cask coddy`**. Удаление идёт через Homebrew.
 
 ```bash
@@ -294,4 +294,4 @@ coddy update -y
 
 См. [build.md](../contributing/build.md) и раздел README **Other installation methods**.
 
-<!-- docsgen:source sha256=6d00ca4e5585587e -->
+<!-- docsgen:source sha256=04105abe630a2f24 -->

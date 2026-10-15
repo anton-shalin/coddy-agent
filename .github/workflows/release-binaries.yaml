@@ -214,7 +214,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Current Homebrew installs a cask only out of a tap (issue #269), so the
-      # cask rendered above goes to coddy-project/homebrew-coddy once the
+      # cask rendered above goes to coddy-project/homebrew-coddy-agent once the
       # archives it names are on the release. The deploy key in the secret can
       # write to that one repository and nothing else; the script never takes
       # the tap back to an older release, so re-running an old tag is safe.

@@ -147,8 +147,8 @@ install:
 #
 # `brew-cask-check` installs that rendered cask with a real Homebrew out of a
 # throwaway local tap and checks what it linked (macOS only); BREW_TAP=
-# coddy-project/coddy checks the published cask by name instead. `brew-publish`
-# commits the rendered cask to the tap coddy-project/homebrew-coddy, which the
+# coddy-project/coddy-agent checks the published cask by name instead. `brew-publish`
+# commits the rendered cask to the tap coddy-project/homebrew-coddy-agent, which the
 # release job does for every release.
 #
 # `brew-formula` renders the Homebrew formula (packaging/homebrew/coddy-formula.rb.tmpl)

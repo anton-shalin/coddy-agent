@@ -93,8 +93,8 @@ make brew VERSION=1.0.11
 Текущий Homebrew не принимает cask по пути к файлу, поэтому сгенерированный файл пробуют через временный локальный тап. На Mac с Homebrew это выглядит так.
 
 ```bash
-make brew-cask-check                              # dist/coddy.rb from a local tap
-make brew-cask-check BREW_TAP=coddy-project/coddy # the published cask, by name
+make brew-cask-check                                    # dist/coddy.rb from a local tap
+make brew-cask-check BREW_TAP=coddy-project/coddy-agent # the published cask, by name
 ```
 
 **`scripts/check-homebrew-cask.sh`** устанавливает cask, прогоняет по нему **`brew style`** и проверяет, что **`coddy -v`** печатает его версию, что бинарник ведёт в **`Caskroom`** и на нём не осталось атрибута **`com.apple.quarantine`**, что ссылки на man-страницу и оба автодополнения созданы и что **`coddy update`** называет **`brew upgrade --cask coddy`**, после чего запускает эту команду. В конце он удаляет cask и добавленный им тап, а **`--keep`** оставляет и то и другое. Режим разработчика Homebrew он не включает. Локальный тап он создаёт обычным каталогом, без **`brew tap-new`**, а **`brew style`** запускает с переменной **`HOMEBREW_DEVELOPER`** только для этой команды, потому что команда для разработчиков без неё включает этот режим насовсем.
@@ -103,7 +103,7 @@ Cask создаёт ссылки на **`coddy`**, **`coddy.1`** и оба ск�
 
 ### Тап Homebrew
 
-До пользователей cask доходит через тап [coddy-project/homebrew-coddy](https://github.com/coddy-project/homebrew-coddy), который ставится командой **`brew install coddy-project/coddy/coddy`**. Его **`Casks/coddy.rb`** генерируется, и вручную его не правят.
+До пользователей cask доходит через тап [coddy-project/homebrew-coddy-agent](https://github.com/coddy-project/homebrew-coddy-agent), который ставится командой **`brew install coddy-project/coddy-agent/coddy`**. Его **`Casks/coddy.rb`** генерируется, и вручную его не правят.
 
 ```bash
 make brew-publish VERSION=1.0.11
@@ -231,7 +231,7 @@ go build -tags=http,ui,scheduler,memory,cli,gateway,swarm,metrics ...
 | **`coddy_X.Y.Z_darwin_arm64.tar.gz`** | macOS Apple Silicon |
 | **`coddy_X.Y.Z_linux_amd64.deb`**, **`coddy_X.Y.Z_linux_arm64.deb`** | Debian, Ubuntu и производные |
 | **`coddy_X.Y.Z_linux_amd64.rpm`**, **`coddy_X.Y.Z_linux_arm64.rpm`** | Fedora, RHEL, openSUSE и производные |
-| **`coddy.rb`** | Homebrew cask для архивов macOS этого тега; тот же файл коммитится в тап [coddy-project/homebrew-coddy](https://github.com/coddy-project/homebrew-coddy) |
+| **`coddy.rb`** | Homebrew cask для архивов macOS этого тега; тот же файл коммитится в тап [coddy-project/homebrew-coddy-agent](https://github.com/coddy-project/homebrew-coddy-agent) |
 | **`SHA256SUMS`** | Контрольные суммы всех архивов и пакетов выше |
 
 Архивы **`.tar.gz`** содержат рядом с бинарником man-страницу и автодополнения оболочек; пакеты оборачивают бинарники Linux, которые только что собрало то же задание, а не компилируют свои, поэтому в **`.deb`**, **`.rpm`** и **`.tar.gz`** одного тега лежат побайтно одинаковые исполняемые файлы.
@@ -254,4 +254,4 @@ go install github.com/EvilFreelancer/coddy-agent/cmd/coddy@latest
 
 Так компилируется то, что модуль собирает по умолчанию, **без** ваших локальных **`TAGS`**. Чтобы получить известный набор возможностей (HTTP, веб-интерфейс, планировщик, память, консоль, шлюз мессенджеров), клонируйте репозиторий и используйте **`make build TAGS="http ui scheduler memory cli gateway swarm metrics"`** (или **`go build -tags=...`**, как выше).
 
-<!-- docsgen:source sha256=0cadf05d79ec86f6 -->
+<!-- docsgen:source sha256=0e02928e75015cc1 -->

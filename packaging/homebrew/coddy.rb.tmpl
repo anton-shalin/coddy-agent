@@ -6,10 +6,10 @@
 #
 # Current Homebrew loads a cask only out of a tap - a URL or a file path is
 # refused - so the release job publishes the rendered file to the tap
-# coddy-project/homebrew-coddy (scripts/publish-homebrew-tap.sh), and users run
-# `brew install coddy-project/coddy/coddy`. scripts/check-homebrew-cask.sh
-# installs it with a real brew on macOS. docs/getting-started/homebrew.md has
-# the whole route.
+# coddy-project/homebrew-coddy-agent (scripts/publish-homebrew-tap.sh), and
+# users run `brew install coddy-project/coddy-agent/coddy`.
+# scripts/check-homebrew-cask.sh installs it with a real brew on macOS.
+# docs/getting-started/homebrew.md has the whole route.
 #
 # The cask takes the same darwin archives `coddy update` takes, so a brew
 # install and a manual one are the same binary. The archives carry the man page

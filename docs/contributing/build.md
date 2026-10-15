@@ -121,8 +121,8 @@ Current Homebrew refuses a cask given by its path, so a rendered file is tried o
 local tap. On a Mac with Homebrew:
 
 ```bash
-make brew-cask-check                              # dist/coddy.rb from a local tap
-make brew-cask-check BREW_TAP=coddy-project/coddy # the published cask, by name
+make brew-cask-check                                    # dist/coddy.rb from a local tap
+make brew-cask-check BREW_TAP=coddy-project/coddy-agent # the published cask, by name
 ```
 
 **`scripts/check-homebrew-cask.sh`** installs the cask, runs **`brew style`** on it, checks that
@@ -145,8 +145,8 @@ optional form, and Coddy runs without tmux, so the cask names it and installs no
 ### Homebrew tap
 
 The cask reaches users through the tap
-[coddy-project/homebrew-coddy](https://github.com/coddy-project/homebrew-coddy), installed with
-**`brew install coddy-project/coddy/coddy`**. Its **`Casks/coddy.rb`** is generated and never edited
+[coddy-project/homebrew-coddy-agent](https://github.com/coddy-project/homebrew-coddy-agent), installed with
+**`brew install coddy-project/coddy-agent/coddy`**. Its **`Casks/coddy.rb`** is generated and never edited
 by hand.
 
 ```bash
@@ -332,7 +332,7 @@ On each SemVer git tag **`X.Y.Z`** that is on **`main`**, the [**Release binarie
 | **`coddy_X.Y.Z_darwin_arm64.tar.gz`** | macOS Apple Silicon |
 | **`coddy_X.Y.Z_linux_amd64.deb`**, **`coddy_X.Y.Z_linux_arm64.deb`** | Debian, Ubuntu and derivatives |
 | **`coddy_X.Y.Z_linux_amd64.rpm`**, **`coddy_X.Y.Z_linux_arm64.rpm`** | Fedora, RHEL, openSUSE and derivatives |
-| **`coddy.rb`** | Homebrew cask for the macOS archives of this tag; the same file is committed to the tap [coddy-project/homebrew-coddy](https://github.com/coddy-project/homebrew-coddy) |
+| **`coddy.rb`** | Homebrew cask for the macOS archives of this tag; the same file is committed to the tap [coddy-project/homebrew-coddy-agent](https://github.com/coddy-project/homebrew-coddy-agent) |
 | **`SHA256SUMS`** | Checksums for every archive and package above |
 
 The **`.tar.gz`** archives carry the man page and the shell completions beside the binary; the

@@ -7,7 +7,7 @@
 #                 change before a release carries it. Current Homebrew refuses a
 #                 cask given by its path, so a tap is the only way in;
 #   --tap NAME    the published cask, installed by name from that tap exactly as
-#                 the documentation says (default: coddy-project/coddy).
+#                 the documentation says (default: coddy-project/coddy-agent).
 #
 # Either way it checks that `coddy -v` prints the version, that the linked
 # binary lives in the Caskroom with no quarantine attribute left on it, that the
@@ -28,7 +28,7 @@
 set -euo pipefail
 
 cask_file=""
-tap="coddy-project/coddy"
+tap="coddy-project/coddy-agent"
 version=""
 keep=0
 

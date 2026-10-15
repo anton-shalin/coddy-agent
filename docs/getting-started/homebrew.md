@@ -29,15 +29,15 @@ shape for that job; it is only the wrong shape for Homebrew's own repository.
 ## Installing today
 
 ```bash
-brew install coddy-project/coddy/coddy
+brew install coddy-project/coddy-agent/coddy
 ```
 
-The tap [coddy-project/homebrew-coddy](https://github.com/coddy-project/homebrew-coddy) carries one
+The tap [coddy-project/homebrew-coddy-agent](https://github.com/coddy-project/homebrew-coddy-agent) carries one
 file, **`Casks/coddy.rb`**. Every release renders it with the checksums of its two macOS archives,
 attaches it to the release as **`coddy.rb`** and commits it to the tap
 (**`scripts/publish-homebrew-tap.sh`**), so **`brew upgrade --cask coddy`** sees each new release.
 Given the full name, Homebrew adds the tap and trusts that one cask. Homebrew 7 loads nothing else
-from a third-party tap until it is trusted; **`brew trust coddy-project/coddy`** trusts the whole tap,
+from a third-party tap until it is trusted; **`brew trust coddy-project/coddy-agent`** trusts the whole tap,
 and the short name then works in every command.
 
 The release asset on its own no longer installs. Outside **`HOMEBREW_DEVELOPER`** mode current

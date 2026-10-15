@@ -3,9 +3,9 @@ Feature: Coddy installs from its own Homebrew tap
   a file path is refused, and the command the documentation used to give,
   `brew install --cask <URL>`, ends at "No Cask with this name exists" (issue
   269). Every release therefore renders the cask of the two macOS archives it
-  has just built and publishes it to the tap coddy-project/homebrew-coddy, where
-  `brew install coddy-project/coddy/coddy` finds it by name and `brew upgrade`
-  follows the next release. The cask is written for the Homebrew of today:
+  has just built and publishes it to the tap coddy-project/homebrew-coddy-agent,
+  where `brew install coddy-project/coddy-agent/coddy` finds it by name and
+  `brew upgrade` follows the next release. The cask is written for the Homebrew of today:
   completions through their own stanzas, structured flight steps rather than
   Ruby blocks, and the quarantine Homebrew puts on every cask download lifted
   from the binary, which is not notarised.

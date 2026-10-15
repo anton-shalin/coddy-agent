@@ -157,10 +157,10 @@ See [build.md](../contributing/build.md#distribution-packages).
 ## macOS (Homebrew)
 
 ```bash
-brew install coddy-project/coddy/coddy
+brew install coddy-project/coddy-agent/coddy
 ```
 
-The cask lives in Coddy's own tap, [coddy-project/homebrew-coddy](https://github.com/coddy-project/homebrew-coddy),
+The cask lives in Coddy's own tap, [coddy-project/homebrew-coddy-agent](https://github.com/coddy-project/homebrew-coddy-agent),
 and every release updates it. The command adds the tap, trusts this one cask and installs the
 **`coddy`** binary from the macOS archive of the latest release, plus **`man coddy`** and the bash and zsh
 completions. It needs macOS 12 or later. It does not install **`tmux`**: its caveats, printed after
@@ -175,7 +175,7 @@ brew upgrade --cask coddy
 
 Homebrew 7 loads nothing from a third-party tap until it is trusted. Installing by the full name makes
 Homebrew trust that cask, which is why the later commands accept the short name **`coddy`**. To trust the
-whole tap, run **`brew trust coddy-project/coddy`** once; **`brew install --cask coddy`** then works
+whole tap, run **`brew trust coddy-project/coddy-agent`** once; **`brew install --cask coddy`** then works
 by name too. Removal goes through Homebrew:
 
 ```bash
