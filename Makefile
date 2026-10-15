@@ -1,4 +1,4 @@
-.PHONY: build build-acp android check-android ui-deps ui-build ui-test ui-typecheck ui-format-check fmt-check test test-matrix test-race test-cache test-perf bench-cli-startup bench-cli-startup-real print-test-tag-sets print-full-tags print-lint-tags-no-ui test-agent-rules test-opencode-rules check-windows lint lint-windows clean install print-version hooks deb rpm brew brew-formula brew-check check-image site-schema site-schema-check docs docs-check docs-stamp docs-changelog docs-fast site-docs site-docs-check skills-vendor skills-vendor-check security sec-trivy sec-semgrep sec-govulncheck sec-report
+.PHONY: build build-acp android check-android ui-deps ui-build ui-test ui-typecheck ui-format-check fmt-check test test-matrix test-race test-cache test-perf bench-cli-startup bench-cli-startup-real print-test-tag-sets print-full-tags print-lint-tags-no-ui test-agent-rules test-opencode-rules check-windows lint lint-windows clean install print-version hooks deb rpm brew brew-cask-check brew-publish brew-formula brew-check check-image site-schema site-schema-check docs docs-check docs-stamp docs-changelog docs-fast site-docs site-docs-check skills-vendor skills-vendor-check security sec-trivy sec-semgrep sec-govulncheck sec-report
 
 # ---- Build options (extend when you add optional Go build tags) ----
 #   TAGS   optional extra `go build -tags` values (space-separated).
@@ -145,6 +145,12 @@ install:
 # macOS archives of a release. It needs those archives, so pass the version of a
 # published release: make brew VERSION=1.0.11
 #
+# `brew-cask-check` installs that rendered cask with a real Homebrew out of a
+# throwaway local tap and checks what it linked (macOS only); BREW_TAP=
+# coddy-project/coddy checks the published cask by name instead. `brew-publish`
+# commits the rendered cask to the tap coddy-project/homebrew-coddy, which the
+# release job does for every release.
+#
 # `brew-formula` renders the Homebrew formula (packaging/homebrew/coddy-formula.rb.tmpl)
 # for the source archive of a release - that is the artefact homebrew/core takes,
 # because Homebrew wants open-source command-line software built from source.
@@ -167,6 +173,12 @@ rpm:
 
 brew:
 	scripts/build-homebrew-cask.sh --version "$(VERSION)" --out "$(DIST_DIR)"
+
+brew-cask-check:
+	scripts/check-homebrew-cask.sh $(if $(BREW_TAP),--tap "$(BREW_TAP)",--cask "$(DIST_DIR)/coddy.rb")
+
+brew-publish:
+	scripts/publish-homebrew-tap.sh --version "$(VERSION)" --cask "$(DIST_DIR)/coddy.rb"
 
 brew-formula:
 	scripts/build-homebrew-formula.sh --version "$(VERSION)" --out "$(DIST_DIR)/formula"
