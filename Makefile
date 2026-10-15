@@ -2,7 +2,7 @@
 
 # ---- Build options (extend when you add optional Go build tags) ----
 #   TAGS   optional extra `go build -tags` values (space-separated).
-#     Recommended full binary: make build TAGS="http ui scheduler memory cli gateway swarm"
+#     Recommended full binary: make build TAGS="http ui scheduler memory cli gateway swarm metrics"
 #     http     OpenAI-compatible gateway and web UI (coddy serve)
 #     ui       embedded SPA for GET / (combine with http); runs npm ui-build first
 #     scheduler       cron scheduler daemon and tools (see external/scheduler/)
@@ -12,12 +12,14 @@
 #     gateway         all messenger gateways: Telegram and Pachca (superset of both)
 #     cli      interactive console TUI (bare `coddy` on a terminal; see external/cli/)
 #     swarm    stateless relay that aggregates nodes (coddy serve; see external/swarm/)
+#     metrics  Prometheus exporter, off by default (coddy serve; see external/metrics/)
 #   Examples: make build TAGS=http
 #             make build TAGS="http ui"
 #             make build TAGS="http scheduler"
 #             make build TAGS="http ui scheduler memory"
 #             make build TAGS="gateway.telegram"
-#             make build TAGS="http ui scheduler memory cli gateway swarm"
+#             make build TAGS="gateway metrics"
+#             make build TAGS="http ui scheduler memory cli gateway swarm metrics"
 #   Omit memory (or other tags) for a slimmer binary; runtime memory.enable only applies when built with memory.
 #   VERSION / LDFLAGS   embedded version string (see print-version).
 
@@ -37,7 +39,7 @@ GOEXE := $(shell go env GOEXE)
 BINARY := $(BUILD_DIR)/coddy$(GOEXE)
 
 # Default tag set for `make install` when build/coddy is missing (matches Docker BUILD_TAGS).
-FULL_TAGS := http ui scheduler memory cli gateway swarm
+FULL_TAGS := http ui scheduler memory cli gateway swarm metrics
 
 # Plain `make` must run `build`. Without this, the first rule would be `print-version`.
 .DEFAULT_GOAL := build
@@ -303,6 +305,8 @@ TEST_TAG_SETS := \
 	gateway \
 	http,scheduler,ui,memory,cli,gateway \
 	http,scheduler,ui,memory,cli,swarm \
+	metrics \
+	gateway,metrics \
 	$(FULL_TAGS_CSV)
 
 # Express run: the SPA suite, then the whole Go tree once with every optional
@@ -426,7 +430,8 @@ check-windows:
 	GOOS=windows go vet -tags=http,swarm ./...
 	GOOS=windows go vet -tags=gateway ./...
 	GOOS=windows go vet -tags=http,scheduler,memory,cli,gateway ./...
-	GOOS=windows go vet -tags=http,scheduler,memory,cli,gateway,swarm ./...
+	GOOS=windows go vet -tags=metrics ./...
+	GOOS=windows go vet -tags=http,scheduler,memory,cli,gateway,swarm,metrics ./...
 
 # Type-check the Android build without a device, test files included.
 #

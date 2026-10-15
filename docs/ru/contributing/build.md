@@ -19,7 +19,7 @@
 **HTTP-шлюз**, **встроенный SPA**, **планировщик**, **память**, **шлюз мессенджеров** (**`gateway`**, см. [`docs/surfaces/gateway.md`](../surfaces/gateway.md)) и **интерактивная консоль** (**`cli`**, **`coddy`** без аргументов в терминале, см. [`docs/surfaces/console.md`](../surfaces/console.md)) управляются тегами сборки Go. Один бинарник, который соответствует **Docker**-образу по умолчанию и включает все необязательные возможности, собирается так.
 
 ```bash
-make build TAGS="http ui scheduler memory cli gateway swarm"
+make build TAGS="http ui scheduler memory cli gateway swarm metrics"
 ```
 
 Результат - **`build/coddy`**.
@@ -29,26 +29,26 @@ make build TAGS="http ui scheduler memory cli gateway swarm"
 ```bash
 make ui-build   # only when using -tags=...,ui,... with http; Makefile runs this for you on `make build`
 VERSION="$(make -s print-version)"
-go build -tags=http,ui,scheduler,memory,cli \
+go build -tags=http,ui,scheduler,memory,cli,gateway,swarm,metrics \
   -ldflags "-X github.com/EvilFreelancer/coddy-agent/internal/version.Version=${VERSION}" \
   -o build/coddy \
   ./cmd/coddy/
 ```
 
-[**Dockerfile**](../../../Dockerfile) следует той же схеме, передаёт теги через запятую в **`BUILD_TAGS`** (по умолчанию **`http,scheduler,ui,memory,gateway,cli`**) и, кроме флага версии **`X`**, убирает отладочные символы через **`-ldflags "-s -w ..."`**.
+[**Dockerfile**](../../../Dockerfile) следует той же схеме, передаёт теги через запятую в **`BUILD_TAGS`** (по умолчанию **`http,scheduler,ui,memory,gateway,cli,swarm,metrics`**) и, кроме флага версии **`X`**, убирает отладочные символы через **`-ldflags "-s -w ..."`**.
 
 ## Установка в PATH
 
 **`make install`** копирует **`build/coddy`** в каталог из вашего **`PATH`**:
 
-- если **`build/coddy`** уже есть (например, после **`make build TAGS="http ui scheduler memory cli gateway swarm"`**), он устанавливается как есть, без пересборки;
-- если бинарника нет, **`make install`** сначала запускает **`make build TAGS="http ui scheduler memory cli gateway swarm"`**.
+- если **`build/coddy`** уже есть (например, после **`make build TAGS="http ui scheduler memory cli gateway swarm metrics"`**), он устанавливается как есть, без пересборки;
+- если бинарника нет, **`make install`** сначала запускает **`make build TAGS="http ui scheduler memory cli gateway swarm metrics"`**.
 
 - **root** - **`/usr/local/bin/coddy`**, man-страница в **`/usr/local/share/man/man1`**;
 - **не root** - **`~/.local/bin/coddy`** (убедитесь, что этот каталог есть в **`PATH`**), man-страница в **`~/.local/share/man/man1`**.
 
 ```bash
-make build TAGS="http ui scheduler memory cli gateway swarm"
+make build TAGS="http ui scheduler memory cli gateway swarm metrics"
 make install
 ```
 
@@ -66,7 +66,7 @@ make rpm
 | Переменная | По умолчанию | Назначение |
 |----------|---------|------|
 | **`PKG_ARCHS`** | **`GOARCH`** хоста | архитектуры для упаковки, например **`"amd64 arm64"`** |
-| **`PKG_TAGS`** | **`http ui scheduler memory cli gateway swarm`** | теги сборки упакованного бинарника |
+| **`PKG_TAGS`** | **`http ui scheduler memory cli gateway swarm metrics`** | теги сборки упакованного бинарника |
 | **`DIST_DIR`** | **`dist`** | куда кладутся пакеты |
 
 ```bash
@@ -130,7 +130,7 @@ make build
 ## Android (Termux)
 
 ```bash
-make android TAGS="http ui scheduler memory cli gateway swarm"   # build/coddy-android-arm64, -amd64
+make android TAGS="http ui scheduler memory cli gateway swarm metrics"   # build/coddy-android-arm64, -amd64
 make check-android                                              # go vet with GOOS=android, test files included
 ```
 
@@ -160,7 +160,7 @@ make -s print-version
 
 ```bash
 go build \
-  -tags=http,ui,scheduler,memory,cli \
+  -tags=http,ui,scheduler,memory,cli,gateway,swarm,metrics \
   -ldflags "-X github.com/EvilFreelancer/coddy-agent/internal/version.Version=$(make -s print-version)" \
   -o build/coddy \
   ./cmd/coddy/
@@ -171,13 +171,13 @@ go build \
 В **`Makefile`** список **`TAGS`** разделяется **пробелами**.
 
 ```bash
-make build TAGS="http ui scheduler memory cli gateway swarm"
+make build TAGS="http ui scheduler memory cli gateway swarm metrics"
 ```
 
 **`go build`** ожидает список **через запятую** (без пробелов).
 
 ```bash
-go build -tags=http,ui,scheduler,memory,cli ...
+go build -tags=http,ui,scheduler,memory,cli,gateway,swarm,metrics ...
 ```
 
 Порядок этих тегов не важен.
@@ -194,8 +194,9 @@ go build -tags=http,ui,scheduler,memory,cli ...
 | **`gateway.telegram`** | Адаптер Telegram-бота, который запускает **`coddy serve`** при **`gateways.telegram.enable`**; сессии на пользователя или группу, контроль доступа | [`docs/surfaces/gateway.md`](../surfaces/gateway.md) · [`external/gateway/`](../../../external/gateway) |
 | **`gateway`** | Все адаптеры мессенджеров (надмножество **`gateway.telegram`**; включает будущие адаптеры Discord и Slack) | [`docs/surfaces/gateway.md`](../surfaces/gateway.md) |
 | **`swarm`** | Релей без состояния, который объединяет узлы и запускается **`coddy serve`** при **`swarm.enable`** | [`docs/operate/swarm.md`](../operate/swarm.md) · [`external/swarm/`](../../../external/swarm) |
+| **`metrics`** | Экспортёр Prometheus, который запускает **`coddy serve`** при **`metrics.enable`** (по умолчанию выключен); отдаёт **`/metrics`** на отдельном порту | [`docs/operate/monitoring.md`](../operate/monitoring.md) · [`external/metrics/`](../../../external/metrics) |
 
-**`make test`** - экспресс-прогон, то есть всё дерево один раз со всеми необязательными модулями (**`http,ui,scheduler,memory,cli,gateway,swarm`**). **`make test-matrix`** перебирает все комбинации (список **`TEST_TAG_SETS`** в [`Makefile`](../../../Makefile)); CI прогоняет эту матрицу на каждом пул-реквесте, по заданию на комбинацию. Задание `cli` к тому же запускает собранный бинарник и управляет консолью через настоящий pty (`examples/cli/cli_e2e_startup.py`), а задание **Telegram stand (tgfake)** запускает Telegram-бота против релизного бинарника [tgfake](tgfake.md) (`examples/gateway/tg_e2e_offline.sh`). Задание **Docker image** собирает образ среды выполнения для **`linux/amd64`** и **`linux/arm64`**, платформ, которые публикует релиз, и проверяет, что в каждом варианте лежит бинарник его собственной платформы (**`make check-image`**, см. [Проверка платформ образа](../getting-started/docker.md#проверка-платформ-образа)). **`make test-race`** прогоняет всё дерево под детектором гонок Go со всеми тегами, кроме `ui`; CI запускает его на каждом пул-реквесте в задании **Race detector**, а `GOFLAGS=-count=3 make test-race` локально повторяет каждый тест, чтобы поймать редко проявляющуюся гонку. Две группы можно запускать отдельно. **`make test-cache`** - группа кэша промптов (спецификации `features/prompt_cache_*.feature` и тесты `TestPromptCache*`, входят в `make test`; они проверяют, что каждый запрос отправляет провайдеру, байт в байт на протяжении сессии), а **`make test-perf`** - группа производительности (бенчмарки файлов `perf_test.go`, никогда не входят в `make test`; они измеряют время работы, которую повторяет каждый ход, и стоимость контекста сессии над собственными правилами этого репозитория в виде `system-tokens`, `request-tokens` и `duplicate-rules`).
+**`make test`** - экспресс-прогон, то есть всё дерево один раз со всеми необязательными модулями (**`http,ui,scheduler,memory,cli,gateway,swarm,metrics`**). **`make test-matrix`** перебирает все комбинации (список **`TEST_TAG_SETS`** в [`Makefile`](../../../Makefile)); CI прогоняет эту матрицу на каждом пул-реквесте, по заданию на комбинацию. Задание `cli` к тому же запускает собранный бинарник и управляет консолью через настоящий pty (`examples/cli/cli_e2e_startup.py`), а задание **Telegram stand (tgfake)** запускает Telegram-бота против релизного бинарника [tgfake](tgfake.md) (`examples/gateway/tg_e2e_offline.sh`; запускаемый им бинарник собран с `gateway metrics`, и после чата скрипт снимает метрики экспортёра). Задание **Docker image** собирает образ среды выполнения для **`linux/amd64`** и **`linux/arm64`**, платформ, которые публикует релиз, и проверяет, что в каждом варианте лежит бинарник его собственной платформы (**`make check-image`**, см. [Проверка платформ образа](../getting-started/docker.md#проверка-платформ-образа)). **`make test-race`** прогоняет всё дерево под детектором гонок Go со всеми тегами, кроме `ui`; CI запускает его на каждом пул-реквесте в задании **Race detector**, а `GOFLAGS=-count=3 make test-race` локально повторяет каждый тест, чтобы поймать редко проявляющуюся гонку. Две группы можно запускать отдельно. **`make test-cache`** - группа кэша промптов (спецификации `features/prompt_cache_*.feature` и тесты `TestPromptCache*`, входят в `make test`; они проверяют, что каждый запрос отправляет провайдеру, байт в байт на протяжении сессии), а **`make test-perf`** - группа производительности (бенчмарки файлов `perf_test.go`, никогда не входят в `make test`; они измеряют время работы, которую повторяет каждый ход, и стоимость контекста сессии над собственными правилами этого репозитория в виде `system-tokens`, `request-tokens` и `duplicate-rules`).
 
 В Windows запускайте Make через Git Bash. Цели сборки и установки используют суффикс исполняемых файлов Go (`coddy.exe`), в том числе для бинарника, который запускает `make docs`. Фикстуры экранируют родные пути Windows в JSON и YAML, а проверки упаковки принимают чекауты с CRLF. Проверки прав доступа POSIX в Windows не применяются; тесты, которые вызывают сбои через права на каталоги или файлы Unix, там пропускаются (и при запуске от root). Сценарий ACP с символической ссылкой пропускается, только если Windows не даёт права на создание символических ссылок; чтобы его выполнить, включите режим разработчика или запустите терминал с повышенными правами. Проверки ресурсов Docker охватывают и чекауты Git с `core.symlinks=false`, читая режимы ссылок из индекса.
 
@@ -220,7 +221,7 @@ go build -tags=http,ui,scheduler,memory,cli ...
 
 Архивы **`.tar.gz`** содержат рядом с бинарником man-страницу и автодополнения оболочек; пакеты оборачивают бинарники Linux, которые только что собрало то же задание, а не компилируют свои, поэтому в **`.deb`**, **`.rpm`** и **`.tar.gz`** одного тега лежат побайтно одинаковые исполняемые файлы.
 
-Теги соответствуют полному набору возможностей: **`http`**, **`ui`**, **`scheduler`**, **`memory`**, **`cli`**, **`gateway`**, **`swarm`**. Ручной запуск, когда тег уже существует, выглядит так.
+Теги соответствуют полному набору возможностей: **`http`**, **`ui`**, **`scheduler`**, **`memory`**, **`cli`**, **`gateway`**, **`swarm`**, **`metrics`**. Ручной запуск, когда тег уже существует, выглядит так.
 
 ```bash
 gh workflow run "Release binaries" --ref X.Y.Z -f tag=X.Y.Z
@@ -236,6 +237,6 @@ gh workflow run "Release binaries" --ref X.Y.Z -f tag=X.Y.Z
 go install github.com/EvilFreelancer/coddy-agent/cmd/coddy@latest
 ```
 
-Так компилируется то, что модуль собирает по умолчанию, **без** ваших локальных **`TAGS`**. Чтобы получить известный набор возможностей (HTTP, веб-интерфейс, планировщик, память, консоль, шлюз мессенджеров), клонируйте репозиторий и используйте **`make build TAGS="http ui scheduler memory cli gateway swarm"`** (или **`go build -tags=...`**, как выше).
+Так компилируется то, что модуль собирает по умолчанию, **без** ваших локальных **`TAGS`**. Чтобы получить известный набор возможностей (HTTP, веб-интерфейс, планировщик, память, консоль, шлюз мессенджеров), клонируйте репозиторий и используйте **`make build TAGS="http ui scheduler memory cli gateway swarm metrics"`** (или **`go build -tags=...`**, как выше).
 
-<!-- docsgen:source sha256=4332fb0f693ff713 -->
+<!-- docsgen:source sha256=bd7553aa3326b86d -->

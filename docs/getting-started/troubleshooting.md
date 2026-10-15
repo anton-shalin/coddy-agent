@@ -80,12 +80,12 @@ For access from other machines bind wider and require a token: `coddy serve -H 0
 
 **Symptom.** `coddy serve` refuses to start with `<key> is true but this binary has no <surface> support (rebuild with -tags <tag>)`; bare `coddy` prints the usage instead of opening the console and `coddy cli` answers `interactive console is not built in`; `coddy serve` with nothing enabled says `no subsystem is enabled`.
 
-**Cause.** The console, the HTTP API, the web UI, the scheduler, the memory subagent, the messenger gateway and the swarm relay are Go build tags. A plain `make build` (or `go build`, or `go install ...@latest`) produces the lean ACP binary without them. `coddy serve` treats an enabled subsystem the binary cannot run as an error rather than a warning, so a bot that would otherwise be silently offline is refused by name.
+**Cause.** The console, the HTTP API, the web UI, the scheduler, the memory subagent, the messenger gateway, the swarm relay and the Prometheus exporter are Go build tags. A plain `make build` (or `go build`, or `go install ...@latest`) produces the lean ACP binary without them. `coddy serve` treats an enabled subsystem the binary cannot run as an error rather than a warning, so a bot that would otherwise be silently offline is refused by name.
 
 **Fix.** Use a release build - the GitHub Release archives, the `.deb` and `.rpm` packages and the Homebrew cask are built with every tag, and the Docker image ships the API, the web UI, the scheduler, the memory subagent, the console and the gateway - or build it yourself:
 
 ```bash
-make build TAGS="http ui scheduler memory cli gateway swarm"
+make build TAGS="http ui scheduler memory cli gateway swarm metrics"
 ```
 
 `ui` needs Node.js and npm (the Makefile runs `ui-build` first). `coddy serve --dry-run` reports a surface this binary was not built with without starting anything. Tag reference: [Build from source](../contributing/build.md#build-tags-reference).
@@ -349,7 +349,7 @@ A build from source that stops at the first `FROM` with `failed to parse platfor
 
   ```bash
   (cd external/ui && npm install && npm run build:go)
-  make build TAGS="http ui scheduler memory cli gateway swarm"
+  make build TAGS="http ui scheduler memory cli gateway swarm metrics"
   ```
 
 - **Updates from scripts.** `coddy update -y --no-restart` installs without starting Coddy again, for a CI step with no console to run in.

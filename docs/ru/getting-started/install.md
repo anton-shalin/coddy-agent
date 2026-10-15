@@ -92,7 +92,7 @@ SSH-соединение. **`apt`** показывает его в списке 
 
 | Путь | Что |
 |------|------|
-| **`/usr/bin/coddy`** | Полный бинарник (**`http`**, **`ui`**, **`scheduler`**, **`memory`**, **`cli`**, **`gateway`**, **`swarm`**) |
+| **`/usr/bin/coddy`** | Полный бинарник (**`http`**, **`ui`**, **`scheduler`**, **`memory`**, **`cli`**, **`gateway`**, **`swarm`**, **`metrics`**) |
 | **`/usr/share/man/man1/coddy.1.gz`** | **`man coddy`** |
 | **`/usr/share/bash-completion/completions/coddy`** | автодополнение bash |
 | **`/usr/share/zsh/site-functions/_coddy`** | автодополнение zsh |
@@ -277,4 +277,4 @@ coddy update -y
 
 См. [build.md](../contributing/build.md) и раздел README **Other installation methods**.
 
-<!-- docsgen:source sha256=cccf085abf891453 -->
+<!-- docsgen:source sha256=916d7f0b8c651a3c -->

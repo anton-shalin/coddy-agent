@@ -80,12 +80,12 @@ coddy serve -P 12346          # or httpserver.port in the file
 
 **Симптом.** `coddy serve` отказывается запускаться с `<key> is true but this binary has no <surface> support (rebuild with -tags <tag>)`; `coddy` без аргументов выводит справку по использованию вместо консоли, а `coddy cli` отвечает `interactive console is not built in`; `coddy serve`, в котором ничего не включено, сообщает `no subsystem is enabled`.
 
-**Причина.** Консоль, HTTP API, веб-интерфейс, планировщик, субагент памяти, шлюз мессенджеров и релей роя подключаются тегами сборки Go. Обычный `make build` (или `go build`, или `go install ...@latest`) собирает облегчённый бинарник для ACP без них. `coddy serve` считает включённую подсистему, которую бинарник не может запустить, ошибкой, а не предупреждением, поэтому бот, который иначе молча остался бы офлайн, отвергается с указанием имени.
+**Причина.** Консоль, HTTP API, веб-интерфейс, планировщик, субагент памяти, шлюз мессенджеров, релей роя и экспортёр Prometheus подключаются тегами сборки Go. Обычный `make build` (или `go build`, или `go install ...@latest`) собирает облегчённый бинарник для ACP без них. `coddy serve` считает включённую подсистему, которую бинарник не может запустить, ошибкой, а не предупреждением, поэтому бот, который иначе молча остался бы офлайн, отвергается с указанием имени.
 
 **Решение.** Возьмите релизную сборку - архивы GitHub Release, пакеты `.deb` и `.rpm` и Homebrew cask собраны со всеми тегами, а Docker-образ включает API, веб-интерфейс, планировщик, субагент памяти, консоль и шлюз, - или соберите бинарник сами.
 
 ```bash
-make build TAGS="http ui scheduler memory cli gateway swarm"
+make build TAGS="http ui scheduler memory cli gateway swarm metrics"
 ```
 
 Для `ui` нужны Node.js и npm (Makefile сначала запускает `ui-build`). `coddy serve --dry-run` сообщает об интерфейсе, без которого собран бинарник, ничего не запуская. Справочник тегов - на странице [Сборка из исходников](../contributing/build.md#справочник-тегов-сборки).
@@ -349,7 +349,7 @@ file ./coddy-from-image   # ARM aarch64 on an arm64 host
 
   ```bash
   (cd external/ui && npm install && npm run build:go)
-  make build TAGS="http ui scheduler memory cli gateway swarm"
+  make build TAGS="http ui scheduler memory cli gateway swarm metrics"
   ```
 
 - **Обновления из скриптов.** `coddy update -y --no-restart` устанавливает обновление, не запуская Coddy заново, для шага CI, где нет консоли;
@@ -379,4 +379,4 @@ coddy acp --log-level debug
 
 Те же настройки можно сохранить в разделе `logger` файла `config.yaml` (`level`, `levels`, `outputs`, `file`, `format`). Справка - [Конфигурация](configuration.md), [`logger`](../reference/config.md#logger).
 
-<!-- docsgen:source sha256=78acc4f3be7e6dec -->
+<!-- docsgen:source sha256=9e2db28ec762f1b2 -->
