@@ -184,7 +184,8 @@ brew uninstall --cask coddy      # brew zap --cask coddy also removes ~/.coddy
 
 Homebrew sets the quarantine attribute on every cask download, and the Coddy binary is not
 notarised, so the cask removes that attribute from **`coddy`** after the install and macOS lets
-the first run through.
+the first run through. If macOS stops the first run all the same, remove it yourself:
+**`xattr -d com.apple.quarantine "$(which coddy)"`**.
 
 The command this page used to give, **`brew install --cask https://github.com/coddy-project/coddy-agent/releases/latest/download/coddy.rb`**,
 no longer works: current Homebrew refuses a cask given by its URL or by a file path and answers

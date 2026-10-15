@@ -36,11 +36,17 @@ func skipWithoutBash(t *testing.T) {
 
 // isolatedGitEnv keeps the operator's git configuration out of the scripts, so
 // a commit identity or a default branch set on this machine cannot make a test
-// pass that would fail on a CI runner, which has neither.
+// pass that would fail on a CI runner, which has neither. useConfigOnly stops
+// git from making up an identity from the user and host names, which it does
+// on some machines and not on others.
 func isolatedGitEnv(t *testing.T) []string {
 	t.Helper()
 	home := t.TempDir()
-	env := []string{"HOME=" + home, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + filepath.Join(home, "gitconfig")}
+	global := filepath.Join(home, "gitconfig")
+	if err := os.WriteFile(global, []byte("[user]\n\tuseConfigOnly = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{"HOME=" + home, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + global}
 	for _, kv := range os.Environ() {
 		name, _, _ := strings.Cut(kv, "=")
 		switch {
@@ -55,7 +61,18 @@ func isolatedGitEnv(t *testing.T) []string {
 // runScript runs one of the repository's scripts and returns what it printed.
 func runScript(t *testing.T, env []string, script string, args ...string) (string, error) {
 	t.Helper()
-	cmd := exec.Command("bash", append([]string{filepath.Join("..", "..", "scripts", script)}, args...)...)
+	return runScriptIn(t, "", env, script, args...)
+}
+
+// runScriptIn runs a script from dir ("" for the test's own directory).
+func runScriptIn(t *testing.T, dir string, env []string, script string, args ...string) (string, error) {
+	t.Helper()
+	path, err := filepath.Abs(filepath.Join("..", "..", "scripts", script))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bash", append([]string{path}, args...)...)
+	cmd.Dir = dir
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	return string(out), err
@@ -416,5 +433,36 @@ func TestHomebrewCaskTakesChecksumsFromTheRelease(t *testing.T) {
 	}
 	if out, err := runScript(t, env, "build-homebrew-cask.sh", "--version", "1.3.14", "--out", t.TempDir(), "--release-url", base); err == nil {
 		t.Errorf("a SHA256SUMS without the darwin archives rendered a cask:\n%s", out)
+	}
+}
+
+func TestPublishHomebrewTapCommitsWithoutTheCallersRepoIdentity(t *testing.T) {
+	// `make brew-publish` runs from a checkout that may carry its own
+	// user.email; the commit is made in a fresh clone of the tap, which does
+	// not inherit it, so the identity has to be judged there.
+	skipWithoutBash(t)
+	env := isolatedGitEnv(t)
+	dir := t.TempDir()
+	writeDarwinArchives(t, dir, "1.3.14")
+	cask, err := renderCask(t, env, dir, "1.3.14")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tap := newTap(t, env, "1.3.13")
+	caller := t.TempDir()
+	for _, args := range [][]string{{"init", "--quiet"}, {"config", "user.email", "operator@example.invalid"}, {"config", "user.name", "Operator"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = caller
+		cmd.Env = env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	out, err := runScriptIn(t, caller, env, "publish-homebrew-tap.sh", "--version", "1.3.14", "--cask", cask, "--tap-repo", tap)
+	if err != nil {
+		t.Fatalf("publish from a checkout with a local identity: %v\n%s", err, out)
+	}
+	if got := tapGit(t, env, tap, "show", "main:Casks/coddy.rb"); got != readRepoFile(t, cask) {
+		t.Errorf("the tap's cask was not published:\n%s", got)
 	}
 }

@@ -223,6 +223,7 @@ jobs:
         env:
           VERSION: ${{ steps.git_tag.outputs.tag }}
           HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           if [ -z "$HOMEBREW_TAP_DEPLOY_KEY" ]; then

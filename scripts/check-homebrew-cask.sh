@@ -13,14 +13,17 @@
 # binary lives in the Caskroom with no quarantine attribute left on it, that the
 # man page and both completions are linked, that `coddy update` names
 # `brew upgrade --cask coddy` and that this command runs. Then it uninstalls the
-# cask and removes the tap it added, unless --keep.
+# cask and removes the tap it added, unless --keep. Nothing it runs turns on
+# Homebrew's developer mode, which would stay on for every later brew command.
 #
 # macOS with Homebrew only; it refuses to run over an installed coddy cask.
 #
 # Usage:
 #   scripts/check-homebrew-cask.sh [--cask FILE | --tap NAME] [--version VER] [--keep]
 #
-#   --version VER   version `coddy -v` must print (default: the installed cask's)
+#   --version VER   oldest version the installed cask may be: after a release,
+#                   the one it has just published (a re-run for an older tag
+#                   leaves a newer cask in the tap, which passes)
 #   --keep          leave the cask installed and the tap in place
 set -euo pipefail
 
@@ -35,18 +38,36 @@ while [ $# -gt 0 ]; do
         --tap) tap="$2"; shift 2 ;;
         --version) version="$2"; shift 2 ;;
         --keep) keep=1; shift ;;
-        -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,28p' "$0"; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
 
 step() { printf '\n==> %s\n' "$*"; }
+
+# version_lt succeeds when X.Y.Z $1 sorts before X.Y.Z $2, part by part as
+# numbers.
+version_lt() {
+    local IFS=.
+    local -a a b
+    read -r -a a <<< "$1"
+    read -r -a b <<< "$2"
+    local i
+    for i in 0 1 2; do
+        if (( 10#${a[i]} < 10#${b[i]} )); then return 0; fi
+        if (( 10#${a[i]} > 10#${b[i]} )); then return 1; fi
+    done
+    return 1
+}
 fail() {
     echo "check-homebrew-cask: $*" >&2
     exit 1
 }
 
 [ "$(uname -s)" = "Darwin" ] || fail "the cask installs macOS archives; run this on macOS"
+# Developer mode lifts the rules a user's Homebrew applies (casks from paths and
+# URLs among them), so the check runs without it.
+unset HOMEBREW_DEVELOPER
 command -v brew >/dev/null 2>&1 || fail "brew is not on PATH"
 if brew list --cask coddy >/dev/null 2>&1; then
     fail "a coddy cask is already installed; uninstall it first (brew uninstall --cask coddy)"
@@ -71,10 +92,12 @@ if [ -n "$cask_file" ]; then
     tap="coddy-check/local"
     brew untap "$tap" >/dev/null 2>&1 || true
     step "a throwaway tap ${tap} with ${cask_file}"
-    brew tap-new --no-git "$tap" >/dev/null
+    # A tap is a directory under Library/Taps; `brew tap-new` would also turn
+    # Homebrew's developer mode on for good, on whatever Mac runs this.
+    tap_dir="$(brew --repository)/Library/Taps/coddy-check/homebrew-local"
+    mkdir -p "${tap_dir}/Casks"
     added_tap="$tap"
-    mkdir -p "$(brew --repository "$tap")/Casks"
-    cp "$cask_file" "$(brew --repository "$tap")/Casks/coddy.rb"
+    cp "$cask_file" "${tap_dir}/Casks/coddy.rb"
 elif ! brew tap | grep -qx "$tap"; then
     # `brew install <tap>/coddy` adds the tap by itself; remember to remove it.
     added_tap="$tap"
@@ -86,14 +109,19 @@ full="${tap}/coddy"
 step "brew install ${full}"
 brew install "$full"
 
-# After the install, so the tap a by-name install adds is there to read.
+# After the install, so the tap a by-name install adds is there to read. style
+# is a developer command: without HOMEBREW_DEVELOPER in its environment brew
+# turns developer mode on for good (homebrew.devcmdrun), and from then on
+# `brew update` follows Homebrew's main branch instead of its releases.
 step "brew style ${full}"
-brew style --cask "$full"
+HOMEBREW_DEVELOPER=1 brew style --cask "$full"
 
 installed=$(brew list --cask --versions coddy | awk '{print $2}')
 [ -n "$installed" ] || fail "brew does not list coddy after the install"
-version="${version:-$installed}"
-[ "$installed" = "$version" ] || fail "brew installed coddy ${installed}, want ${version}"
+if [ -n "$version" ] && version_lt "$installed" "$version"; then
+    fail "brew installed coddy ${installed}, older than ${version}"
+fi
+version="$installed"
 
 step "the linked binary"
 bin="${prefix}/bin/coddy"
@@ -108,6 +136,14 @@ echo "$printed"
 grep -qF "$version" <<< "$printed" || fail "coddy -v does not print ${version}"
 
 step "quarantine"
+# Homebrew quarantines the download; the cask's postflight step is what keeps
+# the attribute off the binary. Print both, so the log shows the step at work.
+download=$(brew --cache --cask "$full" 2>/dev/null || true)
+if [ -n "$download" ] && xattr -p com.apple.quarantine "$download" >/dev/null 2>&1; then
+    echo "the download ${download} carries com.apple.quarantine"
+else
+    echo "the download ${download:-(not in the cache)} carries no com.apple.quarantine"
+fi
 xattr -l "$target" || true
 if xattr -p com.apple.quarantine "$target" >/dev/null 2>&1; then
     fail "${target} still carries com.apple.quarantine; Gatekeeper would stop its first run"

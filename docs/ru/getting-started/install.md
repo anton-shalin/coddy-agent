@@ -185,7 +185,9 @@ brew uninstall --cask coddy      # brew zap --cask coddy also removes ~/.coddy
 ```
 
 Homebrew ставит атрибут карантина на каждую загрузку cask, а бинарник Coddy не нотаризован. Поэтому
-после установки cask снимает этот атрибут с **`coddy`**, и macOS пропускает первый запуск.
+после установки cask снимает этот атрибут с **`coddy`**, и macOS пропускает первый запуск. Если macOS
+всё же остановит первый запуск, снимите атрибут сами командой
+**`xattr -d com.apple.quarantine "$(which coddy)"`**.
 
 Команда, которую эта страница давала раньше,
 **`brew install --cask https://github.com/coddy-project/coddy-agent/releases/latest/download/coddy.rb`**,
@@ -292,4 +294,4 @@ coddy update -y
 
 См. [build.md](../contributing/build.md) и раздел README **Other installation methods**.
 
-<!-- docsgen:source sha256=854ee14b214ad144 -->
+<!-- docsgen:source sha256=6d00ca4e5585587e -->

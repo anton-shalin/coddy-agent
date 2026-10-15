@@ -23,6 +23,9 @@
 #   HOMEBREW_TAP_DEPLOY_KEY   private SSH key with write access to the tap - the
 #                             release job's secret. Without it git pushes with
 #                             the caller's own credentials.
+#   GITHUB_TOKEN              optional; authenticates the read of GitHub's SSH
+#                             host keys, which otherwise shares the hourly limit
+#                             of unauthenticated API calls with the whole runner
 set -euo pipefail
 
 version=""
@@ -36,7 +39,7 @@ while [ $# -gt 0 ]; do
         --cask) cask="$2"; shift 2 ;;
         --tap-repo) tap_repo="$2"; shift 2 ;;
         --branch) branch="$2"; shift 2 ;;
-        -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,28p' "$0"; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
@@ -83,18 +86,11 @@ if [ -n "${HOMEBREW_TAP_DEPLOY_KEY:-}" ]; then
     # from its API over HTTPS, so the SSH connection is not trusted on first use.
     key="${work}/deploy_key"
     (umask 077 && printf '%s\n' "$HOMEBREW_TAP_DEPLOY_KEY" > "$key")
-    curl -fsSL https://api.github.com/meta |
+    curl -fsSL ${GITHUB_TOKEN:+-H "Authorization: Bearer ${GITHUB_TOKEN}"} https://api.github.com/meta |
         grep -oE '"(ssh-ed25519|ecdsa-sha2-nistp256|ssh-rsa) [A-Za-z0-9+/=]+"' |
         tr -d '"' | sed 's/^/github.com /' > "${work}/known_hosts"
     [ -s "${work}/known_hosts" ] || die "could not read GitHub's SSH host keys from api.github.com/meta"
     export GIT_SSH_COMMAND="ssh -i ${key} -o IdentitiesOnly=yes -o UserKnownHostsFile=${work}/known_hosts -o StrictHostKeyChecking=yes"
-fi
-
-# A release runner has no git identity of its own; an operator publishing by
-# hand keeps theirs.
-identity=()
-if [ -z "$(git config user.email || true)" ]; then
-    identity=(-c "user.name=github-actions[bot]" -c "user.email=41898282+github-actions[bot]@users.noreply.github.com")
 fi
 
 # publish makes one attempt and returns 3 when the push lost a race with
@@ -123,6 +119,12 @@ publish() {
 
     mkdir -p "${tap}/Casks" && cp "$cask" "$current" || die "cannot write ${current}"
     git -C "$tap" add Casks/coddy.rb || die "cannot stage the cask"
+    # A release runner has no git identity of its own; an operator publishing
+    # by hand keeps the one git gives the clone (global, not the checkout's).
+    local identity=()
+    if [ -z "$(git -C "$tap" config user.email || true)" ]; then
+        identity=(-c "user.name=github-actions[bot]" -c "user.email=41898282+github-actions[bot]@users.noreply.github.com")
+    fi
     # ${identity[@]+...}: an empty array is unbound to the bash 3.2 macOS ships.
     git -C "$tap" ${identity[@]+"${identity[@]}"} commit --quiet -m "coddy ${version}" ||
         die "cannot commit the cask"

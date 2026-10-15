@@ -129,7 +129,10 @@ make brew-cask-check BREW_TAP=coddy-project/coddy # the published cask, by name
 **`coddy -v`** prints its version, that the binary resolves into the **`Caskroom`** with no
 **`com.apple.quarantine`** attribute left, that the man page and both completions are linked, and
 that **`coddy update`** names **`brew upgrade --cask coddy`**, which it then runs. It uninstalls the
-cask and removes the tap it added at the end; **`--keep`** leaves both.
+cask and removes the tap it added at the end; **`--keep`** leaves both. It never turns on Homebrew's
+developer mode: it creates the local tap as a plain directory instead of running **`brew tap-new`**,
+and gives **`brew style`** the **`HOMEBREW_DEVELOPER`** variable for that one command, because a
+developer command run without it switches the mode on for good.
 
 The cask links **`coddy`**, **`coddy.1`** and both completion scripts, which is why the release
 **`darwin`** and **`linux`** archives carry those files beside the binary. It declares
@@ -161,7 +164,7 @@ can write to the tap and nothing else, from the secret **`HOMEBREW_TAP_DEPLOY_KE
 host keys come from **`api.github.com/meta`**. Without the secret git pushes with the caller's own
 credentials. Then the **Homebrew tap** workflow
 ([`homebrew.yaml`](../../.github/workflows/homebrew.yaml)) installs the cask by name on a macOS
-runner with current Homebrew and checks that it carries the release just published. The same
+runner with current Homebrew and checks that it carries the release just published or a newer one. The same
 workflow runs on pull requests that touch the cask, the scripts or itself, where it also installs the
 cask the checkout renders. It also runs by hand, and weekly on its own, to catch a Homebrew release
 that stops installing the tap's cask.
