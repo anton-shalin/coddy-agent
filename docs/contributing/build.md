@@ -112,22 +112,59 @@ make brew VERSION=1.0.11
 ```
 
 **`scripts/build-homebrew-cask.sh`** fills **`packaging/homebrew/coddy.rb.tmpl`** with the version
-and the SHA-256 of both macOS archives, writing **`dist/coddy.rb`**. It takes those archives from
+and the SHA-256 of both macOS archives, writing **`dist/coddy.rb`**. It hashes the archives in
 **`DIST_DIR`** when they are there (which is the case in the release job, right after the
-cross-compile) and downloads them from the GitHub release otherwise - a cask pins checksums, so it
-can only be rendered for a version whose archives exist.
+cross-compile) and otherwise reads their checksums from the **`SHA256SUMS`** of that GitHub release -
+a cask pins checksums, so it can only be rendered for a version whose archives exist.
 
-Install the rendered file to try it:
+Current Homebrew refuses a cask given by its path, so a rendered file is tried out of a throwaway
+local tap. On a Mac with Homebrew:
 
 ```bash
-brew install --cask dist/coddy.rb
+make brew-cask-check                              # dist/coddy.rb from a local tap
+make brew-cask-check BREW_TAP=coddy-project/coddy # the published cask, by name
 ```
 
+**`scripts/check-homebrew-cask.sh`** installs the cask, runs **`brew style`** on it, checks that
+**`coddy -v`** prints its version, that the binary resolves into the **`Caskroom`** with no
+**`com.apple.quarantine`** attribute left, that the man page and both completions are linked, and
+that **`coddy update`** names **`brew upgrade --cask coddy`**, which it then runs. It uninstalls the
+cask and removes the tap it added at the end; **`--keep`** leaves both.
+
 The cask links **`coddy`**, **`coddy.1`** and both completion scripts, which is why the release
-**`darwin`** and **`linux`** archives carry those files beside the binary. It recommends **`tmux`**
-in its **`caveats`** rather than declaring it: a cask's **`depends_on`** has no optional form, and
-Coddy runs without tmux, so the cask names it and installs nothing. Each release publishes
-**`coddy.rb`** as an asset, and **`brew install --cask <url>`** installs from it.
+**`darwin`** and **`linux`** archives carry those files beside the binary. It declares
+**`depends_on macos: :monterey`**: Go 1.25 and later build binaries that need macOS 12. A
+**`postflight_steps`** step removes the quarantine attribute Homebrew sets on the download from the
+binary, which is ad-hoc signed and not notarised, so Gatekeeper does not stop its first run. It
+recommends **`tmux`** in its **`caveats`** rather than declaring it: a cask's **`depends_on`** has no
+optional form, and Coddy runs without tmux, so the cask names it and installs nothing.
+
+### Homebrew tap
+
+The cask reaches users through the tap
+[coddy-project/homebrew-coddy](https://github.com/coddy-project/homebrew-coddy), installed with
+**`brew install coddy-project/coddy/coddy`**. Its **`Casks/coddy.rb`** is generated and never edited
+by hand.
+
+```bash
+make brew-publish VERSION=1.0.11
+```
+
+**`scripts/publish-homebrew-tap.sh`** clones the tap, replaces **`Casks/coddy.rb`** with the rendered
+cask and pushes a commit named **`coddy X.Y.Z`**. The tap only moves forward: a cask for a release
+older than the one the tap carries is skipped, and a cask identical to the tap's changes nothing, so
+a release job re-run for an old tag cannot take it back. A push that loses a race with another
+release job is retried from the tap's new head.
+
+The release job runs it after the assets are uploaded, with the private half of a deploy key that
+can write to the tap and nothing else, from the secret **`HOMEBREW_TAP_DEPLOY_KEY`**; GitHub's SSH
+host keys come from **`api.github.com/meta`**. Without the secret git pushes with the caller's own
+credentials. Then the **Homebrew tap** workflow
+([`homebrew.yaml`](../../.github/workflows/homebrew.yaml)) installs the cask by name on a macOS
+runner with current Homebrew and checks that it carries the release just published. The same
+workflow runs on pull requests that touch the cask, the scripts or itself, where it also installs the
+cask the checkout renders. It also runs by hand, and weekly on its own, to catch a Homebrew release
+that stops installing the tap's cask.
 
 ### Homebrew formula
 
@@ -292,7 +329,7 @@ On each SemVer git tag **`X.Y.Z`** that is on **`main`**, the [**Release binarie
 | **`coddy_X.Y.Z_darwin_arm64.tar.gz`** | macOS Apple Silicon |
 | **`coddy_X.Y.Z_linux_amd64.deb`**, **`coddy_X.Y.Z_linux_arm64.deb`** | Debian, Ubuntu and derivatives |
 | **`coddy_X.Y.Z_linux_amd64.rpm`**, **`coddy_X.Y.Z_linux_arm64.rpm`** | Fedora, RHEL, openSUSE and derivatives |
-| **`coddy.rb`** | Homebrew cask for the macOS archives of this tag |
+| **`coddy.rb`** | Homebrew cask for the macOS archives of this tag; the same file is committed to the tap [coddy-project/homebrew-coddy](https://github.com/coddy-project/homebrew-coddy) |
 | **`SHA256SUMS`** | Checksums for every archive and package above |
 
 The **`.tar.gz`** archives carry the man page and the shell completions beside the binary; the
