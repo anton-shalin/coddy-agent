@@ -52,7 +52,18 @@ const anthropicMinThinkingBudget int64 = 1024
 
 // thinkingEnabled reports whether this request enables extended thinking.
 func (p *anthropicProvider) thinkingEnabled() bool {
-	return anthropicThinkingBudget(p.reasoningEffort, p.maxTokens) >= anthropicMinThinkingBudget
+	return anthropicAdaptiveThinking(p.model) || anthropicThinkingBudget(p.reasoningEffort, p.maxTokens) >= anthropicMinThinkingBudget
+}
+
+func anthropicAdaptiveThinking(model string) bool {
+	return model == "claude-opus-5-5"
+}
+
+func validateAnthropicReasoningEffort(model, effort string) error {
+	if anthropicAdaptiveThinking(model) && effort == "off" {
+		return fmt.Errorf("reasoning_effort %q is not supported by model %q: thinking is always enabled", effort, model)
+	}
+	return nil
 }
 
 // anthropicThinkingBudget maps a reasoning level to an extended-thinking token budget.
@@ -315,6 +326,9 @@ func (p *anthropicProvider) Stream(ctx context.Context, messages []Message, tool
 
 // splitMessages extracts the system message and converts messages to Anthropic format.
 func (p *anthropicProvider) splitMessages(messages []Message) (string, []anthropic.MessageParam, error) {
+	if err := validateAnthropicReasoningEffort(p.model, p.reasoningEffort); err != nil {
+		return "", nil, err
+	}
 	var system string
 	var result []anthropic.MessageParam
 	var skippedTrailingAssistant bool
@@ -409,7 +423,16 @@ func (p *anthropicProvider) buildParams(system string, messages []anthropic.Mess
 	}
 
 	budget := anthropicThinkingBudget(p.reasoningEffort, p.maxTokens)
-	if budget >= anthropicMinThinkingBudget {
+	if anthropicAdaptiveThinking(p.model) {
+		params.Thinking = anthropic.ThinkingConfigParamUnion{OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{}}
+		params.OutputConfig.Effort = anthropic.OutputConfigEffort(p.reasoningEffort)
+		if p.reasoningEffort == "" {
+			params.OutputConfig.Effort = anthropic.OutputConfigEffortMedium
+		}
+		if p.tempSet {
+			params.Temperature = anthropic.Float(p.temp)
+		}
+	} else if budget >= anthropicMinThinkingBudget {
 		// Extended thinking requires room for a response beyond the thinking budget
 		// and forbids a custom temperature (only the default is allowed).
 		if params.MaxTokens <= budget {

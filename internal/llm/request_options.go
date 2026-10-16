@@ -16,7 +16,7 @@ type RequestOptions struct {
 	Temperature *float64
 	// ReasoningEffort is the reasoning level of this request, already checked
 	// against the levels the model offers (the caller's own, or the model's
-	// reasoning_default); empty sends no reasoning parameter at all, which is
+	// reasoning_default); empty preserves the backend/model default, which is
 	// not the same request as the level "none".
 	ReasoningEffort string
 	// SupportedParameters is what the provider's model listing says the model
@@ -24,10 +24,15 @@ type RequestOptions struct {
 	SupportedParameters []string
 }
 
-// Validate reports the first option a provider of providerType cannot send as
+// Validate reports the first option a provider of providerType and API model cannot send as
 // asked, so the caller refuses the request before anything reaches the
 // provider instead of the value being dropped on the way.
-func (o RequestOptions) Validate(providerType string) error {
+func (o RequestOptions) Validate(providerType, model string) error {
+	if providerType == "anthropic" {
+		if err := validateAnthropicReasoningEffort(model, o.ReasoningEffort); err != nil {
+			return err
+		}
+	}
 	if o.MaxTokens != nil {
 		if *o.MaxTokens < 1 {
 			return fmt.Errorf("max_tokens must be a positive integer")
@@ -50,7 +55,7 @@ func (o RequestOptions) Validate(providerType string) error {
 			return fmt.Errorf("temperature must be between 0 and %g", highest)
 		}
 	}
-	if o.MaxTokens != nil && providerType == "anthropic" {
+	if o.MaxTokens != nil && providerType == "anthropic" && !anthropicAdaptiveThinking(model) {
 		// Extended thinking needs room for an answer beyond its budget, and the
 		// provider raises a cap that leaves none; a cap the caller set is kept or
 		// refused, never raised behind the caller's back.
