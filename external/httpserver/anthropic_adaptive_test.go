@@ -146,15 +146,32 @@ func TestAdaptiveProfileSettingsAdmission(t *testing.T) {
 				{"persisted off", "claude-opus-5-5", "off", `{}`, false},
 				{"stale off", "claude-opus-5-5", "off", `{"settingsVersion":1,"reasoning":"high"}`, false},
 				{"model carrying off", "claude-sonnet-4-5", "off", `{"model":"reviewer/claude-opus-5-5"}`, false},
+				{"slash off", "claude-opus-5-5", "high", `{}`, false},
+				{"slash combined off", "claude-sonnet-4-5", "high", `{}`, false},
+				{"slash legacy off", "claude-sonnet-4-5", "high", `{}`, true},
+				{"pending off", "claude-sonnet-4-5", "high", `{}`, false},
+				{"stale pending off", "claude-sonnet-4-5", "high", `{"settingsVersion":1}`, false},
 				{"high", "claude-sonnet-4-5", "off", `{"model":"reviewer/claude-opus-5-5","reasoning":"high"}`, true},
 				{"default clears off", "claude-opus-5-5", "off", `{"reasoning":null}`, true},
 				{"legacy off", "claude-sonnet-4-5", "high", `{"reasoning":"off"}`, true},
 			} {
 				t.Run(fmt.Sprintf("%s/stream=%v/%s", path, stream, tc.name), func(t *testing.T) {
 					srv, st, calls := adaptiveSettingsServer(t, tc.model, tc.reasoning)
+					if strings.Contains(tc.name, "pending") {
+						st.ArmTurnOverride(session.SettingModel, "reviewer/claude-opus-5-5", 1)
+						st.ArmTurnOverride(session.SettingReasoning, "off", 1)
+					}
+					beforeOverrides := st.TurnOverrides()
 					beforeModel, beforeReasoning, beforeMode := st.GetSelectedModelID(), st.GetSelectedReasoning(), st.GetMode()
 					beforeVersion, beforeMessages := st.PublishedSettingsVersion(), st.GetMessages()
-					body := fmt.Sprintf(`{"model":"ask","messages":[{"role":"user","content":"hi"}],"input":"hi","stream":%v,"metadata":%s}`, stream, tc.metadata)
+					prompt := "hi"
+					if strings.HasPrefix(tc.name, "slash") {
+						prompt = "/reasoning off hi"
+					}
+					if tc.name == "slash combined off" {
+						prompt = "/model reviewer/claude-opus-5-5 /reasoning off --once hi"
+					}
+					body := fmt.Sprintf(`{"model":"ask","messages":[{"role":"user","content":%q}],"input":%q,"stream":%v,"metadata":%s}`, prompt, prompt, stream, tc.metadata)
 					req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 					req.Header.Set("X-Coddy-Session-ID", "sess-adaptive-settings")
 					rec := httptest.NewRecorder()
@@ -168,12 +185,28 @@ func TestAdaptiveProfileSettingsAdmission(t *testing.T) {
 					if rec.Code != http.StatusBadRequest || strings.Contains(rec.Header().Get("Content-Type"), "text/event-stream") {
 						t.Errorf("status=%d content-type=%q, want JSON400 before SSE: %s", rec.Code, rec.Header().Get("Content-Type"), rec.Body.String())
 					}
-					if calls.Load() != 0 || st.GetSelectedModelID() != beforeModel || st.GetSelectedReasoning() != beforeReasoning || st.GetMode() != beforeMode || st.PublishedSettingsVersion() != beforeVersion || !reflect.DeepEqual(st.GetMessages(), beforeMessages) {
+					if calls.Load() != 0 || st.GetSelectedModelID() != beforeModel || st.GetSelectedReasoning() != beforeReasoning || st.GetMode() != beforeMode || st.PublishedSettingsVersion() != beforeVersion || !reflect.DeepEqual(st.GetMessages(), beforeMessages) || !reflect.DeepEqual(st.TurnOverrides(), beforeOverrides) {
 						t.Error("rejected profile called provider/runner or changed session state")
 					}
 				})
 			}
 		}
+	}
+}
+
+func TestAdaptiveArmedSettingsAdmission(t *testing.T) {
+	srv, st, calls := adaptiveSettingsServer(t, "claude-sonnet-4-5", "high")
+	code, body := patchSessionJSON(t, srv, "sess-adaptive-settings", map[string]interface{}{"selectedModelId": "reviewer/claude-opus-5-5", "selectedReasoning": "high", "turns": 1})
+	if code != http.StatusOK {
+		t.Fatalf("arm valid Opus/high: %d %v", code, body)
+	}
+	before, version := st.TurnOverrides(), st.PublishedSettingsVersion()
+	code, body = patchSessionJSON(t, srv, "sess-adaptive-settings", map[string]interface{}{"selectedReasoning": "off", "turns": 1})
+	if code != http.StatusBadRequest {
+		t.Errorf("merged pending Opus/off: %d %v, want400", code, body)
+	}
+	if !reflect.DeepEqual(st.TurnOverrides(), before) || st.PublishedSettingsVersion() != version || calls.Load() != 0 {
+		t.Error("rejected override changed settings or called runner/provider")
 	}
 }
 
@@ -184,6 +217,7 @@ func TestAdaptiveSessionPatchAdmission(t *testing.T) {
 		allowed                bool
 	}{
 		{"reasoning off", "claude-opus-5-5", "high", map[string]interface{}{"selectedReasoning": "off"}, false},
+		{"active Opus off", "claude-sonnet-4-5", "high", map[string]interface{}{"selectedReasoning": "off"}, false},
 		{"model and off", "claude-sonnet-4-5", "high", map[string]interface{}{"selectedModelId": "reviewer/claude-opus-5-5", "selectedReasoning": "off"}, false},
 		{"model carrying off", "claude-sonnet-4-5", "off", map[string]interface{}{"selectedModelId": "reviewer/claude-opus-5-5"}, false},
 		{"clear model carrying off", "claude-sonnet-4-5", "off", map[string]interface{}{"selectedModelId": ""}, false},
@@ -194,6 +228,10 @@ func TestAdaptiveSessionPatchAdmission(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, st, calls := adaptiveSettingsServer(t, tc.model, tc.reasoning)
+			if tc.name == "active Opus off" {
+				st.SetTurnSetting(session.SettingModel, "reviewer/claude-opus-5-5")
+			}
+			beforeOverrides := st.TurnOverrides()
 			beforeModel, beforeReasoning := st.GetSelectedModelID(), st.GetSelectedReasoning()
 			beforeVersion, beforeMessages := st.PublishedSettingsVersion(), st.GetMessages()
 			code, body := patchSessionJSON(t, srv, "sess-adaptive-settings", tc.patch)
@@ -207,7 +245,7 @@ func TestAdaptiveSessionPatchAdmission(t *testing.T) {
 			if calls.Load() != 0 || !reflect.DeepEqual(st.GetMessages(), beforeMessages) {
 				t.Error("settings PATCH called provider/runner or changed transcript")
 			}
-			if !tc.allowed && (st.GetSelectedModelID() != beforeModel || st.GetSelectedReasoning() != beforeReasoning || st.PublishedSettingsVersion() != beforeVersion) {
+			if !tc.allowed && (st.GetSelectedModelID() != beforeModel || st.GetSelectedReasoning() != beforeReasoning || st.PublishedSettingsVersion() != beforeVersion || !reflect.DeepEqual(st.TurnOverrides(), beforeOverrides)) {
 				t.Error("rejected PATCH changed session settings")
 			}
 		})

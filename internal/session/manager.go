@@ -1695,10 +1695,8 @@ func (m *Manager) HandleSessionPromptWithSender(ctx context.Context, params acp.
 	if operatorTurn {
 		// Installed under the turn lock, so the turn this prompt starts is the
 		// one that takes them; then this turn consumes one of every override.
-		for _, ch := range turnSettings {
-			if _, err := m.ApplySessionSettings(turnCtx, params.SessionID, ch); err != nil {
-				return nil, err
-			}
+		if _, err := m.applySettingsBatch(params.SessionID, turnSettings); err != nil {
+			return nil, err
 		}
 		if m.beginOperatorTurnSettings(params.SessionID, state) {
 			defer m.endTurnSettings(params.SessionID, state)

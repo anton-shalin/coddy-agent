@@ -9,6 +9,7 @@ import (
 
 	"github.com/EvilFreelancer/coddy-agent/internal/acp"
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
+	"github.com/EvilFreelancer/coddy-agent/internal/llm"
 )
 
 // SettingsChange is one change of a session's settings, whichever surface
@@ -226,6 +227,13 @@ func (m *Manager) applySessionSettings(_ context.Context, sessionID string, ch S
 	if err != nil {
 		return acp.SessionSettings{}, "", err
 	}
+	if ch.Model != nil || ch.Reasoning != nil {
+		preview := st.settingsPreview()
+		applySettingsValues(preview, m.activeCfg(), ch, values)
+		if err := validateOperatorModelReasoning(m.activeCfg(), preview); err != nil {
+			return acp.SessionSettings{}, "", err
+		}
+	}
 	notice := m.writeSettings(sessionID, st, ch, values)
 	m.keepIfLetGo(sessionID, st)
 	source := strings.TrimSpace(ch.Source)
@@ -341,14 +349,34 @@ func (m *Manager) validateSettingsChange(st *State, ch SettingsChange) (map[stri
 func (m *Manager) writeSettings(sessionID string, st *State, ch SettingsChange, values map[string]string) string {
 	cfg := m.activeCfg()
 	names := sortedSettings(values)
+	modeChanged := applySettingsValues(st, cfg, ch, values)
 	if ch.Turns > 0 {
-		for _, name := range names {
-			st.ArmTurnOverride(name, values[name], ch.Turns)
-		}
 		return settingsNotice(values, names, turnsScope(ch.Turns))
 	}
+	if permission, ok := values[SettingPermissionMode]; ok && !ch.SessionOnly {
+		m.rememberPermissionMode(permission)
+	}
+	if modeChanged && m.server != nil {
+		if err := m.server.SendSessionUpdate(sessionID, acp.ModeUpdate{
+			SessionUpdate: acp.UpdateTypeCurrentModeUpdate,
+			CurrentModeID: values[SettingMode],
+		}); err != nil {
+			m.log.Warn("failed to send mode update", "error", err)
+		}
+	}
+	m.sendConfigOptionUpdate(sessionID, st)
+	return settingsNotice(values, names, "for this session")
+}
+
+func applySettingsValues(st *State, cfg *config.Config, ch SettingsChange, values map[string]string) bool {
+	if ch.Turns > 0 {
+		for name, value := range values {
+			st.ArmTurnOverride(name, value, ch.Turns)
+		}
+		return false
+	}
 	modeChanged := false
-	for _, name := range names {
+	for _, name := range sortedSettings(values) {
 		v := values[name]
 		switch name {
 		case SettingModel:
@@ -373,24 +401,110 @@ func (m *Manager) writeSettings(sessionID string, st *State, ch SettingsChange, 
 			st.SetMode(v)
 		case SettingPermissionMode:
 			st.SetPermissionMode(v)
-			// A session the operator switched is their latest choice: the
-			// sessions created after it start in it (#512).
-			if !ch.SessionOnly {
-				m.rememberPermissionMode(v)
-			}
 		}
 		st.ClearTurnOverride(name)
 	}
-	if modeChanged && m.server != nil {
-		if err := m.server.SendSessionUpdate(sessionID, acp.ModeUpdate{
-			SessionUpdate: acp.UpdateTypeCurrentModeUpdate,
-			CurrentModeID: values[SettingMode],
-		}); err != nil {
-			m.log.Warn("failed to send mode update", "error", err)
+	return modeChanged
+}
+
+func validateOperatorModelReasoning(cfg *config.Config, st *State) error {
+	if cfg == nil {
+		return nil
+	}
+	validate := func(model, reasoning string) error {
+		ent := cfg.FindModelEntry(model)
+		if ent == nil {
+			return nil
+		}
+		provider := cfg.FindProvider(ent.ProviderName())
+		if provider == nil {
+			return nil
+		}
+		level := ResolveReasoningLevel(cfg, model, reasoning)
+		return (llm.RequestOptions{ReasoningEffort: level}).Validate(provider.Type, ent.APIModel())
+	}
+	if err := validate(st.EffectiveModelID(cfg), st.EffectiveReasoning(cfg)); err != nil {
+		return err
+	}
+	armed := st.readProcessSettings().armed
+	for turn := 0; turn <= MaxOverrideTurns; turn++ {
+		model, reasoning := st.SessionModelID(cfg), st.GetSelectedReasoning()
+		if turn > 0 {
+			if o := armed[SettingModel]; o.turnsLeft >= turn {
+				model = o.value
+			}
+			if o := armed[SettingReasoning]; o.turnsLeft >= turn {
+				reasoning = o.value
+			}
+		}
+		if err := validate(model, reasoning); err != nil {
+			return err
 		}
 	}
-	m.sendConfigOptionUpdate(sessionID, st)
-	return settingsNotice(values, names, "for this session")
+	return nil
+}
+
+// ValidateOperatorSettings previews metadata and leading settings commands without
+// changing the session or consuming the overrides armed for its next turns.
+func (m *Manager) ValidateOperatorSettings(st *State, change SettingsChange, prompt string) error {
+	line, err := ParseSettingsCommands(prompt)
+	if err != nil {
+		return err
+	}
+	return m.validateOperatorSettings(st, change, line)
+}
+
+func (m *Manager) validateOperatorSettings(st *State, change SettingsChange, line *CommandLine) error {
+	changes := append([]SettingsChange{change, line.Session}, line.Turns...)
+	_, err := m.previewSettingsChanges(st, changes)
+	return err
+}
+
+func (m *Manager) previewSettingsChanges(st *State, changes []SettingsChange) ([]map[string]string, error) {
+	preview := st.settingsPreview()
+	allValues := make([]map[string]string, len(changes))
+	for i, ch := range changes {
+		if ch.Empty() {
+			continue
+		}
+		values, err := m.validateSettingsChange(preview, ch)
+		if err != nil {
+			return nil, err
+		}
+		allValues[i] = values
+		applySettingsValues(preview, m.activeCfg(), ch, values)
+	}
+	return allValues, validateOperatorModelReasoning(m.activeCfg(), preview)
+}
+
+func (m *Manager) applySettingsBatch(sessionID string, changes []SettingsChange) ([]string, error) {
+	if len(changes) == 0 {
+		return nil, nil
+	}
+	st := m.getSession(sessionID)
+	if st == nil {
+		return nil, fmt.Errorf("session not found: %s", sessionID)
+	}
+	if err := readOnlyRefusal(st, sessionID); err != nil {
+		return nil, err
+	}
+	values, err := m.previewSettingsChanges(st, changes)
+	if err != nil {
+		return nil, err
+	}
+	var notices []string
+	for i, ch := range changes {
+		notices = append(notices, m.writeSettings(sessionID, st, ch, values[i]))
+	}
+	m.keepIfLetGo(sessionID, st)
+	notice := strings.Join(notices, "; ")
+	source := strings.TrimSpace(changes[0].Source)
+	if source == "" {
+		source = "unknown"
+	}
+	m.log.Info("session settings changed", "session", sessionID, "source", source, "change", notice)
+	m.PublishSessionSettings(sessionID, st, noteSettingsChange(st, changes[0], notice), source)
+	return notices, nil
 }
 
 // turnsScope names a number of turns the way a notice says it.
@@ -559,14 +673,10 @@ func (m *Manager) takeSettingsCommands(ctx context.Context, sessionID string, pr
 	if err := readOnlyRefusal(st, sessionID); err != nil {
 		return out, err
 	}
-	out.Names = line.Names
-	// Validate every part before applying any, so a typo in the second
-	// command does not leave the first one half done.
-	for _, ch := range line.Turns {
-		if _, err := m.validateSettingsChange(st, ch); err != nil {
-			return out, err
-		}
+	if err := m.validateOperatorSettings(st, SettingsChange{}, line); err != nil {
+		return out, err
 	}
+	out.Names = line.Names
 	var notices []string
 	if !line.Session.Empty() {
 		ch := line.Session
@@ -587,15 +697,15 @@ func (m *Manager) takeSettingsCommands(ctx context.Context, sessionID string, pr
 		}
 	}
 	if rest == "" && !others {
-		for _, ch := range line.Turns {
-			ch.Source = source
-			ch.SessionOnly = sessionOnly
-			_, notice, err := m.applySessionSettings(ctx, sessionID, ch)
-			if err != nil {
-				return out, err
-			}
-			notices = append(notices, notice)
+		for i := range line.Turns {
+			line.Turns[i].Source = source
+			line.Turns[i].SessionOnly = sessionOnly
 		}
+		batchNotices, err := m.applySettingsBatch(sessionID, line.Turns)
+		if err != nil {
+			return out, err
+		}
+		notices = append(notices, batchNotices...)
 		out.Handled = true
 		out.Prompt = nil
 		out.Notice = strings.Join(notices, "; ")
@@ -673,6 +783,11 @@ func (m *Manager) ApplyTurnSettings(_ context.Context, sessionID string, ch Sett
 		return acp.SessionSettings{}, err
 	}
 	cfg := m.activeCfg()
+	preview := &State{SelectedModelID: st.EffectiveModelID(cfg), SelectedReasoning: st.EffectiveReasoning(cfg)}
+	applySettingsValues(preview, cfg, SettingsChange{}, values)
+	if err := validateOperatorModelReasoning(cfg, preview); err != nil {
+		return acp.SessionSettings{}, err
+	}
 	names := sortedSettings(values)
 	for _, name := range names {
 		st.SetTurnSetting(name, values[name])

@@ -136,6 +136,17 @@ func (s *State) restoreProcessSettings(p processSettings) {
 	s.bumpSettingsRevision()
 }
 
+func (s *State) settingsPreview() *State {
+	s.mu.RLock()
+	preview := &State{Mode: s.Mode, SelectedModelID: s.SelectedModelID, SelectedReasoning: s.SelectedReasoning, SelectedToolset: s.SelectedToolset}
+	s.mu.RUnlock()
+	preview.restoreProcessSettings(s.readProcessSettings())
+	s.settingsMu.Lock()
+	preview.turn.active = s.turn.active
+	s.settingsMu.Unlock()
+	return preview
+}
+
 // settingsRevision counts changes of anything a model request reads - the
 // session's model and reasoning, the running turn's values - so the loop can
 // tell between two requests that it has to build a new transport.

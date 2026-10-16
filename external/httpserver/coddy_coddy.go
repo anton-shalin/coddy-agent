@@ -1932,20 +1932,12 @@ func (s *Server) coddySessionPatch(w http.ResponseWriter, r *http.Request) {
 	change.Mode = body.Mode
 	change.PermissionMode = body.PermissionMode
 	if body.SelectedModelID != nil || body.SelectedReasoning != nil {
-		cfg := s.activeCfg()
-		model, reasoning := st.SessionModelID(cfg), st.GetSelectedReasoning()
-		if body.Turns > 0 {
-			model, reasoning = st.EffectiveModelID(cfg), st.EffectiveReasoning(cfg)
+		validation := change
+		if clearModel && s.activeCfg() != nil {
+			model := session.ResolveModelID(s.activeCfg(), "")
+			validation.Model = &model
 		}
-		if clearModel {
-			model = ""
-		} else if change.Model != nil {
-			model = *change.Model
-		}
-		if change.Reasoning != nil {
-			reasoning = *change.Reasoning
-		}
-		if err := validateSessionModelReasoning(cfg, model, reasoning); err != nil {
+		if err := s.mgr.ValidateOperatorSettings(st, validation, ""); err != nil {
 			http.Error(w, fmt.Sprintf(`{"error":{"message":%q}}`, err.Error()), http.StatusBadRequest)
 			return
 		}

@@ -643,7 +643,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if httpModelIsCoddyProfile(model) {
-		if err := applyProfileSettings(ctx, s.mgr, st, sessionID, model, req.Metadata); err != nil {
+		if err := applyProfileSettings(ctx, s.mgr, st, sessionID, model, req.Metadata, last.Content); err != nil {
 			if errors.Is(err, ErrInvalidMetadataModel) || errors.Is(err, ErrUnknownMetadataModel) {
 				http.Error(w, fmt.Sprintf(`{"error":{"message":%q}}`, err.Error()), http.StatusBadRequest)
 				return
@@ -1215,7 +1215,7 @@ func (s *Server) handleResponsesCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if httpModelIsCoddyProfile(model) {
-		if err := applyProfileSettings(ctx, s.mgr, st, sid, model, body.Metadata); err != nil {
+		if err := applyProfileSettings(ctx, s.mgr, st, sid, model, body.Metadata, body.Input); err != nil {
 			if errors.Is(err, ErrInvalidMetadataModel) || errors.Is(err, ErrUnknownMetadataModel) {
 				http.Error(w, fmt.Sprintf(`{"error":{"message":%q}}`, err.Error()), http.StatusBadRequest)
 				return

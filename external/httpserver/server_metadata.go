@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
-	"github.com/EvilFreelancer/coddy-agent/internal/llm"
 	"github.com/EvilFreelancer/coddy-agent/internal/plans"
 	"github.com/EvilFreelancer/coddy-agent/internal/session"
 )
@@ -43,7 +42,7 @@ func metadataResponse(cfg *config.Config, yamlSel string) map[string]string {
 // switched from a console, an editor or a command - the client has not seen
 // it yet, and its values would undo that change: they are ignored and the
 // session's own settings stand. An empty mode leaves the mode alone.
-func applyProfileSettings(ctx context.Context, mgr *session.Manager, st *session.State, sessionID, mode string, raw json.RawMessage) error {
+func applyProfileSettings(ctx context.Context, mgr *session.Manager, st *session.State, sessionID, mode string, raw json.RawMessage, prompt string) error {
 	cfg := mgr.Cfg()
 	var m map[string]json.RawMessage
 	if len(raw) > 0 {
@@ -64,7 +63,7 @@ func applyProfileSettings(ctx context.Context, mgr *session.Manager, st *session
 			}
 		}
 		if version > 0 && version < st.PublishedSettingsVersion() {
-			return validateSessionModelReasoning(cfg, st.EffectiveModelID(cfg), st.EffectiveReasoning(cfg))
+			return mgr.ValidateOperatorSettings(st, session.SettingsChange{}, prompt)
 		}
 	}
 	ch := session.SettingsChange{Source: "web"}
@@ -119,14 +118,7 @@ func applyProfileSettings(ctx context.Context, mgr *session.Manager, st *session
 			ch.Toolset = &name
 		}
 	}
-	reasoning := st.GetSelectedReasoning()
-	if ch.Reasoning != nil {
-		reasoning = *ch.Reasoning
-	}
-	if ch.Model == nil && ch.Reasoning == nil {
-		model, reasoning = st.EffectiveModelID(cfg), st.EffectiveReasoning(cfg)
-	}
-	if err := validateSessionModelReasoning(cfg, model, reasoning); err != nil {
+	if err := mgr.ValidateOperatorSettings(st, ch, prompt); err != nil {
 		return err
 	}
 	if ch.Empty() {
@@ -134,22 +126,6 @@ func applyProfileSettings(ctx context.Context, mgr *session.Manager, st *session
 	}
 	_, err := mgr.ApplySessionSettings(ctx, sessionID, ch)
 	return err
-}
-
-func validateSessionModelReasoning(cfg *config.Config, model, reasoning string) error {
-	if cfg == nil {
-		return nil
-	}
-	ent := cfg.FindModelEntry(session.ResolveModelID(cfg, model))
-	if ent == nil {
-		return nil
-	}
-	provider := cfg.FindProvider(ent.ProviderName())
-	if provider == nil {
-		return nil
-	}
-	level := session.ResolveReasoningLevel(cfg, ent.Model, strings.ToLower(strings.TrimSpace(reasoning)))
-	return (llm.RequestOptions{ReasoningEffort: level}).Validate(provider.Type, ent.APIModel())
 }
 
 // applySessionReasoning checks a reasoning level for a PATCH before it goes
