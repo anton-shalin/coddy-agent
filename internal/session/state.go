@@ -256,6 +256,8 @@ type State struct {
 	// running turn holds, what the last operator turn held. settingsMu guards
 	// it alone; it is never taken together with mu.
 	settingsMu sync.Mutex
+	// settingsOp serializes settings admission and mutation; notifications run after it is released.
+	settingsOp sync.Mutex
 	turn       turnSettings
 	// settingsRev is the number of the last change of a setting a model
 	// request reads (SettingsRevision).

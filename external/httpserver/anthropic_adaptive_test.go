@@ -210,6 +210,33 @@ func TestAdaptiveArmedSettingsAdmission(t *testing.T) {
 	}
 }
 
+func TestAdaptiveConcurrentPatchAdmission(t *testing.T) {
+	srv, st, _ := adaptiveSettingsServer(t, "claude-sonnet-4-5", "high")
+	for attempt := 0; attempt < 20; attempt++ {
+		st.SetSelectedModelID("reviewer/claude-sonnet-4-5")
+		st.SetSelectedReasoning("high")
+		start, statuses := make(chan struct{}), make(chan int, 2)
+		for _, body := range []string{`{"selectedModelId":"reviewer/claude-opus-5-5"}`, `{"selectedReasoning":"off"}`} {
+			go func(payload string) {
+				<-start
+				req := httptest.NewRequest(http.MethodPatch, "/coddy/sessions/sess-adaptive-settings", strings.NewReader(payload))
+				rec := httptest.NewRecorder()
+				srv.Handler().ServeHTTP(rec, req)
+				statuses <- rec.Code
+			}(body)
+		}
+		close(start)
+		first, second := <-statuses, <-statuses
+		oneRejected := first == http.StatusOK && second == http.StatusBadRequest || second == http.StatusOK && first == http.StatusBadRequest
+		if !oneRejected {
+			t.Fatalf("attempt %d: concurrent PATCH statuses %d/%d, want200/400", attempt, first, second)
+		}
+		if st.EffectiveModelID(srv.activeCfg()) == "reviewer/claude-opus-5-5" && st.EffectiveReasoning(srv.activeCfg()) == "off" {
+			t.Fatal("concurrent PATCH left Opus/off")
+		}
+	}
+}
+
 func TestAdaptiveSessionPatchAdmission(t *testing.T) {
 	for _, tc := range []struct {
 		name, model, reasoning string

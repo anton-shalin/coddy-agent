@@ -147,6 +147,12 @@ func (s *State) settingsPreview() *State {
 	return preview
 }
 
+func (s *State) withSettingsOperation(fn func() error) error {
+	s.settingsOp.Lock()
+	defer s.settingsOp.Unlock()
+	return fn()
+}
+
 // settingsRevision counts changes of anything a model request reads - the
 // session's model and reasoning, the running turn's values - so the loop can
 // tell between two requests that it has to build a new transport.
@@ -202,6 +208,8 @@ func (s *State) ClearTurnOverride(setting string) {
 // started: every armed override gives up one of its turns and the values
 // become the turn's for its whole length.
 func (s *State) BeginOperatorTurnSettings() {
+	s.settingsOp.Lock()
+	defer s.settingsOp.Unlock()
 	s.settingsMu.Lock()
 	var held turnValues
 	for setting, o := range s.turn.armed {
@@ -224,6 +232,8 @@ func (s *State) BeginOperatorTurnSettings() {
 // ResumeTurnSettings gives a permission resume the values of the turn it
 // continues. Nothing armed is consumed: it is the same turn.
 func (s *State) ResumeTurnSettings() {
+	s.settingsOp.Lock()
+	defer s.settingsOp.Unlock()
 	s.settingsMu.Lock()
 	s.turn.active = s.turn.last
 	s.settingsMu.Unlock()
@@ -233,6 +243,8 @@ func (s *State) ResumeTurnSettings() {
 // EndTurnSettings drops the values of the turn that ended. The last operator
 // turn's values stay for a resume.
 func (s *State) EndTurnSettings() {
+	s.settingsOp.Lock()
+	defer s.settingsOp.Unlock()
 	s.settingsMu.Lock()
 	s.turn.active = turnValues{}
 	s.settingsMu.Unlock()

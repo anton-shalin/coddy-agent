@@ -88,6 +88,28 @@ func TestAdaptiveSessionSettingsPreserveActiveTurnAdmission(t *testing.T) {
 	}
 }
 
+func TestAdaptiveConcurrentSessionSettingsAdmission(t *testing.T) {
+	mgr, st, id := adaptiveSettingsManager(t)
+	model, off := "reviewer/claude-opus-5-5", "off"
+	for attempt := 0; attempt < 100; attempt++ {
+		st.SetSelectedModelID("reviewer/claude-sonnet-4-5")
+		st.SetSelectedReasoning("high")
+		start, results := make(chan struct{}), make(chan error, 2)
+		for _, change := range []session.SettingsChange{{Model: &model}, {Reasoning: &off}} {
+			go func(ch session.SettingsChange) {
+				<-start
+				_, err := mgr.ApplySessionSettings(context.Background(), id, ch)
+				results <- err
+			}(change)
+		}
+		close(start)
+		first, second := <-results, <-results
+		if (first == nil) == (second == nil) || st.EffectiveModelID(mgr.Cfg()) == model && st.EffectiveReasoning(mgr.Cfg()) == off {
+			t.Fatalf("attempt %d: concurrent incompatible changes were not serialized: %v / %v", attempt, first, second)
+		}
+	}
+}
+
 func TestAdaptiveSettingsOverrideLifetimeInvariant(t *testing.T) {
 	mgr, _, _ := adaptiveSettingsManager(t)
 	property := func(modelCount, reasoningCount uint8) bool {

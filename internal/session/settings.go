@@ -16,6 +16,8 @@ import (
 // asked for it. A nil field is left alone.
 type SettingsChange struct {
 	Model *string
+	// ClearModel removes the session model selection, restoring the configured default.
+	ClearModel bool
 	// Reasoning is a level the model offers, "off" where its provider can
 	// turn thinking off, or "default" (or "") for the model's default level.
 	Reasoning      *string
@@ -47,7 +49,7 @@ const (
 
 // Empty reports whether the change names no setting at all.
 func (c SettingsChange) Empty() bool {
-	return c.Model == nil && c.Reasoning == nil && c.Toolset == nil && c.Mode == nil && c.PermissionMode == nil
+	return c.Model == nil && !c.ClearModel && c.Reasoning == nil && c.Toolset == nil && c.Mode == nil && c.PermissionMode == nil
 }
 
 // ByAgent reports whether the agent made the change itself rather than the
@@ -223,18 +225,28 @@ func (m *Manager) applySessionSettings(_ context.Context, sessionID string, ch S
 	if ch.Empty() {
 		return m.settingsSnapshot(sessionID, st), "", nil
 	}
-	values, err := m.validateSettingsChange(st, ch)
-	if err != nil {
+	var values map[string]string
+	var notice string
+	var modeChanged bool
+	if err := st.withSettingsOperation(func() error {
+		var err error
+		values, err = m.validateSettingsChange(st, ch)
+		if err != nil {
+			return err
+		}
+		if ch.Model != nil || ch.ClearModel || ch.Reasoning != nil {
+			preview := st.settingsPreview()
+			applySettingsValues(preview, m.activeCfg(), ch, values)
+			if err := validateOperatorModelReasoning(m.activeCfg(), preview); err != nil {
+				return err
+			}
+		}
+		notice, modeChanged = m.writeSettings(st, ch, values)
+		return nil
+	}); err != nil {
 		return acp.SessionSettings{}, "", err
 	}
-	if ch.Model != nil || ch.Reasoning != nil {
-		preview := st.settingsPreview()
-		applySettingsValues(preview, m.activeCfg(), ch, values)
-		if err := validateOperatorModelReasoning(m.activeCfg(), preview); err != nil {
-			return acp.SessionSettings{}, "", err
-		}
-	}
-	notice := m.writeSettings(sessionID, st, ch, values)
+	m.notifySettingsChange(sessionID, st, ch, values, modeChanged)
 	m.keepIfLetGo(sessionID, st)
 	source := strings.TrimSpace(ch.Source)
 	if source == "" {
@@ -268,6 +280,16 @@ func (m *Manager) validateSettingsChange(st *State, ch SettingsChange) (map[stri
 		return nil, fmt.Errorf("--count must be between 1 and %d", MaxOverrideTurns)
 	}
 	model := ""
+	if ch.ClearModel {
+		if ch.Turns > 0 {
+			return nil, fmt.Errorf("selectedModelId cannot be cleared for a number of turns")
+		}
+		if ch.Model != nil {
+			return nil, fmt.Errorf("model cannot be selected and cleared together")
+		}
+		out[SettingModel] = ""
+		model = ResolveModelID(cfg, "")
+	}
 	if ch.Model != nil {
 		v := strings.TrimSpace(*ch.Model)
 		if cfg == nil || len(cfg.Models) == 0 {
@@ -346,15 +368,22 @@ func (m *Manager) validateSettingsChange(st *State, ch SettingsChange) (map[stri
 
 // writeSettings applies validated values and returns the notice describing
 // the change.
-func (m *Manager) writeSettings(sessionID string, st *State, ch SettingsChange, values map[string]string) string {
+func (m *Manager) writeSettings(st *State, ch SettingsChange, values map[string]string) (string, bool) {
 	cfg := m.activeCfg()
 	names := sortedSettings(values)
 	modeChanged := applySettingsValues(st, cfg, ch, values)
 	if ch.Turns > 0 {
-		return settingsNotice(values, names, turnsScope(ch.Turns))
+		return settingsNotice(values, names, turnsScope(ch.Turns)), modeChanged
 	}
 	if permission, ok := values[SettingPermissionMode]; ok && !ch.SessionOnly {
 		m.rememberPermissionMode(permission)
+	}
+	return settingsNotice(values, names, "for this session"), modeChanged
+}
+
+func (m *Manager) notifySettingsChange(sessionID string, st *State, ch SettingsChange, values map[string]string, modeChanged bool) {
+	if ch.Turns > 0 {
+		return
 	}
 	if modeChanged && m.server != nil {
 		if err := m.server.SendSessionUpdate(sessionID, acp.ModeUpdate{
@@ -365,7 +394,6 @@ func (m *Manager) writeSettings(sessionID string, st *State, ch SettingsChange, 
 		}
 	}
 	m.sendConfigOptionUpdate(sessionID, st)
-	return settingsNotice(values, names, "for this session")
 }
 
 func applySettingsValues(st *State, cfg *config.Config, ch SettingsChange, values map[string]string) bool {
@@ -383,7 +411,7 @@ func applySettingsValues(st *State, cfg *config.Config, ch SettingsChange, value
 			st.SetSelectedModelID(v)
 			// A level the new model does not offer falls back to its default,
 			// in the snapshot for everyone to see, instead of lingering unused.
-			if _, named := values[SettingReasoning]; !named && cfg != nil {
+			if _, named := values[SettingReasoning]; !named && !ch.ClearModel && cfg != nil {
 				sel := strings.TrimSpace(st.GetSelectedReasoning())
 				if sel != "" && !containsLevel(cfg.ReasoningChoicesFor(cfg.FindModelEntry(v)), sel) {
 					st.SetSelectedReasoning("")
@@ -451,7 +479,7 @@ func (m *Manager) ValidateOperatorSettings(st *State, change SettingsChange, pro
 	if err != nil {
 		return err
 	}
-	return m.validateOperatorSettings(st, change, line)
+	return st.withSettingsOperation(func() error { return m.validateOperatorSettings(st, change, line) })
 }
 
 func (m *Manager) validateOperatorSettings(st *State, change SettingsChange, line *CommandLine) error {
@@ -488,13 +516,26 @@ func (m *Manager) applySettingsBatch(sessionID string, changes []SettingsChange)
 	if err := readOnlyRefusal(st, sessionID); err != nil {
 		return nil, err
 	}
-	values, err := m.previewSettingsChanges(st, changes)
-	if err != nil {
+	var notices []string
+	var values []map[string]string
+	var modeChanges []bool
+	if err := st.withSettingsOperation(func() error {
+		var err error
+		values, err = m.previewSettingsChanges(st, changes)
+		if err != nil {
+			return err
+		}
+		for i, ch := range changes {
+			notice, modeChanged := m.writeSettings(st, ch, values[i])
+			notices = append(notices, notice)
+			modeChanges = append(modeChanges, modeChanged)
+		}
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-	var notices []string
 	for i, ch := range changes {
-		notices = append(notices, m.writeSettings(sessionID, st, ch, values[i]))
+		m.notifySettingsChange(sessionID, st, ch, values[i], modeChanges[i])
 	}
 	m.keepIfLetGo(sessionID, st)
 	notice := strings.Join(notices, "; ")
@@ -778,31 +819,36 @@ func (m *Manager) ApplyTurnSettings(_ context.Context, sessionID string, ch Sett
 	}
 	check := ch
 	check.Turns = 1
-	values, err := m.validateSettingsChange(st, check)
-	if err != nil {
-		return acp.SessionSettings{}, err
-	}
 	cfg := m.activeCfg()
-	preview := &State{SelectedModelID: st.EffectiveModelID(cfg), SelectedReasoning: st.EffectiveReasoning(cfg)}
-	applySettingsValues(preview, cfg, SettingsChange{}, values)
-	if err := validateOperatorModelReasoning(cfg, preview); err != nil {
-		return acp.SessionSettings{}, err
-	}
-	names := sortedSettings(values)
-	for _, name := range names {
-		st.SetTurnSetting(name, values[name])
-	}
-	// A level the new model does not offer is dropped, so the turn falls
-	// back on the session's level or the model's default.
-	if model, ok := values[SettingModel]; ok && cfg != nil {
-		if _, named := values[SettingReasoning]; !named {
-			if lv := st.TurnSetting(SettingReasoning); lv != "" && lv != config.ReasoningDefault &&
-				!containsLevel(cfg.ReasoningChoicesFor(cfg.FindModelEntry(model)), lv) {
-				st.SetTurnSetting(SettingReasoning, "")
+	var values map[string]string
+	if err := st.withSettingsOperation(func() error {
+		var err error
+		values, err = m.validateSettingsChange(st, check)
+		if err != nil {
+			return err
+		}
+		preview := &State{SelectedModelID: st.EffectiveModelID(cfg), SelectedReasoning: st.EffectiveReasoning(cfg)}
+		applySettingsValues(preview, cfg, SettingsChange{}, values)
+		if err := validateOperatorModelReasoning(cfg, preview); err != nil {
+			return err
+		}
+		for _, name := range sortedSettings(values) {
+			st.SetTurnSetting(name, values[name])
+		}
+		// A level the new model does not offer falls back to the session default.
+		if model, ok := values[SettingModel]; ok && cfg != nil {
+			if _, named := values[SettingReasoning]; !named {
+				if lv := st.TurnSetting(SettingReasoning); lv != "" && lv != config.ReasoningDefault &&
+					!containsLevel(cfg.ReasoningChoicesFor(cfg.FindModelEntry(model)), lv) {
+					st.SetTurnSetting(SettingReasoning, "")
+				}
 			}
 		}
+		return nil
+	}); err != nil {
+		return acp.SessionSettings{}, err
 	}
-	notice := settingsNotice(values, names, "for the rest of this turn")
+	notice := settingsNotice(values, sortedSettings(values), "for the rest of this turn")
 	source := strings.TrimSpace(ch.Source)
 	if source == "" {
 		source = "unknown"
