@@ -1931,6 +1931,25 @@ func (s *Server) coddySessionPatch(w http.ResponseWriter, r *http.Request) {
 	change.Toolset = body.SelectedToolset
 	change.Mode = body.Mode
 	change.PermissionMode = body.PermissionMode
+	if body.SelectedModelID != nil || body.SelectedReasoning != nil {
+		cfg := s.activeCfg()
+		model, reasoning := st.SessionModelID(cfg), st.GetSelectedReasoning()
+		if body.Turns > 0 {
+			model, reasoning = st.EffectiveModelID(cfg), st.EffectiveReasoning(cfg)
+		}
+		if clearModel {
+			model = ""
+		} else if change.Model != nil {
+			model = *change.Model
+		}
+		if change.Reasoning != nil {
+			reasoning = *change.Reasoning
+		}
+		if err := validateSessionModelReasoning(cfg, model, reasoning); err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":{"message":%q}}`, err.Error()), http.StatusBadRequest)
+			return
+		}
+	}
 	if clearModel {
 		if body.Turns > 0 {
 			http.Error(w, `{"error":{"message":"selectedModelId cannot be cleared for a number of turns"}}`, http.StatusBadRequest)
