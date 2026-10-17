@@ -42,8 +42,7 @@ func metadataResponse(cfg *config.Config, yamlSel string) map[string]string {
 // switched from a console, an editor or a command - the client has not seen
 // it yet, and its values would undo that change: they are ignored and the
 // session's own settings stand. An empty mode leaves the mode alone.
-func applyProfileSettings(ctx context.Context, mgr *session.Manager, st *session.State, sessionID, mode string, raw json.RawMessage, prompt string) error {
-	cfg := mgr.Cfg()
+func applyProfileSettings(ctx context.Context, mgr *session.Manager, st *session.State, sessionID, mode string, raw json.RawMessage) error {
 	var m map[string]json.RawMessage
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &m); err != nil {
@@ -63,9 +62,10 @@ func applyProfileSettings(ctx context.Context, mgr *session.Manager, st *session
 			}
 		}
 		if version > 0 && version < st.PublishedSettingsVersion() {
-			return mgr.ValidateOperatorSettings(st, session.SettingsChange{}, prompt)
+			return nil
 		}
 	}
+	cfg := mgr.Cfg()
 	ch := session.SettingsChange{Source: "web"}
 	if mode = strings.TrimSpace(mode); mode != "" && mode != st.GetMode() {
 		ch.Mode = &mode
@@ -117,9 +117,6 @@ func applyProfileSettings(ctx context.Context, mgr *session.Manager, st *session
 		if name = strings.TrimSpace(name); name != "" && name != st.GetSelectedToolset() {
 			ch.Toolset = &name
 		}
-	}
-	if err := mgr.ValidateOperatorSettings(st, ch, prompt); err != nil {
-		return err
 	}
 	if ch.Empty() {
 		return nil

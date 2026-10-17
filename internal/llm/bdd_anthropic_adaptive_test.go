@@ -22,12 +22,27 @@ type anthropicAdaptiveState struct {
 }
 
 func (s *anthropicAdaptiveState) givenModel(model, effort string) error {
-	s.requests = nil
-	first := anthropicSSE(s.t, anthropicEvents(
+	return s.serve(model, effort, anthropicSSE(s.t, anthropicEvents(
 		anthropicThinkingBlock(0, "exact reasoning\n", "signed"),
 		anthropicToolUseBlock(1, "call_1", "read", "{}"),
 		anthropicMessageEnd("tool_use"),
-	)...)
+	)...))
+}
+
+// givenSeveralBlocks answers with a reasoning block, a line of text, a signed
+// progress update with the empty text of the omitted display, and the call.
+func (s *anthropicAdaptiveState) givenSeveralBlocks(model string) error {
+	return s.serve(model, "high", anthropicSSE(s.t, anthropicEvents(
+		anthropicThinkingBlock(0, "plan the read", "sigA"),
+		anthropicTextBlock(1, "Reading the file."),
+		anthropicThinkingBlock(2, "", "sigB"),
+		anthropicToolUseBlock(3, "call_1", "read", "{}"),
+		anthropicMessageEnd("tool_use"),
+	)...))
+}
+
+func (s *anthropicAdaptiveState) serve(model, effort, first string) error {
+	s.requests = nil
 	last := anthropicSSE(s.t, anthropicEvents(anthropicTextBlock(0, "done"), anthropicMessageEnd("end_turn"))...)
 	s.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body json.RawMessage
@@ -57,11 +72,11 @@ func (s *anthropicAdaptiveState) continueToolCall(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if resp.Reasoning != "exact reasoning\n" || resp.ReasoningSignature != "signed" || len(resp.ToolCalls) != 1 || resp.ToolCalls[0].ID != "call_1" {
+	if resp.ReasoningSignature == "" || len(resp.ToolCalls) != 1 || resp.ToolCalls[0].ID != "call_1" {
 		return fmt.Errorf("stream lost signed thinking or tool call: %+v", resp)
 	}
 	messages = append(messages,
-		Message{Role: RoleAssistant, Reasoning: resp.Reasoning, ReasoningSignature: resp.ReasoningSignature, ToolCalls: resp.ToolCalls},
+		Message{Role: RoleAssistant, Content: resp.Content, Reasoning: resp.Reasoning, ReasoningSignature: resp.ReasoningSignature, ToolCalls: resp.ToolCalls},
 		Message{Role: RoleTool, ToolCallID: resp.ToolCalls[0].ID, Content: "result"},
 	)
 	resp, err = s.provider.Stream(ctx, messages, tools, func(StreamChunk) {})
@@ -83,6 +98,9 @@ func (s *anthropicAdaptiveState) requestsUse(thinking, effort string) error {
 	for _, raw := range s.requests {
 		if gjson.Get(raw, "thinking.type").String() != thinking || gjson.Get(raw, "output_config.effort").String() != effort {
 			return fmt.Errorf("unexpected thinking configuration: %s", raw)
+		}
+		if thinking == "adaptive" && gjson.Get(raw, "thinking.display").String() != "summarized" {
+			return fmt.Errorf("adaptive thinking without the summarized display: %s", raw)
 		}
 		budget := gjson.Get(raw, "thinking.budget_tokens")
 		if thinking == "adaptive" && budget.Exists() || thinking == "enabled" && budget.Int() != 6144 {
@@ -114,6 +132,32 @@ func (s *anthropicAdaptiveState) signedReplay() error {
 	return nil
 }
 
+func (s *anthropicAdaptiveState) everyBlockInOrder() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.requests) != 2 {
+		return fmt.Errorf("provider requests = %d, want 2", len(s.requests))
+	}
+	for path, want := range map[string]string{
+		"messages.1.content.#":           "4",
+		"messages.1.content.0.type":      "thinking",
+		"messages.1.content.0.thinking":  "plan the read",
+		"messages.1.content.0.signature": "sigA",
+		"messages.1.content.1.type":      "text",
+		"messages.1.content.1.text":      "Reading the file.",
+		"messages.1.content.2.type":      "thinking",
+		"messages.1.content.2.thinking":  "",
+		"messages.1.content.2.signature": "sigB",
+		"messages.1.content.3.type":      "tool_use",
+		"messages.1.content.3.id":        "call_1",
+	} {
+		if got := gjson.Get(s.requests[1], path).String(); got != want {
+			return fmt.Errorf("%s = %q, want %q", path, got, want)
+		}
+	}
+	return nil
+}
+
 func TestAnthropicAdaptiveThinkingFeature(t *testing.T) {
 	s := &anthropicAdaptiveState{t: t}
 	suite := godog.TestSuite{
@@ -129,6 +173,8 @@ func TestAnthropicAdaptiveThinkingFeature(t *testing.T) {
 			sc.Step(`^Coddy streams a tool call and continues with its result$`, s.continueToolCall)
 			sc.Step(`^both requests use "([^"]*)" thinking and output effort "([^"]*)"$`, s.requestsUse)
 			sc.Step(`^signed thinking is replayed unchanged before tool use$`, s.signedReplay)
+			sc.Step(`^Anthropic model "([^"]*)" answering with a note, a progress update and a tool call$`, s.givenSeveralBlocks)
+			sc.Step(`^every thinking block is replayed with its own signature in the order the model wrote it$`, s.everyBlockInOrder)
 		},
 		Options: &godog.Options{Format: "pretty", Paths: []string{"../../features/anthropic_adaptive_thinking.feature"}, TestingT: t, Strict: true},
 	}

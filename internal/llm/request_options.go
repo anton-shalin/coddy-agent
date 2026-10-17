@@ -1,6 +1,10 @@
 package llm
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/EvilFreelancer/coddy-agent/internal/config"
+)
 
 // RequestOptions are the generation options one caller asked for on one
 // request - the max_tokens, temperature and reasoning_effort of a direct POST
@@ -55,10 +59,11 @@ func (o RequestOptions) Validate(providerType, model string) error {
 			return fmt.Errorf("temperature must be between 0 and %g", highest)
 		}
 	}
-	if o.MaxTokens != nil && providerType == "anthropic" && !anthropicAdaptiveThinking(model) {
+	if o.MaxTokens != nil && providerType == "anthropic" && !config.ClaudeThinkingFor(model).Adaptive {
 		// Extended thinking needs room for an answer beyond its budget, and the
 		// provider raises a cap that leaves none; a cap the caller set is kept or
-		// refused, never raised behind the caller's back.
+		// refused, never raised behind the caller's back. Adaptive thinking has
+		// no budget to make room for.
 		if budget := anthropicThinkingBudget(o.ReasoningEffort, *o.MaxTokens); budget >= anthropicMinThinkingBudget && int64(*o.MaxTokens) <= budget {
 			return fmt.Errorf("max_tokens must exceed %d at reasoning level %q: extended thinking takes that budget first", budget, o.ReasoningEffort)
 		}

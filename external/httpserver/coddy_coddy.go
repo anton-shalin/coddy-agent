@@ -1911,7 +1911,6 @@ func (s *Server) coddySessionPatch(w http.ResponseWriter, r *http.Request) {
 		case mid == "":
 			// Clearing the selection goes back to the configured agent model.
 			clearModel = true
-			change.ClearModel = true
 		case s.activeCfg() == nil || s.activeCfg().FindModelEntry(mid) == nil:
 			http.Error(w, fmt.Sprintf(`{"error":{"message":%q}}`, ErrUnknownMetadataModel.Error()), http.StatusBadRequest)
 			return
@@ -1921,7 +1920,7 @@ func (s *Server) coddySessionPatch(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.SelectedReasoning != nil {
 		level := strings.TrimSpace(*body.SelectedReasoning)
-		if change.Model == nil && !change.ClearModel {
+		if change.Model == nil {
 			if err := applySessionReasoning(s.activeCfg(), st, level); err != nil {
 				http.Error(w, fmt.Sprintf(`{"error":{"message":%q}}`, err.Error()), http.StatusBadRequest)
 				return
@@ -1932,8 +1931,22 @@ func (s *Server) coddySessionPatch(w http.ResponseWriter, r *http.Request) {
 	change.Toolset = body.SelectedToolset
 	change.Mode = body.Mode
 	change.PermissionMode = body.PermissionMode
+	if clearModel {
+		if body.Turns > 0 {
+			http.Error(w, `{"error":{"message":"selectedModelId cannot be cleared for a number of turns"}}`, http.StatusBadRequest)
+			return
+		}
+		st.SetSelectedModelID("")
+		st.ClearTurnOverride(session.SettingModel)
+	}
 	if !change.Empty() || clearModel {
-		snap, err := s.mgr.ApplySessionSettings(r.Context(), id, change)
+		var snap acp.SessionSettings
+		var err error
+		if change.Empty() {
+			snap = s.mgr.PublishSessionSettings(id, st, "", "web")
+		} else {
+			snap, err = s.mgr.ApplySessionSettings(r.Context(), id, change)
+		}
 		if err != nil {
 			code := http.StatusBadRequest
 			if isSubagentReadOnly(err) {
