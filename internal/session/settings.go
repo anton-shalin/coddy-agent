@@ -296,7 +296,7 @@ func (m *Manager) validateSettingsChange(st *State, ch SettingsChange) (map[stri
 			v = thinkingOnLevel(cfg, ent, choices)
 		}
 		if v == config.ReasoningOff && !containsLevel(choices, v) {
-			if ent != nil && config.ClaudeThinkingFor(ent.APIModel()).AlwaysOn {
+			if cfg.ReasoningAlwaysOn(ent) {
 				return nil, fmt.Errorf("thinking cannot be turned off for model %q: the model always thinks, a lower level makes it think less (levels: %s)", model, strings.Join(choices, ", "))
 			}
 			return nil, fmt.Errorf("thinking cannot be turned off for model %q: set allow_reasoning_off for this model after verifying its deployment supports the request (levels: %s)", model, strings.Join(choices, ", "))

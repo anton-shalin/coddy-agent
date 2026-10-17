@@ -207,6 +207,16 @@ func TestAnthropicThinkingCarrierReplay(t *testing.T) {
 			want: []string{"thinking:plan:sigA", "tool_use:call_1", "thinking:more:sigB"},
 		},
 		{
+			name: "a block cut before its signature is left out",
+			blocks: []anthropicReplayBlock{
+				{Type: "thinking", Thinking: "plan", Signature: "sigA"},
+				{Type: "text", Text: "Let me read."},
+				{Type: "thinking", Thinking: "progress"},
+			},
+			msg:  Message{Content: "Let me read.", Reasoning: "plan\n\nprogress"},
+			want: []string{"thinking:plan:sigA", "text:Let me read."},
+		},
+		{
 			name: "text that changed since puts the thinking first",
 			blocks: []anthropicReplayBlock{
 				{Type: "text", Text: "original"},

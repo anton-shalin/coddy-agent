@@ -57,20 +57,24 @@ type anthropicThinkingCarrier struct {
 
 // anthropicThinkingSignature packs an answer's blocks for
 // Message.ReasoningSignature: "" when it has no thinking to replay, the bare
-// signature when a single signed thinking block with text opens the answer
-// (the shape every answer had before adaptive thinking, stored as before),
-// and the carrier otherwise.
+// signature when the answer's only thinking block opens it, signed and with
+// text (the shape every answer had before adaptive thinking, stored as
+// before), and the carrier otherwise. A block cut before its signature counts
+// too: its text is in Response.Reasoning, which a bare signature replays.
 func anthropicThinkingSignature(blocks []anthropicReplayBlock) string {
-	var thinking []anthropicReplayBlock
+	replayable, thinking := 0, 0
 	for _, b := range blocks {
+		if b.Type == anthropicBlockThinking || b.Type == anthropicBlockRedacted {
+			thinking++
+		}
 		if b.replayableThinking() {
-			thinking = append(thinking, b)
+			replayable++
 		}
 	}
-	if len(thinking) == 0 {
+	if replayable == 0 {
 		return ""
 	}
-	if len(thinking) == 1 && blocks[0].Type == anthropicBlockThinking && blocks[0].Signature != "" && blocks[0].Thinking != "" {
+	if thinking == 1 && blocks[0].Type == anthropicBlockThinking && blocks[0].Signature != "" && blocks[0].Thinking != "" {
 		return blocks[0].Signature
 	}
 	kept := make([]anthropicReplayBlock, 0, len(blocks))

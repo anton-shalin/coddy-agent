@@ -445,7 +445,7 @@ func TestReasoningChoicesReserveOffForAllowReasoningOff(t *testing.T) {
 }
 
 func TestClaudeFiveIsAThinkingModel(t *testing.T) {
-	for _, id := range []string{"anthropic/claude-opus-5", "anthropic/claude-sonnet-5", "anthropic/claude-fable-5-1", "anthropic/claude-haiku-5"} {
+	for _, id := range []string{"anthropic/claude-opus-5", "anthropic/claude-sonnet-5", "anthropic/claude-fable-5-1", "anthropic/claude-haiku-5", "anthropic/claude-mythos-5-1"} {
 		m := config.ModelEntry{Model: id}
 		if got := m.ResolvedReasoningLevels(); !reflect.DeepEqual(got, []string{"low", "medium", "high"}) {
 			t.Errorf("%s: ResolvedReasoningLevels() = %v, want low/medium/high", id, got)
@@ -488,13 +488,15 @@ func TestClaudeThinkingFor(t *testing.T) {
 // cannot offer off for a model that refuses to disable thinking, while it still
 // does for one that accepts it.
 func TestReasoningOffNeverOfferedWhereThinkingCannotStop(t *testing.T) {
-	cfg := &config.Config{Providers: []config.ProviderConfig{{Name: "anthropic", Type: "anthropic"}}}
+	cfg := &config.Config{Providers: []config.ProviderConfig{{Name: "anthropic", Type: "anthropic"}, {Name: "router", Type: "openai"}}}
 	for model, want := range map[string]bool{
 		"anthropic/claude-opus-5-5":   false,
 		"anthropic/claude-sonnet-5-5": false,
 		"anthropic/claude-fable-5-1":  false,
 		"anthropic/claude-opus-5":     true,
 		"anthropic/claude-sonnet-4-5": true,
+		// Another provider type keeps its own mapping of off.
+		"router/anthropic/claude-opus-5-5": true,
 	} {
 		entry := config.ModelEntry{Model: model, AllowReasoningOff: true}
 		if got := cfg.ReasoningOffOffered(&entry); got != want {

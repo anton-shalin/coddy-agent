@@ -96,18 +96,31 @@ func ReasoningLevelsForProviderType(ent *ModelEntry, providerType string) []stri
 // for this model entry. The setting attests that this deployment honours its
 // provider-specific request; Coddy does not infer that capability from a model
 // name or provider type. A model with no reasoning levels has nothing to switch,
-// and a model whose thinking cannot be turned off (ClaudeThinkingFor AlwaysOn)
-// never offers it, whatever the setting says: every surface checks a level
-// against these choices, so "off" is refused before it reaches the provider.
+// and a Claude model the Anthropic API serves with thinking always on
+// (ReasoningAlwaysOn) never offers it, whatever the setting says: every
+// surface checks a level against these choices, so "off" is refused before it
+// reaches the provider.
 func (c *Config) ReasoningOffOffered(ent *ModelEntry) bool {
 	if ent == nil || !ent.AllowReasoningOff {
 		return false
 	}
-	if ClaudeThinkingFor(ent.APIModel()).AlwaysOn {
+	if c.ReasoningAlwaysOn(ent) {
 		return false
 	}
 	levels := c.ReasoningLevelsFor(ent)
 	return len(levels) > 0
+}
+
+// ReasoningAlwaysOn reports a model entry an anthropic provider serves whose
+// thinking cannot be turned off (ClaudeThinkingFor AlwaysOn): the API refuses
+// thinking.type "disabled" for it. Another provider type serving the same id
+// keeps its own mapping of "off".
+func (c *Config) ReasoningAlwaysOn(ent *ModelEntry) bool {
+	if c == nil || ent == nil {
+		return false
+	}
+	prov := c.FindProvider(ent.ProviderName())
+	return prov != nil && prov.Type == "anthropic" && ClaudeThinkingFor(ent.APIModel()).AlwaysOn
 }
 
 // ReasoningChoicesFor returns what a session may select for this model entry:
@@ -207,7 +220,7 @@ func isOpenAIOSeries(id string) bool {
 func isAnthropicThinking(id string) bool {
 	for _, p := range []string{
 		"claude-opus-4", "claude-sonnet-4", "claude-haiku-4", "claude-3-7",
-		"claude-opus-5", "claude-sonnet-5", "claude-haiku-5", "claude-fable-5",
+		"claude-opus-5", "claude-sonnet-5", "claude-haiku-5", "claude-fable-5", "claude-mythos-5",
 	} {
 		if strings.HasPrefix(id, p) {
 			return true
